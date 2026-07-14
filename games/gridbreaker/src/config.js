@@ -1,109 +1,174 @@
 // ============================================================================
-// GRIDBREAKER — central tuning file.
+// TIMESHARD — central tuning file.
 // Every gameplay-feel and difficulty knob lives here so the game can be
 // balanced without touching engine code. Units are meters / seconds unless
-// noted. The camera flies down -Z; the corridor is centered on X=0.
+// noted. You speed down -Z through generated zones (open grid / corridor /
+// tunnel). "Game time" = real time × the global time scale: hold a finger
+// to slow the world to a crawl.
 // ============================================================================
 
 export const TUNING = {
-  // --- The corridor ---------------------------------------------------------
-  corridor: {
-    halfWidth: 3.2,     // playable half-width (walls sit just outside)
-    eyeHeight: 1.7,     // camera height above the floor
-    fogNear: 26,
-    fogFar: 95,
-    horizon: 130,       // how far ahead rooms are generated
+  // --- The track ---------------------------------------------------------------
+  track: {
+    eyeHeight: 1.7,     // camera height above the grid
+    fogNear: 16,
+    fogFar: 74,
+    horizon: 130,       // how far ahead zones are generated
+    cleanupBehind: 12,  // meters behind the camera before things are recycled
   },
 
-  // --- Forward speed (the core difficulty ramp) -----------------------------
+  // --- Forward speed (the pace dial) --------------------------------------------
   speed: {
-    base: 7.5,          // m/s at the start of a run
-    perRoom: 0.16,      // added per room cleared
-    max: 24,            // hard cap
+    base: 9.5,          // m/s at run start
+    perZone: 0.25,      // gentle creep per zone crossed
+    perGate: 2.0,       // the REAL jumps happen at gateways — and they stick
+    max: 27,
   },
 
-  // --- Balls (ammo) ----------------------------------------------------------
-  balls: {
-    start: 20,          // ammo at run start
-    crashPenalty: 8,    // balls lost when you fly into unbroken glass
-    radius: 0.17,
-    throwSpeed: 36,     // muzzle speed of a throw
-    aimDistance: 34,    // tap ray is projected onto a plane this far ahead
-    maxLive: 14,        // active thrown balls before oldest is recycled
-    gravity: -9.81,     // world gravity — real ballistics, learn the drop!
+  // --- Gateways: pass through to shift up a speed tier ----------------------------
+  gates: {
+    everyZones: 3,      // a gate stands at the start of every Nth zone
   },
 
-  // --- Multiball streak (the mastery mechanic, à la Smash Hit) --------------
-  multiball: {
-    streakPerTier: 10,  // consecutive crystals to gain +1 ball per throw
-    maxPerThrow: 5,
-    spread: 0.24,       // lateral spacing between simultaneous balls
+  // --- Steering (drag the held finger to weave) ----------------------------------
+  steer: {
+    sense: 8.5,         // full screen-width drag ≈ this many meters of strafe
+    clampPad: 0.6,      // keep this far off the zone walls
+    lerp: 10,           // how fast the ship chases the steer target (per s)
+    bank: 0.09,         // camera roll per m/s of strafe (the speed feel)
   },
 
-  // --- Crystals (ammo pickups) -----------------------------------------------
-  crystal: {
-    ballBonus: 3,       // balls refunded per crystal smashed
-    roomInterval: 2,    // a crystal appears roughly every N rooms
-    scoreBonus: 25,
+  // --- Time control (THE mechanic) ------------------------------------------------
+  time: {
+    slowScale: 0.13,    // world speed while you hold — the crawl
+    rampDown: 12,       // how fast time collapses into slow-mo (lerp/s)
+    rampUp: 7,          // how fast it snaps back to full speed
+    focusMax: 3.4,      // seconds of slow-mo in the tank
+    focusDrain: 1.0,    // tank drained per real second while slowed
+    focusRegen: 0.5,    // tank refilled per real second at full speed
+    reengageAt: 0.8,    // empty tank must refill to here before slow-mo works again
   },
 
-  // --- Scoring ---------------------------------------------------------------
+  // --- Tap vs hold discrimination (input feel) --------------------------------------
+  tap: {
+    maxMs: 220,         // a press shorter than this…
+    maxMovePx: 16,      // …that moved less than this is a FIRE tap
+  },
+
+  // --- The player ----------------------------------------------------------------
+  player: {
+    shields: 3,         // hits you can take before the run ends
+    hitRadius: 0.6,
+    invuln: 1.2,        // real seconds of grace after taking a hit
+    ammoStart: 14,
+    ammoMax: 30,
+    shotSpeed: 30,      // muzzle speed of your shard
+    shotRadius: 0.14,
+    aimDistance: 14,    // tap ray is projected onto a plane this far ahead
+    aimAssist: 1.1,     // taps within this distance of a drone snap onto it
+    aimAssistBolt: 0.8, // same for enemy bolts (deflection shots)
+    maxLiveShots: 8,
+    shotTtl: 3,         // game-seconds before a stray shard is recycled
+    gravity: -9.81,     // world gravity (shots are ballistic-compensated at aim)
+  },
+
+  // --- Enemies (crystal drones out of doors) ----------------------------------------
+  enemies: {
+    size: 0.5,          // octahedron radius (hitbox derives from this)
+    hitboxPad: 0.14,
+    engageAhead: 13,    // hover distance ahead of the camera while attacking
+    hoverMinY: 1.3,
+    hoverMaxY: 3.3,
+    doorTime: 0.5,      // game-seconds for a door to slide open
+    emergeTime: 0.5,    // game-seconds for the drone to rise/pop out
+    diveTime: 0.7,      // game-seconds for an "from above" dive-in
+    telegraph: 1.0,     // energy builds inside the crystal this long, then fires
+    triggerAhead: 26,   // door starts opening when you're this close
+  },
+
+  // --- Ethereal bolts ------------------------------------------------------------------
+  bolts: {
+    radius: 0.15,       // true (fair) hit path radius
+    hitboxPad: 0.22,    // deflection hitbox slack
+    maxLive: 12,
+    aimLead: 0.85,      // 0..1 how well drones lead your forward motion
+    aimJitter: 0.35,
+    trailLen: 6,        // comet-trail sprites per bolt
+    wobbleAmp: 0.16,    // visual spiral amplitude (path stays straight = fair)
+    wobbleFreq: 6.5,
+  },
+
+  // --- Souls (the ammo economy) ---------------------------------------------------------
+  souls: {
+    ammoBonus: 1,       // ammo per soul absorbed — every shot has to count
+    captureRadius: 1.3, // fly this close to absorb
+    homingRadius: 4.5,  // souls drift toward you inside this radius…
+    homingLerp: 3.0,    // …at this lerp rate (forgiving, not automatic)
+    riseHeight: 1.6,    // souls float up to about eye height after a kill
+    ambientChance: 0.55,// chance a zone carries a free-floating soul (seeded)
+  },
+
+  // --- Scoring: SCORE == DISTANCE, full stop. Shards and gates are their own
+  // tracked metrics; kills pay in ammo/souls and gates pay in speed.
   score: {
-    perMeter: 1,        // distance is the score backbone (skill = survival)
-    glassPane: 12,      // per pane shattered
-    comboWindow: 1.4,   // seconds between breaks that chain a combo
-    comboMax: 8,        // combo multiplier cap on glass points
+    perMeter: 1,
   },
 
-  // --- Shatter / debris ------------------------------------------------------
+  // --- Shatter / debris ---------------------------------------------------------------------
   shatter: {
-    cols: 4,            // fracture grid resolution across a pane
-    rows: 5,
-    jitter: 0.55,       // 0..1 irregularity of fracture cells
-    impulse: 5.5,       // radial burst strength at the impact point
-    impulseFalloff: 1.6,// how quickly burst fades away from impact
-    inheritBall: 0.55,  // fraction of ball velocity passed into shards
-    ttl: 2.6,           // seconds before a shard fades away
-    maxShardBodies: 90, // active physical shards before oldest fade early
+    shardsPerDrone: 12,
+    impulse: 4.6,
+    inheritShot: 0.4,
+    ttl: 2.2,
+    maxShardBodies: 70, // live physical shards cap (mobile perf guard)
   },
 
-  // --- Difficulty curve ------------------------------------------------------
-  // Room index -> parameters. All ramps are linear with a cap; tweak the
-  // `at` values to move where the game gets hard.
+  // --- Difficulty curve (zone index → parameters) ----------------------------------------------
   difficulty: {
-    // fraction of the corridor blocked by "wall" patterns
-    blockage:   { from: 0.35, to: 0.9,  at: 40 },
-    // moving-pane speed multiplier
-    movement:   { from: 0.5,  to: 1.6,  at: 50 },
-    // chance a room uses a hard pattern instead of an easy one
-    hardChance: { from: 0.0,  to: 0.75, at: 45 },
-    // rooms get slightly shorter (denser) over time
-    roomLength: { from: 20,   to: 13,   at: 60 },
+    enemiesPerZone: { from: 1,   to: 3.4, at: 12 }, // spawn cadence unchanged…
+    concurrent:     { from: 1,   to: 3,   at: 14 }, // max drones attacking at once
+    boltSpeed:      { from: 8,   to: 15,  at: 16 }, // …but their fire is meaner
+    fireInterval:   { from: 2.4, to: 1.2, at: 18 },
+    engageTime:     { from: 5,   to: 8,   at: 15 }, // how long a drone harasses you
+    tunnelChance:   { from: 0.15,to: 0.45,at: 10 }, // zones get more claustrophobic
   },
 
-  // --- Weekly level ----------------------------------------------------------
+  // --- Weekly level ------------------------------------------------------------------------------
   weekly: {
     // Bump to invalidate old generated layouts when the generator changes.
-    generatorVersion: 1,
+    generatorVersion: 2,
   },
 };
 
 // Linear ramp helper for the difficulty table above.
-export function ramp(cfg, roomIndex) {
-  const t = Math.min(1, roomIndex / cfg.at);
+export function ramp(cfg, zoneIndex) {
+  const t = Math.min(1, zoneIndex / cfg.at);
   return cfg.from + (cfg.to - cfg.from) * t;
 }
 
-// --- Palette (TRON / synthwave) ---------------------------------------------
+// --- Zone geometry (levelgen + main share these) -----------------------------------
+export const ZONES = {
+  open:     { halfWidth: 6.0, wallH: 0,   ceiling: 0 },
+  corridor: { halfWidth: 3.2, wallH: 4.6, ceiling: 0 },
+  tunnel:   { halfWidth: 2.7, wallH: 4.2, ceiling: 4.2 },
+};
+
+// --- Palette (frozen ice world at speed; violet-white wisps = danger) ----------------
 export const PALETTE = {
-  bg: 0x05010f,
-  fog: 0x0a0220,
-  gridCyan: 0x00eaff,
-  gridMagenta: 0xff2fd6,
-  glass: 0x7fe9ff,
-  glassEdge: 0x00eaff,
-  crystal: 0x25ffc8,
-  crystalEdge: 0x9dffe9,
-  sun: 0xff9de0,
+  bg: 0x04101c,
+  fogFast: 0x1d3d4d,    // pale ice haze at full speed
+  fogSlow: 0x220a38,    // deep violet when time crawls
+  ice: 0xdff6ff,
+  iceEdge: 0x7fdcff,
+  gridLine: 0x66e6ff,
+  gridMajor: 0xeaffff,
+  wisp: 0xc9a6ff,       // bolt trail
+  wispCore: 0xffffff,
+  wispHalo: 0xff2fd6,   // outer danger halo
+  soul: 0xaef7e8,
+  soulCore: 0xffffff,
+  core: 0xff2fd6,       // drone telegraph
+  shard: 0xbfeeff,
   chrome: 0xffffff,
+  door: 0x7fdcff,
 };

@@ -1,12 +1,15 @@
-// Procedural WebAudio SFX + a minimal synthwave bed. No samples, no network.
-// Everything is synthesized so the whole game stays a single static bundle.
+// Procedural WebAudio for TIMESHARD. No samples, no network.
+// The signature trick: the ambient pad runs through a lowpass whose cutoff
+// tracks the global time scale — frozen time sounds muffled and distant,
+// flowing time blooms open. Call setFlow(0..1) every frame.
 
-export class SynthAudio {
+export class TimeshardAudio {
   constructor() {
     this.ctx = null;
     this.muted = false;
     this.musicOn = true;
     this._musicTimer = null;
+    this._flow = 0;
   }
 
   // Must be called from a user gesture (mobile autoplay policy).
@@ -14,17 +17,31 @@ export class SynthAudio {
     if (!this.ctx) {
       const AC = window.AudioContext || window.webkitAudioContext;
       if (!AC) return;
+      // iOS ≥16.4: without this, the mute switch silences WebAudio entirely —
+      // the #1 reason the game seems to "have no sound by default" on iPhone.
+      try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch { /* older iOS */ }
       this.ctx = new AC();
       this.master = this.ctx.createGain();
       this.master.gain.value = 0.8;
       this.master.connect(this.ctx.destination);
-      // gentle synthwave echo bus
-      this.delay = this.ctx.createDelay(0.6);
-      this.delay.delayTime.value = 0.28;
-      const fb = this.ctx.createGain(); fb.gain.value = 0.32;
-      const wet = this.ctx.createGain(); wet.gain.value = 0.25;
+
+      // long icy echo bus for chimes/shatters
+      this.delay = this.ctx.createDelay(0.7);
+      this.delay.delayTime.value = 0.34;
+      const fb = this.ctx.createGain(); fb.gain.value = 0.35;
+      const wet = this.ctx.createGain(); wet.gain.value = 0.28;
       this.delay.connect(fb); fb.connect(this.delay);
       this.delay.connect(wet); wet.connect(this.master);
+
+      // music bus: pad -> flow-controlled lowpass -> master
+      this.flowFilter = this.ctx.createBiquadFilter();
+      this.flowFilter.type = 'lowpass';
+      this.flowFilter.frequency.value = 220;
+      this.flowFilter.Q.value = 0.8;
+      this.musicGain = this.ctx.createGain();
+      this.musicGain.gain.value = 0.5;
+      this.flowFilter.connect(this.musicGain);
+      this.musicGain.connect(this.master);
     }
     if (this.ctx.state === 'suspended') this.ctx.resume();
   }
@@ -32,6 +49,13 @@ export class SynthAudio {
   setMuted(m) {
     this.muted = m;
     if (this.master) this.master.gain.value = m ? 0 : 0.8;
+  }
+
+  // 0 = frozen, 1 = time fully flowing. Direct .value writes are cheap and
+  // glide enough because the game already smooths the time scale.
+  setFlow(f) {
+    this._flow = f;
+    if (this.flowFilter) this.flowFilter.frequency.value = 180 + f * f * 2800;
   }
 
   _env(gainNode, t0, peak, attack, decay) {
@@ -51,131 +75,324 @@ export class SynthAudio {
     return src;
   }
 
-  throw() {
-    if (!this.ctx || this.muted) return;
-    const t = this.ctx.currentTime;
-    const src = this._noise(0.18);
-    const bp = this.ctx.createBiquadFilter();
-    bp.type = 'bandpass'; bp.Q.value = 1.2;
-    bp.frequency.setValueAtTime(600, t);
-    bp.frequency.exponentialRampToValueAtTime(2400, t + 0.15);
-    const g = this.ctx.createGain();
-    this._env(g, t, 0.25, 0.01, 0.15);
-    src.connect(bp); bp.connect(g); g.connect(this.master);
-    src.start(t); src.stop(t + 0.2);
-  }
-
-  shatter(intensity = 1) {
-    if (!this.ctx || this.muted) return;
-    const t = this.ctx.currentTime;
-    // noise burst body
-    const src = this._noise(0.4);
-    const hp = this.ctx.createBiquadFilter();
-    hp.type = 'highpass'; hp.frequency.value = 1800;
-    const g = this.ctx.createGain();
-    this._env(g, t, 0.5 * intensity, 0.005, 0.3);
-    src.connect(hp); hp.connect(g); g.connect(this.master); g.connect(this.delay);
-    src.start(t); src.stop(t + 0.45);
-    // glassy ringing partials
-    for (let i = 0; i < 5; i++) {
-      const o = this.ctx.createOscillator();
-      o.type = 'sine';
-      o.frequency.value = 2200 + Math.random() * 4800;
-      const og = this.ctx.createGain();
-      const dt = Math.random() * 0.05;
-      this._env(og, t + dt, 0.08 * intensity, 0.004, 0.25 + Math.random() * 0.3);
-      o.connect(og); og.connect(this.master);
-      o.start(t + dt); o.stop(t + dt + 0.7);
-    }
-  }
-
-  crystal() {
-    if (!this.ctx || this.muted) return;
-    const t = this.ctx.currentTime;
-    [880, 1320, 1760].forEach((f, i) => {
-      const o = this.ctx.createOscillator();
-      o.type = 'triangle';
-      o.frequency.value = f;
-      const g = this.ctx.createGain();
-      this._env(g, t + i * 0.05, 0.22, 0.01, 0.5);
-      o.connect(g); g.connect(this.master); g.connect(this.delay);
-      o.start(t + i * 0.05); o.stop(t + i * 0.05 + 0.7);
-    });
-  }
-
-  multiballUp() {
-    if (!this.ctx || this.muted) return;
-    const t = this.ctx.currentTime;
-    [523, 659, 784, 1046, 1318].forEach((f, i) => {
-      const o = this.ctx.createOscillator();
-      o.type = 'sawtooth';
-      o.frequency.value = f;
-      const g = this.ctx.createGain();
-      this._env(g, t + i * 0.07, 0.12, 0.01, 0.3);
-      const lp = this.ctx.createBiquadFilter();
-      lp.type = 'lowpass'; lp.frequency.value = 3200;
-      o.connect(lp); lp.connect(g); g.connect(this.master); g.connect(this.delay);
-      o.start(t + i * 0.07); o.stop(t + i * 0.07 + 0.5);
-    });
-  }
-
-  crash() {
+  // Firing a shard: short icy zip — sine gliss down + airy noise.
+  fire() {
     if (!this.ctx || this.muted) return;
     const t = this.ctx.currentTime;
     const o = this.ctx.createOscillator();
     o.type = 'sine';
-    o.frequency.setValueAtTime(160, t);
-    o.frequency.exponentialRampToValueAtTime(40, t + 0.35);
+    o.frequency.setValueAtTime(1900, t);
+    o.frequency.exponentialRampToValueAtTime(500, t + 0.12);
     const g = this.ctx.createGain();
-    this._env(g, t, 0.7, 0.005, 0.4);
+    this._env(g, t, 0.22, 0.005, 0.13);
     o.connect(g); g.connect(this.master);
+    o.start(t); o.stop(t + 0.2);
+
+    const n = this._noise(0.12);
+    const hp = this.ctx.createBiquadFilter();
+    hp.type = 'highpass'; hp.frequency.value = 2500;
+    const ng = this.ctx.createGain();
+    this._env(ng, t, 0.12, 0.004, 0.1);
+    n.connect(hp); hp.connect(ng); ng.connect(this.master);
+    n.start(t); n.stop(t + 0.14);
+  }
+
+  // Crystal drone bursting: noise crack + glassy ringing partials.
+  shatter(intensity = 1) {
+    if (!this.ctx || this.muted) return;
+    const t = this.ctx.currentTime;
+    const src = this._noise(0.35);
+    const hp = this.ctx.createBiquadFilter();
+    hp.type = 'highpass'; hp.frequency.value = 2000;
+    const g = this.ctx.createGain();
+    this._env(g, t, 0.45 * intensity, 0.005, 0.28);
+    src.connect(hp); hp.connect(g); g.connect(this.master); g.connect(this.delay);
+    src.start(t); src.stop(t + 0.4);
+    for (let i = 0; i < 6; i++) {
+      const o = this.ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.value = 2600 + Math.random() * 5200;
+      const og = this.ctx.createGain();
+      const dt = Math.random() * 0.05;
+      this._env(og, t + dt, 0.07 * intensity, 0.004, 0.3 + Math.random() * 0.35);
+      o.connect(og); og.connect(this.delay); og.connect(this.master);
+      o.start(t + dt); o.stop(t + dt + 0.8);
+    }
+  }
+
+  // A door grinding open: low hiss + servo thunk.
+  door() {
+    if (!this.ctx || this.muted) return;
+    const t = this.ctx.currentTime;
+    const n = this._noise(0.35);
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.Q.value = 1.4;
+    bp.frequency.setValueAtTime(300, t);
+    bp.frequency.exponentialRampToValueAtTime(900, t + 0.3);
+    const g = this.ctx.createGain();
+    this._env(g, t, 0.16, 0.02, 0.3);
+    n.connect(bp); bp.connect(g); g.connect(this.master);
+    n.start(t); n.stop(t + 0.38);
+
+    const o = this.ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(90, t + 0.28);
+    o.frequency.exponentialRampToValueAtTime(55, t + 0.4);
+    const og = this.ctx.createGain();
+    this._env(og, t + 0.28, 0.2, 0.005, 0.14);
+    o.connect(og); og.connect(this.master);
+    o.start(t + 0.28); o.stop(t + 0.46);
+  }
+
+  // Absorbing a soul: warm rising shimmer.
+  pickup() {
+    if (!this.ctx || this.muted) return;
+    const t = this.ctx.currentTime;
+    [523, 784, 1046].forEach((f, i) => {
+      const o = this.ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(f * 0.94, t + i * 0.04);
+      o.frequency.exponentialRampToValueAtTime(f, t + i * 0.04 + 0.12);
+      const g = this.ctx.createGain();
+      this._env(g, t + i * 0.04, 0.18, 0.01, 0.45);
+      o.connect(g); g.connect(this.master); g.connect(this.delay);
+      o.start(t + i * 0.04); o.stop(t + i * 0.04 + 0.6);
+    });
+  }
+
+  // Trigger pulled on an empty tank: dull click.
+  dryFire() {
+    if (!this.ctx || this.muted) return;
+    const t = this.ctx.currentTime;
+    const o = this.ctx.createOscillator();
+    o.type = 'square';
+    o.frequency.value = 220;
+    const g = this.ctx.createGain();
+    this._env(g, t, 0.08, 0.002, 0.05);
+    o.connect(g); g.connect(this.master);
+    o.start(t); o.stop(t + 0.08);
+  }
+
+  // Shooting a bolt out of the air: bright metallic ping.
+  deflect() {
+    if (!this.ctx || this.muted) return;
+    const t = this.ctx.currentTime;
+    [2093, 3136].forEach((f, i) => {
+      const o = this.ctx.createOscillator();
+      o.type = 'square';
+      o.frequency.value = f;
+      const g = this.ctx.createGain();
+      this._env(g, t + i * 0.02, 0.14, 0.004, 0.22);
+      o.connect(g); g.connect(this.master); g.connect(this.delay);
+      o.start(t + i * 0.02); o.stop(t + i * 0.02 + 0.3);
+    });
+  }
+
+  // Taking a hit: low slam + dark noise.
+  hurt() {
+    if (!this.ctx || this.muted) return;
+    const t = this.ctx.currentTime;
+    const o = this.ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(150, t);
+    o.frequency.exponentialRampToValueAtTime(38, t + 0.3);
+    const g = this.ctx.createGain();
+    this._env(g, t, 0.7, 0.005, 0.35);
+    o.connect(g); g.connect(this.master);
+    o.start(t); o.stop(t + 0.45);
+
+    const n = this._noise(0.3);
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 900;
+    const ng = this.ctx.createGain();
+    this._env(ng, t, 0.3, 0.005, 0.25);
+    n.connect(lp); lp.connect(ng); ng.connect(this.master);
+    n.start(t); n.stop(t + 0.32);
+  }
+
+  // A drone charging its shot: a shimmering rise, ~1s, matches the telegraph.
+  charge() {
+    if (!this.ctx || this.muted) return;
+    const t = this.ctx.currentTime;
+    const o = this.ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(520, t);
+    o.frequency.exponentialRampToValueAtTime(1560, t + 0.95);
+    const trem = this.ctx.createOscillator(); // flutter that quickens
+    trem.frequency.setValueAtTime(7, t);
+    trem.frequency.linearRampToValueAtTime(18, t + 0.95);
+    const tg = this.ctx.createGain(); tg.gain.value = 0.03;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.075, t + 0.85);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 1.0);
+    trem.connect(tg); tg.connect(g.gain);
+    o.connect(g); g.connect(this.master);
+    o.start(t); o.stop(t + 1.05);
+    trem.start(t); trem.stop(t + 1.05);
+  }
+
+  // The release: a laser zap that reads as INCOMING — swells as it drops.
+  laser() {
+    if (!this.ctx || this.muted) return;
+    const t = this.ctx.currentTime;
+    const o = this.ctx.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(1350, t);
+    o.frequency.exponentialRampToValueAtTime(240, t + 0.42);
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 2400;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.2, t + 0.18); // approaching…
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
+    o.connect(lp); lp.connect(g); g.connect(this.master);
     o.start(t); o.stop(t + 0.5);
-    this.shatter(1.4);
+
+    const n = this._noise(0.2);
+    const hp = this.ctx.createBiquadFilter();
+    hp.type = 'highpass'; hp.frequency.value = 1600;
+    const ng = this.ctx.createGain();
+    this._env(ng, t, 0.07, 0.01, 0.16);
+    n.connect(hp); hp.connect(ng); ng.connect(this.master);
+    n.start(t); n.stop(t + 0.22);
+  }
+
+  // Passing a gateway: a HUGE crystalline crash — deep thump, layered glass,
+  // long bell ring-out — nothing like a drone kill — blending into the whoosh.
+  gate() {
+    if (!this.ctx || this.muted) return;
+    const t0 = this.ctx.currentTime;
+
+    // deep body thump
+    const sub = this.ctx.createOscillator();
+    sub.type = 'sine';
+    sub.frequency.setValueAtTime(85, t0);
+    sub.frequency.exponentialRampToValueAtTime(34, t0 + 0.4);
+    const sg = this.ctx.createGain();
+    this._env(sg, t0, 0.55, 0.005, 0.45);
+    sub.connect(sg); sg.connect(this.master);
+    sub.start(t0); sub.stop(t0 + 0.5);
+
+    // two-stage glass crash, bigger and darker than a drone crack
+    for (const [dt2, peak, hpf] of [[0, 0.5, 900], [0.07, 0.35, 1600]]) {
+      const src = this._noise(0.5);
+      const hp = this.ctx.createBiquadFilter();
+      hp.type = 'highpass'; hp.frequency.value = hpf;
+      const g = this.ctx.createGain();
+      this._env(g, t0 + dt2, peak, 0.005, 0.4);
+      src.connect(hp); hp.connect(g); g.connect(this.master); g.connect(this.delay);
+      src.start(t0 + dt2); src.stop(t0 + dt2 + 0.55);
+    }
+
+    // long tuned bell partials ringing out through the echo bus
+    [523, 784, 1046, 1568, 2093].forEach((f, i) => {
+      const o = this.ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.value = f * (1 + (Math.random() - 0.5) * 0.01);
+      const og = this.ctx.createGain();
+      this._env(og, t0 + 0.03 + i * 0.02, 0.12, 0.005, 0.9 + i * 0.15);
+      o.connect(og); og.connect(this.delay); og.connect(this.master);
+      o.start(t0 + 0.03 + i * 0.02); o.stop(t0 + 1.6);
+    });
+
+    const t = t0 + 0.12;
+
+    // the speed-up: bandpass noise sweeping upward, swelling then gone
+    const n = this._noise(1.0);
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.Q.value = 0.9;
+    bp.frequency.setValueAtTime(240, t);
+    bp.frequency.exponentialRampToValueAtTime(3400, t + 0.85);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.5, t + 0.5);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.95);
+    n.connect(bp); bp.connect(g); g.connect(this.master);
+    n.start(t); n.stop(t + 1.0);
+
+    // a quiet rising tone underneath glues the two halves together
+    const o = this.ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(160, t);
+    o.frequency.exponentialRampToValueAtTime(660, t + 0.8);
+    const og = this.ctx.createGain();
+    this._env(og, t, 0.12, 0.3, 0.55);
+    o.connect(og); og.connect(this.master);
+    o.start(t); o.stop(t + 0.95);
+  }
+
+  // Moment cleared: ascending crystal chime.
+  clear() {
+    if (!this.ctx || this.muted) return;
+    const t = this.ctx.currentTime;
+    [659, 880, 1109, 1319].forEach((f, i) => {
+      const o = this.ctx.createOscillator();
+      o.type = 'triangle';
+      o.frequency.value = f;
+      const g = this.ctx.createGain();
+      this._env(g, t + i * 0.09, 0.2, 0.01, 0.6);
+      o.connect(g); g.connect(this.master); g.connect(this.delay);
+      o.start(t + i * 0.09); o.stop(t + i * 0.09 + 0.8);
+    });
   }
 
   gameOver() {
     if (!this.ctx || this.muted) return;
     const t = this.ctx.currentTime;
-    [392, 311, 233, 196].forEach((f, i) => {
+    [440, 349, 262, 220].forEach((f, i) => {
       const o = this.ctx.createOscillator();
       o.type = 'sawtooth';
       o.frequency.value = f;
       const lp = this.ctx.createBiquadFilter();
-      lp.type = 'lowpass'; lp.frequency.value = 1400;
+      lp.type = 'lowpass'; lp.frequency.value = 1200;
       const g = this.ctx.createGain();
-      this._env(g, t + i * 0.22, 0.18, 0.02, 0.5);
+      this._env(g, t + i * 0.24, 0.16, 0.02, 0.55);
       o.connect(lp); lp.connect(g); g.connect(this.master); g.connect(this.delay);
-      o.start(t + i * 0.22); o.stop(t + i * 0.22 + 0.8);
+      o.start(t + i * 0.24); o.stop(t + i * 0.24 + 0.9);
     });
   }
 
-  // Minimal pulsing synthwave bass bed — one bar, looped by timer.
+  // Ambient pad: slow minor chords through the flow filter, plus a sparse
+  // bell that keeps the frozen state from feeling dead.
   startMusic() {
     if (!this.ctx || this._musicTimer || !this.musicOn) return;
-    const bpm = 104;
-    const beat = 60 / bpm;
-    const bar = beat * 4;
-    const roots = [55, 55, 43.65, 49]; // A A F G
+    const bar = 3.2; // seconds per chord
+    const chords = [
+      [110, 130.8, 164.8],   // Am
+      [87.3, 110, 130.8],    // F
+      [98, 123.5, 146.8],    // G
+      [110, 130.8, 164.8],   // Am
+    ];
     let barIndex = 0;
     let nextBarTime = this.ctx.currentTime + 0.1;
 
     const scheduleBar = () => {
       const t0 = nextBarTime;
-      const root = roots[barIndex % roots.length];
-      for (let i = 0; i < 8; i++) {
-        const t = t0 + i * (beat / 2);
-        const o = this.ctx.createOscillator();
-        o.type = 'sawtooth';
-        o.frequency.value = i % 4 === 3 ? root * 2 : root;
-        const lp = this.ctx.createBiquadFilter();
-        lp.type = 'lowpass';
-        lp.frequency.setValueAtTime(900, t);
-        lp.frequency.exponentialRampToValueAtTime(220, t + beat / 2);
-        const g = this.ctx.createGain();
-        this._env(g, t, 0.11, 0.01, beat * 0.45);
-        o.connect(lp); lp.connect(g); g.connect(this.master);
-        o.start(t); o.stop(t + beat * 0.6);
+      const chord = chords[barIndex % chords.length];
+      for (const f of chord) {
+        for (const det of [-4, 4]) {
+          const o = this.ctx.createOscillator();
+          o.type = 'sawtooth';
+          o.frequency.value = f;
+          o.detune.value = det;
+          const g = this.ctx.createGain();
+          g.gain.setValueAtTime(0.0001, t0);
+          g.gain.linearRampToValueAtTime(0.05, t0 + bar * 0.35);
+          g.gain.linearRampToValueAtTime(0.0001, t0 + bar * 1.05);
+          o.connect(g); g.connect(this.flowFilter);
+          o.start(t0); o.stop(t0 + bar * 1.1);
+        }
       }
+      // sparse high bell straight to master (audible even when frozen)
+      const bell = this.ctx.createOscillator();
+      bell.type = 'sine';
+      bell.frequency.value = chord[2] * 8;
+      const bg = this.ctx.createGain();
+      this._env(bg, t0 + bar * 0.5, 0.035, 0.01, 1.4);
+      bell.connect(bg); bg.connect(this.delay); bg.connect(this.master);
+      bell.start(t0 + bar * 0.5); bell.stop(t0 + bar * 0.5 + 1.6);
+
       barIndex++;
       nextBarTime += bar;
     };
@@ -183,7 +400,7 @@ export class SynthAudio {
     scheduleBar(); scheduleBar();
     this._musicTimer = setInterval(() => {
       while (nextBarTime < this.ctx.currentTime + bar * 1.5) scheduleBar();
-    }, 250);
+    }, 300);
   }
 
   stopMusic() {
