@@ -1,25 +1,34 @@
 // ============================================================================
-// GRIDBREAKER — main game.
-// Endless Smash-Hit-style runner: the camera flies down a TRON corridor,
-// taps hurl chrome balls (real cannon-es rigid bodies), glass shatters into
-// physical shards, crystals refill ammo, streaks earn multiball.
+// TIMESHARD — main game.
+// You speed down an endless generated track — open grid plains, neon
+// corridors, enclosed tunnels. Crystal drones emerge from doors in the
+// floor and walls (or dive in from above) and harass you with ethereal
+// wisp-bolts. HOLD a finger to slow time to a crawl and DRAG it to weave;
+// TAP (a second finger, or a quick single tap) to fire back. Ammo is
+// limited: kills leave a soul — fly through it to absorb it.
+//
+// The pillar: ONE physics world stepped at (dt × timeScale). Slow motion is
+// real simulation, never animation — debris, shots and bolts all obey it.
 // ============================================================================
 
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
-import { TUNING, PALETTE } from './config.js';
-import { weeklySeed, weekId } from '../../../shared/rng.js';
+import { TUNING, PALETTE, ZONES, ramp } from './config.js';
+import { weeklySeed, weekId, mulberry32, hashString } from '../../../shared/rng.js';
 import { createScoreStore } from '../../../shared/scores.js';
-import { LevelGen } from './levelgen.js';
-import { SynthAudio } from './audio.js';
+import { TrackGen } from './levelgen.js';
+import { TimeshardAudio } from './audio.js';
 
-const scores = createScoreStore('gridbreaker');
-const weeklyTag = () => `gridbreaker/v${TUNING.weekly.generatorVersion}`;
+// NOTE: the game was renamed GRID BREAKER, but the storage key and weekly
+// seed tag keep the original 'timeshard' id — renaming them would orphan
+// players' local scores and reroll this week's level mid-week.
+const scores = createScoreStore('timeshard');
+const weeklyTag = () => `timeshard/v${TUNING.weekly.generatorVersion}`;
 
 // ---------------------------------------------------------------------------
 // Collision groups
 // ---------------------------------------------------------------------------
-const G_BALL = 1, G_GLASS = 2, G_SHARD = 4, G_WORLD = 8;
+const G_SHOT = 1, G_DRONE = 2, G_WORLD = 4, G_SHARD = 8;
 
 // ---------------------------------------------------------------------------
 // Renderer / scene
@@ -29,14 +38,16 @@ const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'hi
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.15;
+renderer.toneMappingExposure = 1.1;
 app.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.Fog(PALETTE.fog, TUNING.corridor.fogNear, TUNING.corridor.fogFar);
+const fogFast = new THREE.Color(PALETTE.fogFast);
+const fogSlow = new THREE.Color(PALETTE.fogSlow);
+scene.fog = new THREE.Fog(PALETTE.fogFast, TUNING.track.fogNear, TUNING.track.fogFar);
 
-const camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.1, 300);
-camera.position.set(0, TUNING.corridor.eyeHeight, 0);
+const camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.1, 260);
+camera.position.set(0, TUNING.track.eyeHeight, 0);
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -45,7 +56,7 @@ window.addEventListener('resize', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Synthwave sky: procedural equirect canvas → background + reflections
+// Icy sky: gradient + stars + aurora ribbons → background + chrome env
 // ---------------------------------------------------------------------------
 function makeSkyTexture() {
   const w = 1024, h = 512;
@@ -54,60 +65,53 @@ function makeSkyTexture() {
   const g = cv.getContext('2d');
 
   const grad = g.createLinearGradient(0, 0, 0, h);
-  grad.addColorStop(0, '#12042e');
-  grad.addColorStop(0.42, '#0a0220');
-  grad.addColorStop(0.5, '#1b0533');
-  grad.addColorStop(0.52, '#05010f');
-  grad.addColorStop(1, '#02000a');
+  grad.addColorStop(0, '#061626');
+  grad.addColorStop(0.44, '#0a2438');
+  grad.addColorStop(0.5, '#1a4a5e');
+  grad.addColorStop(0.53, '#04101c');
+  grad.addColorStop(1, '#020810');
   g.fillStyle = grad;
   g.fillRect(0, 0, w, h);
 
-  // stars
-  for (let i = 0; i < 240; i++) {
-    const y = Math.random() * h * 0.45;
-    g.fillStyle = `rgba(255,255,255,${0.2 + Math.random() * 0.6})`;
+  for (let i = 0; i < 260; i++) {
+    const y = Math.random() * h * 0.46;
+    g.fillStyle = `rgba(220,245,255,${0.2 + Math.random() * 0.6})`;
     g.fillRect(Math.random() * w, y, 1.5, 1.5);
   }
 
-  // two suns so a bright disc sits both ahead and behind for reflections
-  for (const cx of [w * 0.25, w * 0.75]) {
-    const cy = h * 0.472, r = 30;
-    const sg = g.createRadialGradient(cx, cy, 2, cx, cy, r * 1.9);
-    sg.addColorStop(0, 'rgba(255,170,235,0.7)');
-    sg.addColorStop(0.45, 'rgba(255,80,200,0.28)');
-    sg.addColorStop(1, 'rgba(255,47,214,0)');
-    g.fillStyle = sg;
-    g.fillRect(cx - r * 2, cy - r * 2, r * 4, r * 4);
-    g.save();
-    g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.clip();
-    const dg = g.createLinearGradient(0, cy - r, 0, cy + r);
-    dg.addColorStop(0, '#ffd9f4'); dg.addColorStop(0.55, '#ff5ecb'); dg.addColorStop(1, '#ff9d3f');
-    g.fillStyle = dg;
-    g.fillRect(cx - r, cy - r, r * 2, r * 2);
-    // retro scanline slits across the lower half of the sun
-    g.fillStyle = '#0a0220';
-    for (let i = 0; i < 5; i++) {
-      const yy = cy + 3 + i * 6;
-      g.fillRect(cx - r, yy, r * 2, 1.6 + i * 0.7);
+  for (let band = 0; band < 3; band++) {
+    const baseY = h * (0.12 + band * 0.09);
+    g.strokeStyle = band % 2
+      ? 'rgba(127,220,255,0.10)' : 'rgba(180,255,240,0.08)';
+    for (let s = 0; s < 14; s++) {
+      g.lineWidth = 6 + Math.random() * 16;
+      g.beginPath();
+      const y0 = baseY + Math.random() * 24;
+      g.moveTo(0, y0);
+      for (let x = 0; x <= w; x += 64) {
+        g.lineTo(x, y0 + Math.sin(x * 0.006 + band * 2 + s) * 26);
+      }
+      g.stroke();
     }
-    g.restore();
   }
 
-  // horizon glow line
-  const hg = g.createLinearGradient(0, h * 0.47, 0, h * 0.53);
-  hg.addColorStop(0, 'rgba(0,234,255,0)');
-  hg.addColorStop(0.5, 'rgba(0,234,255,0.75)');
-  hg.addColorStop(1, 'rgba(0,234,255,0)');
+  // pale suns ahead and behind (u=0.25 faces -Z) for chrome reflections
+  for (const cx of [w * 0.25, w * 0.75]) {
+    const cy = h * 0.47, r = 26;
+    const sg = g.createRadialGradient(cx, cy, 2, cx, cy, r * 2.2);
+    sg.addColorStop(0, 'rgba(230,250,255,0.75)');
+    sg.addColorStop(0.4, 'rgba(150,225,255,0.3)');
+    sg.addColorStop(1, 'rgba(127,220,255,0)');
+    g.fillStyle = sg;
+    g.fillRect(cx - r * 2.4, cy - r * 2.4, r * 4.8, r * 4.8);
+  }
+
+  const hg = g.createLinearGradient(0, h * 0.48, 0, h * 0.53);
+  hg.addColorStop(0, 'rgba(127,220,255,0)');
+  hg.addColorStop(0.5, 'rgba(200,245,255,0.7)');
+  hg.addColorStop(1, 'rgba(127,220,255,0)');
   g.fillStyle = hg;
-  g.fillRect(0, h * 0.47, w, h * 0.06);
-
-  // distant city light streaks
-  for (let i = 0; i < 90; i++) {
-    const x = Math.random() * w;
-    const hh = 4 + Math.random() * 26;
-    g.fillStyle = Math.random() < 0.5 ? 'rgba(0,234,255,0.35)' : 'rgba(255,47,214,0.3)';
-    g.fillRect(x, h * 0.5 - hh, 1.6, hh);
-  }
+  g.fillRect(0, h * 0.48, w, h * 0.05);
 
   const tex = new THREE.CanvasTexture(cv);
   tex.mapping = THREE.EquirectangularReflectionMapping;
@@ -118,28 +122,30 @@ function makeSkyTexture() {
 const sky = makeSkyTexture();
 scene.background = sky;
 scene.environment = sky;
-// (equirect u=0.25 faces -Z, so a sun sits straight down the corridor)
 
-scene.add(new THREE.HemisphereLight(0x8fb8ff, 0x1a0533, 0.7));
-const keyLight = new THREE.DirectionalLight(0xffffff, 1.0);
-keyLight.position.set(2, 6, 3);
+const hemi = new THREE.HemisphereLight(0xcfeeff, 0x0a2030, 0.9);
+scene.add(hemi);
+const keyLight = new THREE.DirectionalLight(0xeaffff, 0.9);
+keyLight.position.set(3, 8, 2);
 scene.add(keyLight);
 
 // ---------------------------------------------------------------------------
-// Neon grid shader (floor + walls), world-locked lines with manual fog
+// Grid shader (floor / walls / ceiling), world-locked lines with manual fog
 // ---------------------------------------------------------------------------
-function gridMaterial(mode) {
+function gridMaterial(mode, baseHex, gain = 1) {
   return new THREE.ShaderMaterial({
     uniforms: {
-      uMode: { value: mode }, // 0 floor (xz), 1 wall (zy)
-      uMinor: { value: new THREE.Color(PALETTE.gridCyan) },
-      uMajor: { value: new THREE.Color(PALETTE.gridMagenta) },
-      uBase: { value: new THREE.Color(0x040112) },
-      uFog: { value: new THREE.Color(PALETTE.fog) },
-      uFogNear: { value: TUNING.corridor.fogNear },
-      uFogFar: { value: TUNING.corridor.fogFar },
+      uMode: { value: mode }, // 0: lines on xz (floor/ceiling), 1: on zy (walls)
+      uGain: { value: gain },
+      uMinor: { value: new THREE.Color(PALETTE.gridLine) },
+      uMajor: { value: new THREE.Color(PALETTE.gridMajor) },
+      uBase: { value: new THREE.Color(baseHex) },
+      uFog: { value: fogFast.clone() },
+      uFogNear: { value: TUNING.track.fogNear },
+      uFogFar: { value: TUNING.track.fogFar },
       uCam: { value: new THREE.Vector3() },
     },
+    side: THREE.DoubleSide,
     vertexShader: /* glsl */`
       varying vec3 vW;
       void main() {
@@ -151,7 +157,7 @@ function gridMaterial(mode) {
       varying vec3 vW;
       uniform int uMode;
       uniform vec3 uMinor, uMajor, uBase, uFog, uCam;
-      uniform float uFogNear, uFogFar;
+      uniform float uFogNear, uFogFar, uGain;
       float lineAt(vec2 p, float spacing, float width) {
         vec2 q = p / spacing;
         vec2 g = abs(fract(q - 0.5) - 0.5) / (fwidth(q) * width);
@@ -159,9 +165,9 @@ function gridMaterial(mode) {
       }
       void main() {
         vec2 p = uMode == 0 ? vW.xz : vW.zy;
-        float minor = lineAt(p, 2.0, 1.4);
-        float major = lineAt(p, 16.0, 2.2);
-        vec3 col = uBase + uMinor * minor * 0.9 + uMajor * major * 1.1;
+        float minor = lineAt(p, 1.6, 1.3);
+        float major = lineAt(p, 12.8, 2.0);
+        vec3 col = uBase + (uMinor * minor * 0.55 + uMajor * major * 0.5) * uGain;
         float d = distance(vW, uCam);
         float f = smoothstep(uFogNear, uFogFar, d);
         col = mix(col, uFog, f);
@@ -170,45 +176,31 @@ function gridMaterial(mode) {
   });
 }
 
-const floorMat = gridMaterial(0);
-const wallMat = gridMaterial(1);
-const floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(64, 300), floorMat);
+const floorMat = gridMaterial(0, 0x03121e);
+const wallMat = gridMaterial(1, 0x0a2438, 1.6);
+const ceilMat = gridMaterial(0, 0x081c2e, 1.4);
+const gridMats = [floorMat, wallMat, ceilMat];
+
+const floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(80, 320), floorMat);
 floorMesh.rotation.x = -Math.PI / 2;
 scene.add(floorMesh);
-const wallL = new THREE.Mesh(new THREE.PlaneGeometry(300, 14), wallMat);
-wallL.rotation.y = Math.PI / 2;
-wallL.position.set(-TUNING.corridor.halfWidth - 0.55, 7, 0);
-scene.add(wallL);
-const wallR = wallL.clone();
-wallR.rotation.y = -Math.PI / 2;
-wallR.position.x = TUNING.corridor.halfWidth + 0.55;
-scene.add(wallR);
-
-// glowing rim strips where walls meet the floor
-const rimMat = new THREE.MeshBasicMaterial({ color: PALETTE.gridCyan });
-const rimL = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 300), rimMat);
-rimL.position.set(-TUNING.corridor.halfWidth - 0.5, 0.04, 0);
-scene.add(rimL);
-const rimR = rimL.clone();
-rimR.position.x = TUNING.corridor.halfWidth + 0.5;
-scene.add(rimR);
 
 // ---------------------------------------------------------------------------
-// Physics world
+// Physics world — stepped at (dt × timeScale) every frame. One clock for all.
 // ---------------------------------------------------------------------------
-const world = new CANNON.World({ gravity: new CANNON.Vec3(0, TUNING.balls.gravity, 0) });
+const world = new CANNON.World({ gravity: new CANNON.Vec3(0, TUNING.player.gravity, 0) });
 world.broadphase = new CANNON.SAPBroadphase(world);
-world.allowSleep = true;
+world.allowSleep = false; // tiny slow-mo steps must never put debris to sleep
 
 const matGround = new CANNON.Material('ground');
-const matBall = new CANNON.Material('ball');
+const matShot = new CANNON.Material('shot');
 const matShard = new CANNON.Material('shard');
-world.addContactMaterial(new CANNON.ContactMaterial(matGround, matBall, { restitution: 0.55, friction: 0.25 }));
-world.addContactMaterial(new CANNON.ContactMaterial(matGround, matShard, { restitution: 0.28, friction: 0.5 }));
+world.addContactMaterial(new CANNON.ContactMaterial(matGround, matShot, { restitution: 0.5, friction: 0.3 }));
+world.addContactMaterial(new CANNON.ContactMaterial(matGround, matShard, { restitution: 0.25, friction: 0.55 }));
 
 const floorBody = new CANNON.Body({
   type: CANNON.Body.STATIC, shape: new CANNON.Plane(), material: matGround,
-  collisionFilterGroup: G_WORLD, collisionFilterMask: G_BALL | G_SHARD,
+  collisionFilterGroup: G_WORLD, collisionFilterMask: G_SHOT | G_SHARD,
 });
 floorBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
 world.addBody(floorBody);
@@ -222,26 +214,62 @@ function flushRemovals() {
 // ---------------------------------------------------------------------------
 // Shared materials / geometry
 // ---------------------------------------------------------------------------
-const glassMat = new THREE.MeshPhysicalMaterial({
-  color: PALETTE.glass, metalness: 0.1, roughness: 0.06,
-  transparent: true, opacity: 0.32, side: THREE.DoubleSide,
-  envMapIntensity: 1.8, depthWrite: false,
-  emissive: 0x0d3340, emissiveIntensity: 0.5,
+const droneGeo = new THREE.OctahedronGeometry(TUNING.enemies.size);
+const droneMat = new THREE.MeshStandardMaterial({
+  color: PALETTE.ice, metalness: 0.25, roughness: 0.12, envMapIntensity: 1.6,
+  emissive: PALETTE.iceEdge, emissiveIntensity: 0.3, flatShading: true,
+  // translucent crystal so the magenta telegraph core inside stays readable
+  transparent: true, opacity: 0.75,
 });
-const shardMat = new THREE.MeshPhysicalMaterial({
-  color: PALETTE.glass, metalness: 0.15, roughness: 0.05,
-  transparent: true, opacity: 0.6, side: THREE.DoubleSide, envMapIntensity: 2.0,
+const shotGeo = new THREE.SphereGeometry(TUNING.player.shotRadius, 18, 12);
+const shotMat = new THREE.MeshStandardMaterial({
+  color: PALETTE.chrome, metalness: 1.0, roughness: 0.07, envMapIntensity: 2.2,
 });
-const edgeMat = new THREE.LineBasicMaterial({ color: PALETTE.glassEdge, transparent: true, opacity: 0.9 });
-const ballMat3 = new THREE.MeshStandardMaterial({
-  color: PALETTE.chrome, metalness: 1.0, roughness: 0.06, envMapIntensity: 2.2,
-});
-const ballGeo = new THREE.SphereGeometry(TUNING.balls.radius, 20, 14);
 const shardGeo = new THREE.BoxGeometry(1, 1, 1);
-const crystalGeo = new THREE.OctahedronGeometry(0.4);
-const crystalMat = new THREE.MeshStandardMaterial({
-  color: PALETTE.crystal, emissive: PALETTE.crystal, emissiveIntensity: 0.9,
-  metalness: 0.3, roughness: 0.25,
+const shardMat = new THREE.MeshStandardMaterial({
+  color: PALETTE.shard, metalness: 0.3, roughness: 0.1, envMapIntensity: 1.8,
+  transparent: true, opacity: 0.85, flatShading: true,
+});
+const doorMat = new THREE.MeshStandardMaterial({
+  color: 0x0a2438, metalness: 0.5, roughness: 0.3,
+  emissive: PALETTE.door, emissiveIntensity: 0.5,
+});
+const frameMat = new THREE.MeshBasicMaterial({ color: PALETTE.door });
+const gateMat = new THREE.MeshBasicMaterial({ color: 0xff7ae4 });
+const portalMat = new THREE.MeshStandardMaterial({
+  color: PALETTE.ice, metalness: 0.4, roughness: 0.15, envMapIntensity: 1.6,
+  emissive: PALETTE.iceEdge, emissiveIntensity: 0.7,
+});
+
+// Floating "GATE N" title rendered to a canvas — lives above the portal in
+// the world instead of flashing on the HUD.
+function makeGateLabel(n) {
+  const cv = document.createElement('canvas');
+  cv.width = 512; cv.height = 128;
+  const g = cv.getContext('2d');
+  g.font = '900 italic 84px -apple-system, "Segoe UI", Roboto, sans-serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.shadowColor = 'rgba(127,220,255,0.9)';
+  g.shadowBlur = 22;
+  const grad = g.createLinearGradient(0, 22, 0, 106);
+  grad.addColorStop(0, '#ffffff');
+  grad.addColorStop(0.5, '#bfeaff');
+  grad.addColorStop(1, '#5ecfff');
+  g.fillStyle = grad;
+  g.fillText(`GATE ${n}`, 256, 66);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: tex, transparent: true, depthWrite: false,
+  }));
+  s.scale.set(3.6, 0.9, 1);
+  return s;
+}
+const ringMat = new THREE.MeshBasicMaterial({ color: 0x9ff0ff });
+const pylonMat = new THREE.MeshStandardMaterial({
+  color: 0x9fd8e8, metalness: 0.4, roughness: 0.25, envMapIntensity: 1.2,
+  emissive: PALETTE.iceEdge, emissiveIntensity: 0.08, flatShading: true,
 });
 
 function makeGlowTexture(inner, outer) {
@@ -258,20 +286,31 @@ function makeGlowTexture(inner, outer) {
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
 }
-const glowTexGreen = makeGlowTexture('rgba(255,255,255,0.9)', 'rgba(37,255,200,0.5)');
-const glowTexCyan = makeGlowTexture('rgba(255,255,255,0.9)', 'rgba(0,234,255,0.45)');
+const glowIce = makeGlowTexture('rgba(255,255,255,0.9)', 'rgba(127,220,255,0.45)');
+const glowWisp = makeGlowTexture('rgba(255,255,255,0.95)', 'rgba(201,166,255,0.55)');
+const glowMagenta = makeGlowTexture('rgba(255,255,255,0.95)', 'rgba(255,47,214,0.5)');
+const glowSoul = makeGlowTexture('rgba(255,255,255,0.95)', 'rgba(174,247,232,0.55)');
+
+function sprite(map, color, scale, opacity = 1) {
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({
+    map, color, blending: THREE.AdditiveBlending, transparent: true,
+    depthWrite: false, opacity,
+  }));
+  s.scale.setScalar(scale);
+  return s;
+}
 
 // ---------------------------------------------------------------------------
 // Impact sparks (pooled additive sprites)
 // ---------------------------------------------------------------------------
 const sparks = [];
-const sparkMat = new THREE.SpriteMaterial({
-  map: glowTexCyan, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false,
+const sparkMatBase = new THREE.SpriteMaterial({
+  map: glowIce, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false,
 });
 function spawnSpark(pos, scale = 1.6, color = null) {
   let s = sparks.find((sp) => sp.life <= 0);
   if (!s) {
-    s = { sprite: new THREE.Sprite(sparkMat.clone()), life: 0 };
+    s = { sprite: new THREE.Sprite(sparkMatBase.clone()), life: 0 };
     scene.add(s.sprite);
     sparks.push(s);
   }
@@ -279,14 +318,14 @@ function spawnSpark(pos, scale = 1.6, color = null) {
   s.sprite.material.color.set(color || 0xffffff);
   s.sprite.position.copy(pos);
   s.sprite.scale.setScalar(scale * 0.4);
-  s.life = 0.28;
+  s.life = 0.3;
   s.maxScale = scale;
 }
 function updateSparks(dt) {
   for (const s of sparks) {
     if (s.life <= 0) { s.sprite.visible = false; continue; }
     s.life -= dt;
-    const t = 1 - Math.max(0, s.life) / 0.28;
+    const t = 1 - Math.max(0, s.life) / 0.3;
     s.sprite.visible = true;
     s.sprite.scale.setScalar(0.4 * s.maxScale + t * s.maxScale);
     s.sprite.material.opacity = 1 - t;
@@ -297,138 +336,874 @@ function updateSparks(dt) {
 // Game state
 // ---------------------------------------------------------------------------
 const S = {
-  mode: 'menu',            // menu | playing | dead
-  camZ: 0,
+  mode: 'menu',          // menu | playing | dead
+  shields: TUNING.player.shields,
+  ammo: TUNING.player.ammoStart,
+  score: 0,              // SCORE == DISTANCE (meters), by design
   distance: 0,
-  smashPoints: 0,
-  score: 0,
-  balls: TUNING.balls.start,
-  multiTier: 1,            // balls per throw
-  crystalStreak: 0,        // 0..streakPerTier progress toward next tier
-  combo: 1,
-  lastBreakTime: -99,
-  roomIndex: 0,
-  nextRoomZ: -6,
+  camZ: 0,
+  camX: 0,
+  steerX: 0,             // where the drag wants you
+  trackHalf: ZONES.open.halfWidth,
+  zoneIdx: 0,
   speed: TUNING.speed.base,
-  shakeT: 0,
-  deadTimer: 0,
+  timeScale: 1,
+  focus: TUNING.time.focusMax,
+  focusOk: true,
+  holdActive: false,
+  gameTime: 0,
   time: 0,
+  fovKick: 0,            // gate-pass speed surge (fov punch, decays)
+  shakeT: 0,
+  invulnT: 0,
+  deadTimer: 0,
+  stats: { shots: 0, kills: 0, deflects: 0, souls: 0, gates: 0 },
 };
 
-let levelGen = new LevelGen(weeklySeed(weeklyTag()));
-const panes = [];     // live glass panes
-const crystals = [];
-const balls = [];
+let trackGen = new TrackGen(weeklySeed(weeklyTag()));
+const zones = [];        // {spec, startZ, endZ, meshes[]}
+const gates = [];        // speed-tier gateways: {z, pos, passed}
+const pendingEvents = []; // spawn events waiting for their trigger distance
+const drones = [];
+const bolts = [];        // ethereal wisps: manual kinematics + sweeps
+const souls = [];
+const shots = [];
 const shards = [];
-const audio = new SynthAudio();
+const audio = new TimeshardAudio();
+let nextZoneZ = -8;
+
+// Debug/replay hook (also used by the Playwright verification script).
+window.__timeshard = { S, drones, bolts, souls, shots, zones, gates, camera };
 
 // ---------------------------------------------------------------------------
-// Glass panes
+// Zone environment building + streaming
 // ---------------------------------------------------------------------------
-const PANE_T = 0.07;
+function buildZoneMeshes(spec, startZ) {
+  const meshes = [];
+  const geo = ZONES[spec.type];
+  const midZ = startZ - spec.length / 2;
+  const add = (m) => { scene.add(m); meshes.push(m); };
 
-function spawnPane(spec, worldZ) {
-  const geo = new THREE.BoxGeometry(spec.w, spec.h, PANE_T);
-  const mesh = new THREE.Mesh(geo, glassMat);
-  const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo), edgeMat);
-  mesh.add(edges);
-  mesh.position.set(spec.x, spec.y, worldZ);
-  scene.add(mesh);
+  if (geo.wallH > 0) {
+    const wallGeo = new THREE.PlaneGeometry(spec.length, geo.wallH);
+    const wl = new THREE.Mesh(wallGeo, wallMat);
+    wl.rotation.y = Math.PI / 2;
+    wl.position.set(-spec.halfWidth - 0.02, geo.wallH / 2, midZ);
+    add(wl);
+    const wr = new THREE.Mesh(wallGeo, wallMat);
+    wr.rotation.y = -Math.PI / 2;
+    wr.position.set(spec.halfWidth + 0.02, geo.wallH / 2, midZ);
+    add(wr);
+    // glowing rim strips where walls meet the floor
+    const rimGeo = new THREE.BoxGeometry(0.07, 0.07, spec.length);
+    const rl = new THREE.Mesh(rimGeo, ringMat);
+    rl.position.set(-spec.halfWidth, 0.035, midZ);
+    add(rl);
+    const rr = new THREE.Mesh(rimGeo, ringMat);
+    rr.position.set(spec.halfWidth, 0.035, midZ);
+    add(rr);
+  }
 
-  const body = new CANNON.Body({
-    type: CANNON.Body.KINEMATIC,
-    shape: new CANNON.Box(new CANNON.Vec3(spec.w / 2, spec.h / 2, PANE_T / 2)),
-    position: new CANNON.Vec3(spec.x, spec.y, worldZ),
-    collisionFilterGroup: G_GLASS,
-    collisionFilterMask: G_BALL,
-  });
-  world.addBody(body);
-
-  const pane = {
-    mesh, body, geo,
-    w: spec.w, h: spec.h,
-    x0: spec.x, y0: spec.y, z: worldZ,
-    blocking: spec.blocking,
-    motion: spec.motion,
-    broken: false,
-  };
-  body.gb = { pane };
-  panes.push(pane);
-  return pane;
-}
-
-function disposePane(pane) {
-  scene.remove(pane.mesh);
-  pane.geo.dispose();
-  pane.mesh.children[0]?.geometry.dispose();
-  queueRemove(pane.body);
-}
-
-// Radial-ish jittered grid fracture. Returns shards with real physics bodies.
-function shatterPane(pane, impactWorld, ballVel) {
-  if (pane.broken) return;
-  pane.broken = true;
-  pane.body.collisionResponse = false;
-  queueRemove(pane.body);
-  scene.remove(pane.mesh);
-  pane.geo.dispose();
-
-  const C = TUNING.shatter;
-  const rng = Math.random;
-  const cols = C.cols, rows = C.rows;
-  const cw = pane.w / cols, ch = pane.h / rows;
-  const q = pane.mesh.quaternion.clone();
-  const paneVel = pane.motion ? paneVelocity(pane) : new THREE.Vector3();
-
-  const local = new THREE.Vector3();
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      const jx = (rng() - 0.5) * C.jitter * cw;
-      const jy = (rng() - 0.5) * C.jitter * ch;
-      local.set(-pane.w / 2 + cw * (c + 0.5) + jx, -pane.h / 2 + ch * (r + 0.5) + jy, 0);
-      const worldPos = local.clone().applyQuaternion(q).add(pane.mesh.position);
-
-      const dir = worldPos.clone().sub(impactWorld);
-      const dist = Math.max(0.15, dir.length());
-      dir.normalize();
-      const power = C.impulse / (1 + dist * C.impulseFalloff);
-      const vel = new THREE.Vector3(
-        dir.x * power + ballVel.x * C.inheritBall,
-        dir.y * power + Math.abs(ballVel.y) * 0.1 + 0.6,
-        dir.z * power + ballVel.z * C.inheritBall
-      ).add(paneVel);
-
-      spawnShard(worldPos, q, cw * (0.55 + rng() * 0.4), ch * (0.55 + rng() * 0.4), vel);
+  if (geo.ceiling > 0) {
+    const ceil = new THREE.Mesh(new THREE.PlaneGeometry(spec.halfWidth * 2 + 0.1, spec.length), ceilMat);
+    ceil.rotation.x = Math.PI / 2;
+    ceil.position.set(0, geo.ceiling, midZ);
+    add(ceil);
+    // light rings every ~8m sell the tunnel rush
+    for (let z = 5; z < spec.length - 2; z += 8) {
+      const ring = makeRing(spec.halfWidth, geo.ceiling, 0.09);
+      ring.position.z = startZ - z;
+      add(ring);
     }
   }
 
-  spawnSpark(impactWorld, 2.4);
-  audio.shatter(Math.min(1.5, 0.7 + pane.w * pane.h * 0.08));
+  // entry arch where an enclosed zone begins — the frame into the tunnel
+  if (spec.type !== 'open') {
+    const arch = makeRing(spec.halfWidth + 0.2, (geo.ceiling || geo.wallH) + 0.2, 0.13);
+    arch.position.z = startZ - 0.5;
+    add(arch);
+  }
 
-  // scoring + combo
-  if (S.mode === 'playing') {
-    const now = S.time;
-    S.combo = now - S.lastBreakTime < TUNING.score.comboWindow
-      ? Math.min(TUNING.score.comboMax, S.combo + 1) : 1;
-    S.lastBreakTime = now;
-    S.smashPoints += TUNING.score.glassPane * S.combo;
-    if (S.combo > 1) showCombo(S.combo);
+  // GATEWAY every Nth zone: a round portal you fly through to shift up a
+  // speed tier. Ice torus + magenta energy ring + faint portal surface,
+  // slowly spinning, with a floating GATE N title above it.
+  if (spec.index > 0 && spec.index % TUNING.gates.everyZones === 0) {
+    const num = spec.index / TUNING.gates.everyZones;
+    const R = Math.min(spec.halfWidth - 0.2, 2.1);
+    const cy = R + 0.35;
+    const gz = startZ - 1.2;
+    const group = new THREE.Group();
+    const ring = new THREE.Group();
+    ring.add(new THREE.Mesh(new THREE.TorusGeometry(R, 0.13, 10, 48), portalMat));
+    ring.add(new THREE.Mesh(new THREE.TorusGeometry(R - 0.26, 0.05, 8, 48), gateMat));
+    ring.add(sprite(glowMagenta, PALETTE.wispHalo, R * 2.6, 0.2)); // portal surface
+    group.add(ring);
+    const label = makeGateLabel(num);
+    // enclosed zones have no headroom — tuck the title inside the ring's top
+    label.position.set(0, geo.ceiling ? R * 0.5 : R + 0.9, 0.05);
+    group.add(label);
+    group.position.set(0, cy, gz);
+    add(group);
+    gates.push({ z: gz, pos: new THREE.Vector3(0, cy, gz), R, ring, group, passed: false });
+  }
+
+  // open plains get off-track crystal pylons streaming past (speed feel)
+  if (spec.type === 'open') {
+    const rng = mulberry32(hashString(`decor:${spec.index}`));
+    const n = 3 + Math.floor(rng() * 3);
+    for (let i = 0; i < n; i++) {
+      const side = rng() < 0.5 ? -1 : 1;
+      const hgt = 2.5 + rng() * 7;
+      const p = new THREE.Mesh(new THREE.BoxGeometry(0.9 + rng() * 1.6, hgt, 0.9 + rng() * 1.6), pylonMat);
+      p.position.set(side * (spec.halfWidth + 2.5 + rng() * 9), hgt / 2, startZ - rng() * spec.length);
+      p.rotation.y = rng() * Math.PI;
+      add(p);
+    }
+  }
+
+  return meshes;
+}
+
+function makeRing(halfW, height, thick) {
+  const g = new THREE.Group();
+  const bar = (w, h, x, y) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, thick), ringMat);
+    m.position.set(x, y, 0);
+    g.add(m);
+  };
+  bar(halfW * 2 + thick * 2, thick, 0, height);       // top
+  bar(thick, height, -halfW - thick / 2, height / 2); // left
+  bar(thick, height, halfW + thick / 2, height / 2);  // right
+  return g;
+}
+
+function streamZones() {
+  while (nextZoneZ > S.camZ - TUNING.track.horizon) {
+    const index = zones.length ? zones[zones.length - 1].spec.index + 1 : 0;
+    const spec = trackGen.nextZone(index);
+    const startZ = nextZoneZ;
+    const meshes = buildZoneMeshes(spec, startZ);
+    zones.push({ spec, startZ, endZ: startZ - spec.length, meshes });
+
+    for (const e of spec.events) {
+      pendingEvents.push({ ...e, worldZ: startZ - e.z, zoneIdx: index, halfWidth: spec.halfWidth });
+    }
+    for (const sl of spec.souls) {
+      spawnSoul(new THREE.Vector3(sl.x, sl.y, startZ - sl.z), true);
+    }
+    nextZoneZ -= spec.length;
+  }
+
+  // recycle zones behind the camera
+  while (zones.length && zones[0].endZ > S.camZ + TUNING.track.cleanupBehind) {
+    const z = zones.shift();
+    for (const m of z.meshes) {
+      scene.remove(m);
+      m.traverse?.((c) => c.geometry?.dispose());
+      m.geometry?.dispose();
+    }
+  }
+
+  // current zone drives speed and steering clamp
+  const cur = zones.find((z) => S.camZ <= z.startZ && S.camZ > z.endZ);
+  if (cur) {
+    S.zoneIdx = cur.spec.index;
+    updateSpeed();
+    const targetHalf = cur.spec.halfWidth;
+    S.trackHalf += (targetHalf - S.trackHalf) * Math.min(1, 2.5 * (1 / 60));
   }
 }
 
-function paneVelocity(pane) {
-  // finite-difference velocity for moving panes so shards inherit motion
-  const m = pane.motion;
-  if (!m) return new THREE.Vector3();
-  if (m.kind === 'slide') {
-    const t = S.time * m.speed + m.phase;
-    return new THREE.Vector3(Math.cos(t) * m.speed * m.range, 0, 0);
-  }
-  return new THREE.Vector3();
+function updateSpeed() {
+  S.speed = Math.min(TUNING.speed.max,
+    TUNING.speed.base + S.zoneIdx * TUNING.speed.perZone + S.stats.gates * TUNING.speed.perGate);
 }
 
-function spawnShard(pos, quat, w, h, vel) {
-  // Cap live shard bodies: fade the oldest early instead of exploding perf.
+function passGates() {
+  for (let i = gates.length - 1; i >= 0; i--) {
+    const g = gates[i];
+    if (!g.passed && S.camZ < g.z) {
+      g.passed = true;
+      if (S.mode === 'playing') {
+        S.stats.gates += 1;
+        updateSpeed(); // the new tier is permanent — perGate never decays
+        audio.gate(); // huge crystalline crash → rising whoosh
+
+        // the portal shatters into real rigid ice around its circumference
+        scene.remove(g.group);
+        for (let k = 0; k < 14; k++) {
+          const a = (k / 14) * Math.PI * 2;
+          const p = new THREE.Vector3(Math.cos(a) * g.R, g.pos.y + Math.sin(a) * g.R, g.z);
+          const v = new THREE.Vector3(
+            Math.cos(a) * 3.2, Math.sin(a) * 3.2 + 1, -S.speed * 0.35);
+          const sz = 0.1 + Math.random() * 0.16;
+          spawnShard(p, sz, sz * 1.4, v);
+        }
+        spawnSpark(g.pos, 5, PALETTE.wispHalo);
+        flash('rgba(255,47,214,0.15)', 450);
+        spawnStreaks(g.z); // hyperspace lines rushing past
+        S.fovKick = 1; // the speed surge you can feel
+        S.shakeT = Math.max(S.shakeT, 0.2);
+        updateHUD();
+      }
+    }
+    if (g.z > S.camZ + TUNING.track.cleanupBehind) gates.splice(i, 1);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Acceleration streaks — thin light lines seeded ahead of a passed gate; the
+// camera rushing past them at the new speed IS the effect.
+// ---------------------------------------------------------------------------
+const streaks = [];
+const streakMatBase = new THREE.MeshBasicMaterial({
+  color: 0xcfefff, transparent: true, opacity: 0.7,
+  blending: THREE.AdditiveBlending, depthWrite: false,
+});
+function spawnStreaks(fromZ) {
+  for (let i = 0; i < 24; i++) {
+    const m = new THREE.Mesh(shardGeo, streakMatBase.clone());
+    const side = Math.random() < 0.5 ? -1 : 1;
+    m.scale.set(0.035, 0.035, 3 + Math.random() * 5);
+    m.position.set(
+      side * (1.3 + Math.random() * 4.5),
+      0.3 + Math.random() * 4.2,
+      fromZ - 6 - Math.random() * 50);
+    scene.add(m);
+    streaks.push({ mesh: m, life: 1.6 });
+  }
+}
+function updateStreaks(dt) {
+  for (let i = streaks.length - 1; i >= 0; i--) {
+    const st = streaks[i];
+    st.life -= dt;
+    st.mesh.material.opacity = 0.7 * Math.max(0, Math.min(1, st.life / 1.2));
+    if (st.life <= 0 || st.mesh.position.z > S.camZ + 2) {
+      scene.remove(st.mesh);
+      st.mesh.material.dispose();
+      streaks.splice(i, 1);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Doors + drones. A drone's life: door → emerge → attack → retreat.
+// ---------------------------------------------------------------------------
+function triggerPendingEvents() {
+  const cap = Math.round(ramp(TUNING.difficulty.concurrent, S.zoneIdx));
+  for (let i = pendingEvents.length - 1; i >= 0; i--) {
+    const e = pendingEvents[i];
+    if (S.camZ < e.worldZ - 4) { pendingEvents.splice(i, 1); continue; } // missed window
+    const ahead = S.camZ - e.worldZ;
+    if (ahead > TUNING.enemies.triggerAhead) continue;
+    // retreating drones have broken off — they don't hold an attack slot
+    const active = drones.filter((d) => d.alive && d.state !== 'retreat').length;
+    if (active >= cap) continue;
+    pendingEvents.splice(i, 1);
+    spawnDroneFromEvent(e);
+  }
+}
+
+function spawnDroneFromEvent(e) {
+  const E = TUNING.enemies;
+  // per-drone material clone: the crystal dims once its soul is spent
+  const mesh = new THREE.Mesh(droneGeo, droneMat.clone());
+  mesh.scale.set(1, 1.35, 1);
+  // the telegraph: a wisp — the same glow it fires — growing inside the crystal
+  const core = new THREE.Group();
+  core.add(sprite(glowWisp, PALETTE.wispCore, 0.34));
+  core.add(sprite(glowMagenta, PALETTE.wispHalo, 0.8, 0.55));
+  mesh.add(core);
+  const halo = sprite(glowIce, 0xffffff, 2.2, 0.75);
+  mesh.add(halo);
+  scene.add(mesh);
+
+  const hb = E.size + E.hitboxPad;
+  const body = new CANNON.Body({
+    type: CANNON.Body.KINEMATIC,
+    shape: new CANNON.Box(new CANNON.Vec3(hb, hb * 1.35, hb)),
+    collisionFilterGroup: G_DRONE,
+    collisionFilterMask: G_SHOT,
+  });
+  world.addBody(body);
+
+  // entrance start position + optional door prop
+  let start, door = null, streak = null;
+  const doorZ = e.worldZ;
+  const hx = THREE.MathUtils.clamp(e.hoverX, -e.halfWidth + 1, e.halfWidth - 1);
+  if (e.entrance === 'floor') {
+    start = new THREE.Vector3(hx, -0.7, doorZ);
+    door = makeDoor('floor', new THREE.Vector3(hx, 0, doorZ));
+  } else if (e.entrance === 'wallL' || e.entrance === 'wallR') {
+    const side = e.entrance === 'wallL' ? -1 : 1;
+    start = new THREE.Vector3(side * (e.halfWidth + 0.6), e.hoverY, doorZ);
+    door = makeDoor('wall', new THREE.Vector3(side * e.halfWidth, e.hoverY, doorZ), side);
+  } else if (e.entrance === 'ceiling') {
+    start = new THREE.Vector3(hx, ZONES.tunnel.ceiling + 0.7, doorZ);
+    door = makeDoor('ceiling', new THREE.Vector3(hx, ZONES.tunnel.ceiling, doorZ));
+  } else { // 'above' — dive in from the sky trailing light
+    start = new THREE.Vector3(hx, e.hoverY + 13, S.camZ - E.engageAhead);
+    streak = sprite(glowIce, PALETTE.iceEdge, 1, 0.8);
+    streak.scale.set(0.7, 9, 1);
+    scene.add(streak);
+  }
+  mesh.position.copy(start);
+  body.position.set(start.x, start.y, start.z);
+
+  const drone = {
+    mesh, core, halo, body, door, streak,
+    state: door ? 'door' : 'dive',
+    t: 0,
+    start: start.clone(),
+    hoverX: hx, hoverY: e.hoverY,
+    strafePhase: Math.random() * Math.PI * 2,
+    fireEvery: e.fireEvery,
+    nextFire: e.fireEvery * 0.5 + E.telegraph,
+    engageLeft: e.engageTime,
+    boltSpeed: e.boltSpeed,
+    hasFired: false, // beat it to the shot and its soul is yours
+    alive: true,
+  };
+  body.ts = { drone };
+  drones.push(drone);
+  audio.door();
+  if (door) spawnSpark(door.group.position, 2.4, PALETTE.door); // the burst sells the opening
+}
+
+function makeDoor(kind, at, side = 0) {
+  const g = new THREE.Group();
+  const W = 1.5, H = kind === 'wall' ? 1.8 : 1.5, T = 0.06;
+  // glowing frame
+  const frame = makeRingFlat(W, H, 0.09);
+  g.add(frame);
+  // two panels that slide apart
+  const pGeo = new THREE.BoxGeometry(W / 2 - 0.02, H, T);
+  const p1 = new THREE.Mesh(pGeo, doorMat);
+  const p2 = new THREE.Mesh(pGeo, doorMat);
+  p1.position.x = -W / 4;
+  p2.position.x = W / 4;
+  g.add(p1, p2);
+
+  if (kind === 'floor') { g.rotation.x = -Math.PI / 2; }
+  else if (kind === 'ceiling') { g.rotation.x = Math.PI / 2; }
+  else { g.rotation.y = side < 0 ? Math.PI / 2 : -Math.PI / 2; }
+  g.position.copy(at);
+  scene.add(g);
+  return { group: g, p1, p2, w: W, open: 0 };
+}
+
+function makeRingFlat(w, h, t) {
+  const g = new THREE.Group();
+  const bar = (bw, bh, x, y) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, t), frameMat);
+    m.position.set(x, y, 0);
+    g.add(m);
+  };
+  bar(w + t * 2, t, 0, h / 2 + t / 2);
+  bar(w + t * 2, t, 0, -h / 2 - t / 2);
+  bar(t, h, -w / 2 - t / 2, 0);
+  bar(t, h, w / 2 + t / 2, 0);
+  return g;
+}
+
+function disposeDoor(door) {
+  scene.remove(door.group);
+  door.group.traverse((c) => c.geometry?.dispose());
+}
+
+function updateDrones(dtGame) {
+  const E = TUNING.enemies;
+  for (const d of drones) {
+    if (!d.alive) continue;
+    d.t += dtGame;
+
+    // door slide
+    if (d.door) {
+      const open = d.state === 'door' ? Math.min(1, d.t / E.doorTime)
+        : d.state === 'emerge' ? 1
+        : Math.max(0, 1 - (d.t - 0.3) / E.doorTime); // closing behind it
+      d.door.p1.position.x = -d.door.w / 4 - (d.door.w / 2) * open;
+      d.door.p2.position.x = d.door.w / 4 + (d.door.w / 2) * open;
+      if (d.state === 'attack' && open <= 0 && !d.door.closed) {
+        d.door.closed = true;
+        disposeDoor(d.door);
+        d.door = null;
+      }
+    }
+
+    const hoverZ = S.camZ - E.engageAhead;
+    if (d.state === 'door') {
+      if (d.t >= E.doorTime) { d.state = 'emerge'; d.t = 0; }
+    } else if (d.state === 'emerge' || d.state === 'dive') {
+      const dur = d.state === 'dive' ? E.diveTime : E.emergeTime;
+      const k = Math.min(1, d.t / dur);
+      const ease = 1 - (1 - k) * (1 - k);
+      d.mesh.position.set(
+        THREE.MathUtils.lerp(d.start.x, d.hoverX, ease),
+        THREE.MathUtils.lerp(d.start.y, d.hoverY, ease),
+        THREE.MathUtils.lerp(d.start.z, hoverZ, ease)
+      );
+      if (d.streak) {
+        d.streak.position.copy(d.mesh.position).y += 4.5;
+        d.streak.material.opacity = 0.8 * (1 - k);
+        if (k >= 1) { scene.remove(d.streak); d.streak = null; }
+      }
+      if (k >= 1) {
+        d.state = 'attack';
+        d.t = 0.31; // past the door-close grace
+        // position set → the energy appears NOW and builds for the full
+        // telegraph second before the first shot
+        d.nextFire = E.telegraph;
+        d.chargeSounded = false;
+        spawnSpark(d.mesh.position, 2.2, PALETTE.iceEdge);
+      }
+    } else if (d.state === 'attack') {
+      // hover ahead of you, strafing, matching your speed
+      const half = Math.max(1, S.trackHalf - 0.9);
+      const x = THREE.MathUtils.clamp(
+        d.hoverX + Math.sin(S.gameTime * 0.9 + d.strafePhase) * 0.8, -half, half);
+      const y = d.hoverY + Math.sin(S.gameTime * 1.4 + d.strafePhase * 1.7) * 0.25;
+      d.mesh.position.x += (x - d.mesh.position.x) * Math.min(1, 3 * dtGame);
+      d.mesh.position.y += (y - d.mesh.position.y) * Math.min(1, 3 * dtGame);
+      d.mesh.position.z += (hoverZ - d.mesh.position.z) * Math.min(1, 4 * dtGame);
+      d.mesh.rotation.y += dtGame * 1.2;
+
+      // fire cycle: the wisp charges up inside the crystal — a shot being born
+      d.nextFire -= dtGame;
+      const warn = Math.max(0, 1 - Math.max(0, d.nextFire) / E.telegraph);
+      const shimmer = 1 + Math.sin(S.gameTime * (6 + warn * 12)) * 0.1 * warn;
+      d.core.scale.setScalar((0.35 + warn * 1.9) * shimmer);
+      d.core.children[0].material.opacity = 0.3 + warn * 0.7;
+      d.core.children[1].material.opacity = 0.15 + warn * 0.6;
+      // the charge-up is audible, not just visible
+      if (!d.chargeSounded && warn > 0 && S.mode === 'playing') {
+        d.chargeSounded = true;
+        audio.charge();
+      }
+      // menu (attract mode) drones fire too — bolts just sail past the camera;
+      // without this the telegraph wisp sticks at full swell forever
+      if (d.nextFire <= 0 && (S.mode === 'playing' || S.mode === 'menu')) {
+        fireBolt(d);
+        d.nextFire = d.fireEvery;
+        d.chargeSounded = false;
+      }
+
+      d.engageLeft -= dtGame;
+      if (d.engageLeft <= 0) { d.state = 'retreat'; d.t = 0; }
+    } else if (d.state === 'retreat') {
+      d.mesh.position.y += 6 * dtGame; // peels off upward, falls behind
+      d.mesh.rotation.y += dtGame * 3;
+    }
+
+    d.body.position.set(d.mesh.position.x, d.mesh.position.y, d.mesh.position.z);
+
+    // recycle once well behind the camera (or retreated far up)
+    if (d.mesh.position.z > S.camZ + TUNING.track.cleanupBehind ||
+        (d.state === 'retreat' && d.t > 4)) {
+      removeDrone(d);
+    }
+  }
+  for (let i = drones.length - 1; i >= 0; i--) {
+    if (!drones[i].alive) drones.splice(i, 1);
+  }
+}
+
+function removeDrone(d) {
+  if (!d.alive) return;
+  d.alive = false;
+  scene.remove(d.mesh);
+  d.mesh.material.dispose(); // per-drone clone
+  if (d.streak) scene.remove(d.streak);
+  if (d.door && !d.door.closed) disposeDoor(d.door);
+  queueRemove(d.body);
+}
+
+function shatterDrone(drone, impact, shotVel) {
+  if (!drone.alive) return;
+  const pos = drone.mesh.position.clone();
+  drone.body.collisionResponse = false;
+  removeDrone(drone);
+
+  const C = TUNING.shatter;
+  for (let i = 0; i < C.shardsPerDrone; i++) {
+    const off = new THREE.Vector3(
+      (Math.random() - 0.5), (Math.random() - 0.5) * 1.5, (Math.random() - 0.5)
+    ).multiplyScalar(TUNING.enemies.size * 1.2);
+    const p = pos.clone().add(off);
+    const dir = p.clone().sub(impact);
+    const dist = Math.max(0.12, dir.length());
+    dir.normalize();
+    const power = C.impulse / (1 + dist * 1.4);
+    const vel = new THREE.Vector3(
+      dir.x * power + shotVel.x * C.inheritShot,
+      dir.y * power + 0.8,
+      dir.z * power + shotVel.z * C.inheritShot
+    );
+    const sz = 0.08 + Math.random() * 0.18;
+    spawnShard(p, sz, sz * (0.6 + Math.random()), vel);
+  }
+
+  spawnSpark(impact, 3.0, PALETTE.iceEdge);
+  audio.shatter(1.1);
+  S.stats.kills += 1;
+  S.shakeT = Math.max(S.shakeT, 0.14);
+  updateHUD();
+
+  // beat it to the trigger and you keep its soul; once it has fired, the
+  // soul is spent — the dimmed crystal told you so
+  if (!drone.hasFired) spawnSoul(pos, false);
+  // debug/replay hook: what the last kill was worth
+  window.__timeshard.lastKill = { fired: drone.hasFired, soul: !drone.hasFired };
+}
+
+// ---------------------------------------------------------------------------
+// Ethereal wisp-bolts — manual kinematics (tunnel-proof sweeps), a bright
+// core trailing a comet tail that spirals visually while the true path
+// stays straight (fair to dodge). No solid pink dots here.
+// ---------------------------------------------------------------------------
+function fireBolt(drone) {
+  if (bolts.length >= TUNING.bolts.maxLive) return;
+  const B = TUNING.bolts;
+  const from = drone.mesh.position.clone();
+
+  // true intercept solve: you fly toward the bolt, so time-to-hit is set by
+  // the CLOSING speed, not the raw distance. (v²−b²)t² − 2·dz·v·t + |D|² = 0
+  const px = S.camX, py = TUNING.track.eyeHeight, pz = S.camZ;
+  const dx = px - from.x, dy = py - from.y, dz = pz - from.z;
+  const v = S.speed, b2 = drone.boltSpeed * drone.boltSpeed;
+  const a = v * v - b2, bq = -2 * dz * v, c = dx * dx + dy * dy + dz * dz;
+  let t;
+  if (Math.abs(a) < 1e-6) t = c / Math.max(0.1, -bq);
+  else {
+    const disc = bq * bq - 4 * a * c;
+    if (disc < 0) t = Math.sqrt(c) / drone.boltSpeed; // no intercept: aim at now
+    else {
+      const r1 = (-bq - Math.sqrt(disc)) / (2 * a);
+      const r2 = (-bq + Math.sqrt(disc)) / (2 * a);
+      t = Math.min(r1 > 0.05 ? r1 : Infinity, r2 > 0.05 ? r2 : Infinity);
+      if (!isFinite(t)) t = Math.sqrt(c) / drone.boltSpeed;
+    }
+  }
+  // aimLead < 1 aims slightly behind the perfect intercept (dodgeable), and
+  // jitter keeps volleys from being a single fair-but-cruel line
+  const target = new THREE.Vector3(
+    px + (Math.random() - 0.5) * B.aimJitter * 2,
+    py + (Math.random() - 0.5) * B.aimJitter,
+    pz - v * t * B.aimLead
+  );
+  const vel = target.sub(from).normalize().multiplyScalar(drone.boltSpeed);
+
+  // soul spent: the crystal visibly goes cold
+  if (!drone.hasFired) {
+    drone.hasFired = true;
+    drone.mesh.material.emissiveIntensity = 0.1;
+    drone.halo.material.opacity = 0.3;
+  }
+
+  if (S.mode === 'playing') audio.laser(); // the release, coming at you
+
+  const group = new THREE.Group();
+  const head = sprite(glowWisp, PALETTE.wispCore, 0.55);
+  const halo = sprite(glowMagenta, PALETTE.wispHalo, 1.5, 0.3);
+  group.add(head, halo);
+  const trail = [];
+  const cWisp = new THREE.Color(PALETTE.wisp);
+  const cHalo = new THREE.Color(PALETTE.wispHalo);
+  for (let i = 0; i < B.trailLen; i++) {
+    const k = i / (B.trailLen - 1);
+    const t = sprite(glowWisp, cWisp.clone().lerp(cHalo, k), 0.42 * (1 - k * 0.75), 0.85 * (1 - k * 0.8));
+    group.add(t);
+    trail.push(t);
+  }
+  scene.add(group);
+  bolts.push({ group, trail, pos: from.clone(), vel, phase: Math.random() * Math.PI * 2 });
+  spawnSpark(from, 1.3, PALETTE.wispHalo);
+}
+
+function removeBolt(i, sparkColor = null) {
+  const b = bolts[i];
+  if (sparkColor) spawnSpark(b.pos, 2.0, sparkColor);
+  scene.remove(b.group);
+  bolts.splice(i, 1);
+}
+
+const _perp1 = new THREE.Vector3(), _perp2 = new THREE.Vector3(), _dirN = new THREE.Vector3();
+function updateBolts(dtGame) {
+  const B = TUNING.bolts;
+  const playerPos = new THREE.Vector3(S.camX, TUNING.track.eyeHeight, S.camZ);
+  for (let i = bolts.length - 1; i >= 0; i--) {
+    // the mercy blast in playerHit can shrink the array by several entries
+    if (i >= bolts.length) { i = bolts.length; continue; }
+    const b = bolts[i];
+    b.pos.addScaledVector(b.vel, dtGame);
+
+    // spiral dressing around the (straight, fair) path
+    _dirN.copy(b.vel).normalize();
+    _perp1.set(-_dirN.z, 0, _dirN.x).normalize();
+    _perp2.crossVectors(_dirN, _perp1);
+    const th = S.gameTime * B.wobbleFreq + b.phase;
+    b.group.position.copy(b.pos)
+      .addScaledVector(_perp1, Math.sin(th) * B.wobbleAmp)
+      .addScaledVector(_perp2, Math.cos(th) * B.wobbleAmp);
+    for (let k = 0; k < b.trail.length; k++) {
+      const back = (k + 1) * 0.34;
+      const tth = th - (k + 1) * 0.55;
+      b.trail[k].position.copy(_dirN).multiplyScalar(-back)
+        .addScaledVector(_perp1, Math.sin(tth) * B.wobbleAmp * 1.3)
+        .addScaledVector(_perp2, Math.cos(tth) * B.wobbleAmp * 1.3);
+    }
+
+    if (S.mode === 'playing' && S.invulnT <= 0 &&
+        b.pos.distanceTo(playerPos) < TUNING.player.hitRadius) {
+      removeBolt(i, PALETTE.wispHalo);
+      playerHit();
+      continue;
+    }
+    if (b.pos.z > S.camZ + 2.5 || b.pos.distanceTo(playerPos) > 90) removeBolt(i);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Souls — the ammo economy. Kills leave one; fly through it to absorb.
+// ---------------------------------------------------------------------------
+function spawnSoul(pos, ambient) {
+  const group = new THREE.Group();
+  group.add(sprite(glowSoul, PALETTE.soulCore, 0.7));
+  group.add(sprite(glowSoul, PALETTE.soul, 1.9, 0.55));
+  group.position.copy(pos);
+  scene.add(group);
+  souls.push({ group, pos: pos.clone(), ambient, phase: Math.random() * Math.PI * 2, t: 0 });
+}
+
+function updateSouls(dtGame) {
+  const C = TUNING.souls;
+  const playerPos = new THREE.Vector3(S.camX, TUNING.track.eyeHeight, S.camZ);
+  for (let i = souls.length - 1; i >= 0; i--) {
+    const s = souls[i];
+    s.t += dtGame;
+    // freshly-freed souls float up to eye level
+    if (!s.ambient && s.pos.y < C.riseHeight) s.pos.y += 1.6 * dtGame;
+    // gentle homing once you're close — forgiving, not automatic
+    const d = s.pos.distanceTo(playerPos);
+    if (d < C.homingRadius) {
+      s.pos.lerp(playerPos, Math.min(1, C.homingLerp * dtGame));
+    }
+    s.group.position.copy(s.pos);
+    s.group.position.y += Math.sin(S.gameTime * 2.4 + s.phase) * 0.1;
+    const pulse = 1 + Math.sin(S.gameTime * 5 + s.phase) * 0.14;
+    s.group.children[0].scale.setScalar(0.7 * pulse);
+    s.group.children[1].scale.setScalar(1.9 * pulse);
+
+    if (S.mode === 'playing' && d < C.captureRadius) {
+      S.ammo = Math.min(TUNING.player.ammoMax, S.ammo + C.ammoBonus);
+      S.stats.souls += 1;
+      audio.pickup();
+      spawnSpark(s.pos, 2.6, PALETTE.soul);
+      showMsg(`SOUL +${C.ammoBonus} AMMO`, 'neon-ice');
+      scene.remove(s.group);
+      souls.splice(i, 1);
+      updateHUD();
+      continue;
+    }
+    if (s.pos.z > S.camZ + TUNING.track.cleanupBehind) {
+      scene.remove(s.group);
+      souls.splice(i, 1);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Player shots — dynamic chrome shards, ballistic-compensated at launch;
+// physics vs drones, manual segment/sphere sweeps vs bolts (tunnel-proof).
+// ---------------------------------------------------------------------------
+const raycaster = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+// Aiming uses a CLEAN camera pose — no steering bank, no shake — so the same
+// tap always maps to the same spot in the world. The rolled render camera was
+// skewing shots whenever you fired mid-weave.
+const aimCam = new THREE.PerspectiveCamera(72, 1, 0.1, 260);
+let lastDryMsg = -9;
+
+// Where to aim so a projectile at `speed` meets a target moving at `vel`:
+// |P + V·t − O| = s·t. Smallest positive root, else aim at where it is now.
+function interceptPoint(origin, pos, vel, speed) {
+  const D = pos.clone().sub(origin);
+  const a = vel.lengthSq() - speed * speed;
+  const b = 2 * D.dot(vel);
+  const c = D.lengthSq();
+  let t;
+  if (Math.abs(a) < 1e-6) t = c / Math.max(0.1, -b);
+  else {
+    const disc = b * b - 4 * a * c;
+    if (disc < 0) t = Math.sqrt(c) / speed;
+    else {
+      const r1 = (-b - Math.sqrt(disc)) / (2 * a);
+      const r2 = (-b + Math.sqrt(disc)) / (2 * a);
+      t = Math.min(r1 > 0.02 ? r1 : Infinity, r2 > 0.02 ? r2 : Infinity);
+      if (!isFinite(t)) t = Math.sqrt(c) / speed;
+    }
+  }
+  return pos.clone().addScaledVector(vel, t);
+}
+
+function fireShot(clientX, clientY) {
+  if (S.ammo <= 0) {
+    audio.dryFire();
+    if (S.time - lastDryMsg > 1.6) {
+      lastDryMsg = S.time;
+      showMsg('NO AMMO — CATCH A SOUL', 'neon-pink');
+    }
+    return;
+  }
+  S.ammo -= 1;
+
+  aimCam.fov = camera.fov;
+  aimCam.aspect = camera.aspect;
+  aimCam.position.set(S.camX, TUNING.track.eyeHeight, S.camZ);
+  aimCam.rotation.set(0, 0, 0);
+  aimCam.updateProjectionMatrix();
+  aimCam.updateMatrixWorld();
+  ndc.set((clientX / window.innerWidth) * 2 - 1, -(clientY / window.innerHeight) * 2 + 1);
+  raycaster.setFromCamera(ndc, aimCam);
+  const ray = raycaster.ray;
+
+  const origin = aimCam.position.clone().add(new THREE.Vector3(0, -0.35, -0.45));
+  const spd = TUNING.player.shotSpeed;
+
+  // Soft aim assist: if the tap ray passes near a drone or bolt, aim exactly
+  // at it — with a lead solve, because shards fly real-time while the world
+  // may be crawling (target's effective velocity scales with timeScale).
+  let target = null, bestD = Infinity;
+  for (const d of drones) {
+    if (!d.alive || d.state === 'door' || d.state === 'retreat') continue;
+    const p = d.mesh.position;
+    if (p.z > S.camZ - 1) continue; // must be ahead of you
+    const perp = ray.distanceToPoint(p);
+    if (perp < TUNING.player.aimAssist && perp < bestD) {
+      bestD = perp;
+      const effVel = new THREE.Vector3(0, 0, -S.speed * S.timeScale);
+      target = interceptPoint(origin, p, effVel, spd);
+    }
+  }
+  for (const b of bolts) {
+    if (b.pos.z > S.camZ - 1) continue;
+    const perp = ray.distanceToPoint(b.pos);
+    if (perp < TUNING.player.aimAssistBolt && perp < bestD) {
+      bestD = perp;
+      const effVel = b.vel.clone().multiplyScalar(S.timeScale);
+      target = interceptPoint(origin, b.pos, effVel, spd);
+    }
+  }
+  if (!target) {
+    const t = TUNING.player.aimDistance / Math.max(0.2, -ray.direction.z);
+    target = ray.origin.clone().addScaledVector(ray.direction, t);
+  }
+
+  const disp = target.sub(origin);
+  const flight = disp.length() / spd;
+  const vel = disp.divideScalar(flight);
+  vel.y -= 0.5 * TUNING.player.gravity * flight; // cancel gravity drop at the target
+
+  spawnShot(origin, vel);
+  audio.fire();
+  S.stats.shots += 1;
+  S.shakeT = Math.max(S.shakeT, 0.05);
+  updateHUD();
+}
+
+function spawnShot(pos, vel) {
+  while (shots.length >= TUNING.player.maxLiveShots) disposeShot(shots.shift());
+  const mesh = new THREE.Mesh(shotGeo, shotMat);
+  mesh.position.copy(pos);
+  scene.add(mesh);
+  const body = new CANNON.Body({
+    mass: 1,
+    shape: new CANNON.Sphere(TUNING.player.shotRadius),
+    position: new CANNON.Vec3(pos.x, pos.y, pos.z),
+    velocity: new CANNON.Vec3(vel.x, vel.y, vel.z),
+    material: matShot,
+    collisionFilterGroup: G_SHOT,
+    collisionFilterMask: G_DRONE | G_WORLD,
+  });
+  body.ts = { shot: true, prevVel: new CANNON.Vec3(vel.x, vel.y, vel.z) };
+  body.addEventListener('collide', onShotCollide);
+  world.addBody(body);
+  shots.push({ mesh, body, age: 0, prevPos: pos.clone() });
+}
+
+function disposeShot(s) {
+  scene.remove(s.mesh);
+  queueRemove(s.body);
+}
+
+function onShotCollide(e) {
+  const self = e.target, other = e.body;
+  if (!other.ts || !other.ts.drone) return;
+  const drone = other.ts.drone;
+  if (!drone.alive || drone.state === 'door') return; // can't shoot through a shut door
+  const cp = new CANNON.Vec3();
+  (e.contact.bi === self ? e.contact.bi : e.contact.bj).position.vadd(
+    e.contact.bi === self ? e.contact.ri : e.contact.rj, cp);
+  const pv = self.ts.prevVel;
+  shatterDrone(drone, new THREE.Vector3(cp.x, cp.y, cp.z), new THREE.Vector3(pv.x, pv.y, pv.z));
+  self.velocity.set(pv.x * 0.8, pv.y * 0.8, pv.z * 0.8); // punch through
+}
+
+const _seg = new THREE.Vector3(), _toB = new THREE.Vector3(), _close = new THREE.Vector3();
+function sweepShotsVsBolts() {
+  const R = TUNING.bolts.radius + TUNING.bolts.hitboxPad + TUNING.player.shotRadius;
+  for (const s of shots) {
+    const p0 = s.prevPos;
+    const p1 = s.mesh.position;
+    _seg.subVectors(p1, p0);
+    const len2 = _seg.lengthSq();
+    for (let i = bolts.length - 1; i >= 0; i--) {
+      const b = bolts[i];
+      _toB.subVectors(b.pos, p0);
+      const t = len2 > 1e-8 ? THREE.MathUtils.clamp(_toB.dot(_seg) / len2, 0, 1) : 0;
+      _close.copy(p0).addScaledVector(_seg, t);
+      if (_close.distanceToSquared(b.pos) < R * R) {
+        removeBolt(i, 0xffffff);
+        audio.deflect();
+        S.stats.deflects += 1;
+        showMsg('DEFLECT', 'neon-ice');
+      }
+    }
+  }
+}
+
+// YOUR shards live outside time (the bullet-time power fantasy): the world
+// step only advanced them by dtGame, so top up the integration to real dt —
+// full velocity and full gravity — while everything else crawls. Collisions
+// still resolve through the physics narrowphase on the updated positions.
+function updateShots(dt, dtGame) {
+  const extra = Math.max(0, dt - dtGame);
+  for (let i = shots.length - 1; i >= 0; i--) {
+    const s = shots[i];
+    s.age += dt;
+    if (extra > 0) {
+      const b = s.body;
+      b.velocity.y += TUNING.player.gravity * extra;
+      b.position.x += b.velocity.x * extra;
+      b.position.y += b.velocity.y * extra;
+      b.position.z += b.velocity.z * extra;
+    }
+    if (s.age > TUNING.player.shotTtl || s.body.position.z < S.camZ - 80 ||
+        s.body.position.z > S.camZ + 4 || s.body.position.y < -2) {
+      disposeShot(s);
+      shots.splice(i, 1);
+      continue;
+    }
+    s.prevPos.copy(s.mesh.position);
+    s.mesh.position.copy(s.body.position);
+    s.mesh.quaternion.copy(s.body.quaternion);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Debris shards (real rigid bodies, floor-only collisions, capped + recycled)
+// ---------------------------------------------------------------------------
+function spawnShard(pos, w, h, vel) {
   while (shards.length >= TUNING.shatter.maxShardBodies) {
     const old = shards.shift();
     scene.remove(old.mesh);
@@ -436,19 +1211,16 @@ function spawnShard(pos, quat, w, h, vel) {
     queueRemove(old.body);
   }
   const mesh = new THREE.Mesh(shardGeo, shardMat.clone());
-  mesh.scale.set(w, h, PANE_T);
+  mesh.scale.set(w, h, w * 0.5);
   mesh.position.copy(pos);
-  mesh.quaternion.copy(quat);
   scene.add(mesh);
-
   const body = new CANNON.Body({
-    mass: 0.18,
-    shape: new CANNON.Box(new CANNON.Vec3(w / 2, h / 2, PANE_T / 2)),
+    mass: 0.12,
+    shape: new CANNON.Box(new CANNON.Vec3(w / 2, h / 2, w / 4)),
     position: new CANNON.Vec3(pos.x, pos.y, pos.z),
-    quaternion: new CANNON.Quaternion(quat.x, quat.y, quat.z, quat.w),
     velocity: new CANNON.Vec3(vel.x, vel.y, vel.z),
     angularVelocity: new CANNON.Vec3(
-      (Math.random() - 0.5) * 8, (Math.random() - 0.5) * 8, (Math.random() - 0.5) * 8),
+      (Math.random() - 0.5) * 9, (Math.random() - 0.5) * 9, (Math.random() - 0.5) * 9),
     material: matShard,
     collisionFilterGroup: G_SHARD,
     collisionFilterMask: G_WORLD,
@@ -457,231 +1229,46 @@ function spawnShard(pos, quat, w, h, vel) {
   shards.push({ mesh, body, ttl: TUNING.shatter.ttl });
 }
 
-// ---------------------------------------------------------------------------
-// Crystals
-// ---------------------------------------------------------------------------
-function spawnCrystal(spec, worldZ) {
-  const mesh = new THREE.Mesh(crystalGeo, crystalMat);
-  const glow = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: glowTexGreen, blending: THREE.AdditiveBlending, transparent: true,
-    depthWrite: false, opacity: 0.9,
-  }));
-  glow.scale.setScalar(2.0);
-  mesh.add(glow);
-  mesh.position.set(spec.x, spec.y, worldZ);
-  scene.add(mesh);
-
-  const body = new CANNON.Body({
-    type: CANNON.Body.KINEMATIC,
-    shape: new CANNON.Box(new CANNON.Vec3(0.42, 0.42, 0.42)),
-    position: new CANNON.Vec3(spec.x, spec.y, worldZ),
-    collisionFilterGroup: G_GLASS,
-    collisionFilterMask: G_BALL,
-  });
-  world.addBody(body);
-
-  const crystal = { mesh, body, z: worldZ, y0: spec.y, collected: false, missed: false };
-  body.gb = { crystal };
-  crystals.push(crystal);
-}
-
-function collectCrystal(crystal, impactWorld) {
-  if (crystal.collected) return;
-  crystal.collected = true;
-  crystal.body.collisionResponse = false;
-  queueRemove(crystal.body);
-  scene.remove(crystal.mesh);
-
-  S.balls += TUNING.crystal.ballBonus;
-  S.smashPoints += TUNING.crystal.scoreBonus;
-  S.crystalStreak += 1;
-  audio.crystal();
-  spawnSpark(impactWorld, 3.2, PALETTE.crystal);
-
-  if (S.crystalStreak >= TUNING.multiball.streakPerTier &&
-      S.multiTier < TUNING.multiball.maxPerThrow) {
-    S.multiTier += 1;
-    S.crystalStreak = 0;
-    audio.multiballUp();
-    showMsg(`MULTIBALL ×${S.multiTier}`, 'neon-cyan');
-    flash('rgba(0,234,255,0.25)', 300);
-  }
-  updateHUD();
-}
-
-function missCrystal(crystal) {
-  crystal.missed = true;
-  if (S.multiTier > 1 || S.crystalStreak > 0) {
-    S.multiTier = 1;
-    S.crystalStreak = 0;
-    showMsg('CHAIN BROKEN', 'neon-pink');
-    updateHUD();
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Balls
-// ---------------------------------------------------------------------------
-const raycaster = new THREE.Raycaster();
-const ndc = new THREE.Vector2();
-
-function throwBalls(clientX, clientY) {
-  if (S.balls <= 0) return;
-  const n = Math.min(S.multiTier, S.balls);
-  S.balls -= n;
-
-  ndc.set((clientX / window.innerWidth) * 2 - 1, -(clientY / window.innerHeight) * 2 + 1);
-  raycaster.setFromCamera(ndc, camera);
-  const dir = raycaster.ray.direction.clone();
-  // aim at the point where the ray crosses a plane `aimDistance` ahead
-  const t = TUNING.balls.aimDistance / Math.max(0.2, -dir.z);
-  const target = camera.position.clone().add(dir.multiplyScalar(t));
-
-  const right = new THREE.Vector3(1, 0, 0);
-  for (let i = 0; i < n; i++) {
-    const off = (i - (n - 1) / 2) * TUNING.multiball.spread;
-    const origin = camera.position.clone()
-      .add(new THREE.Vector3(0, -0.42, -0.5))
-      .add(right.clone().multiplyScalar(off * 0.5));
-    const vel = target.clone()
-      .add(right.clone().multiplyScalar(off * 2.2))
-      .sub(origin).normalize().multiplyScalar(TUNING.balls.throwSpeed);
-    spawnBall(origin, vel);
-  }
-  audio.throw();
-  S.shakeT = Math.max(S.shakeT, 0.08);
-  updateHUD();
-}
-
-function spawnBall(pos, vel) {
-  while (balls.length >= TUNING.balls.maxLive) disposeBall(balls.shift());
-
-  const mesh = new THREE.Mesh(ballGeo, ballMat3);
-  mesh.position.copy(pos);
-  scene.add(mesh);
-  const body = new CANNON.Body({
-    mass: 1,
-    shape: new CANNON.Sphere(TUNING.balls.radius),
-    position: new CANNON.Vec3(pos.x, pos.y, pos.z),
-    velocity: new CANNON.Vec3(vel.x, vel.y, vel.z),
-    material: matBall,
-    collisionFilterGroup: G_BALL,
-    collisionFilterMask: G_GLASS | G_WORLD,
-  });
-  body.gb = { ball: true, prevVel: new CANNON.Vec3(vel.x, vel.y, vel.z) };
-  body.addEventListener('collide', onBallCollide);
-  world.addBody(body);
-  balls.push({ mesh, body, age: 0 });
-}
-
-function disposeBall(b) {
-  scene.remove(b.mesh);
-  queueRemove(b.body);
-}
-
-function onBallCollide(e) {
-  const self = e.target, other = e.body;
-  if (!other.gb) return;
-  const cp = new CANNON.Vec3();
-  (e.contact.bi === self ? e.contact.bi : e.contact.bj).position.vadd(
-    e.contact.bi === self ? e.contact.ri : e.contact.rj, cp);
-  const impact = new THREE.Vector3(cp.x, cp.y, cp.z);
-  const pv = self.gb.prevVel;
-  const ballVel = new THREE.Vector3(pv.x, pv.y, pv.z);
-
-  if (other.gb.pane && !other.gb.pane.broken) {
-    shatterPane(other.gb.pane, impact, ballVel);
-    // smash-through: restore most of the pre-impact velocity
-    self.velocity.set(pv.x * 0.86, pv.y * 0.86, pv.z * 0.86);
-  } else if (other.gb.crystal && !other.gb.crystal.collected) {
-    collectCrystal(other.gb.crystal, impact);
-    self.velocity.set(pv.x * 0.9, pv.y * 0.9, pv.z * 0.9);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Level streaming
-// ---------------------------------------------------------------------------
-function streamRooms() {
-  while (S.nextRoomZ > S.camZ - TUNING.corridor.horizon) {
-    const room = levelGen.nextRoom(S.roomIndex);
-    for (const item of room.items) {
-      const z = S.nextRoomZ - item.z;
-      if (item.type === 'pane') spawnPane(item, z);
-      else if (item.type === 'crystal') spawnCrystal(item, z);
+function updateShards(dtGame) {
+  for (let i = shards.length - 1; i >= 0; i--) {
+    const sh = shards[i];
+    sh.ttl -= dtGame;
+    if (sh.ttl <= 0 || sh.body.position.z > S.camZ + TUNING.track.cleanupBehind) {
+      scene.remove(sh.mesh);
+      sh.mesh.material.dispose();
+      queueRemove(sh.body);
+      shards.splice(i, 1);
+      continue;
     }
-    S.nextRoomZ -= room.length;
-    S.roomIndex += 1;
-    S.speed = Math.min(TUNING.speed.max, TUNING.speed.base + S.roomIndex * TUNING.speed.perRoom);
-  }
-}
-
-function cleanupBehind() {
-  const behind = S.camZ + 9;
-  for (let i = panes.length - 1; i >= 0; i--) {
-    if (panes[i].z > behind) {
-      if (!panes[i].broken) disposePane(panes[i]);
-      panes.splice(i, 1);
-    }
-  }
-  for (let i = crystals.length - 1; i >= 0; i--) {
-    const c = crystals[i];
-    if (!c.collected && !c.missed && c.z > S.camZ + 0.5) missCrystal(c);
-    if (c.z > behind) {
-      if (!c.collected) { scene.remove(c.mesh); queueRemove(c.body); }
-      crystals.splice(i, 1);
-    }
-  }
-  for (let i = balls.length - 1; i >= 0; i--) {
-    const b = balls[i];
-    if (b.body.position.z > S.camZ + 4 || b.body.position.z < S.camZ - 130 || b.age > 8) {
-      disposeBall(b);
-      balls.splice(i, 1);
-    }
+    sh.mesh.position.copy(sh.body.position);
+    sh.mesh.quaternion.copy(sh.body.quaternion);
+    if (sh.ttl < 0.6) sh.mesh.material.opacity = 0.85 * (sh.ttl / 0.6);
   }
 }
 
 // ---------------------------------------------------------------------------
-// Crash detection: player box vs unbroken blocking panes crossing the camera
+// Getting hit
 // ---------------------------------------------------------------------------
-const PLAYER_HALF = { x: 0.38, y: 0.5 };
-function checkCrash(dt) {
-  const reach = 0.4 + S.speed * dt;
-  for (const pane of panes) {
-    if (pane.broken || !pane.blocking) continue;
-    if (Math.abs(pane.body.position.z - S.camZ) > reach + 1.2) continue;
-    pane.body.updateAABB();
-    const a = pane.body.aabb;
-    const px = camera.position.x, py = TUNING.corridor.eyeHeight;
-    if (a.lowerBound.x < px + PLAYER_HALF.x && a.upperBound.x > px - PLAYER_HALF.x &&
-        a.lowerBound.y < py + PLAYER_HALF.y && a.upperBound.y > py - PLAYER_HALF.y &&
-        a.lowerBound.z < S.camZ + 0.3 && a.upperBound.z > S.camZ - reach) {
-      crash(pane);
-      return;
-    }
-  }
-}
-
-function crash(pane) {
-  // smashing through with your face: shards blast forward, balls drain
-  const impact = new THREE.Vector3(camera.position.x, TUNING.corridor.eyeHeight, pane.body.position.z);
-  const fakeVel = new THREE.Vector3(0, 0, -S.speed * 1.4);
-  shatterPane(pane, impact, fakeVel);
-  audio.crash();
+function playerHit() {
+  S.shields -= 1;
+  S.invulnT = TUNING.player.invuln;
+  audio.hurt();
   S.shakeT = 0.5;
-  flash('rgba(255,40,80,0.45)', 380);
+  flash('rgba(255,40,90,0.5)', 420);
 
-  S.balls = Math.max(0, S.balls - TUNING.balls.crashPenalty);
-  S.multiTier = 1;
-  S.crystalStreak = 0;
-  S.combo = 1;
+  // mercy: vaporize anything about to combo you
+  const playerPos = new THREE.Vector3(S.camX, TUNING.track.eyeHeight, S.camZ);
+  for (let i = bolts.length - 1; i >= 0; i--) {
+    if (bolts[i].pos.distanceTo(playerPos) < 4.5) removeBolt(i, PALETTE.wispHalo);
+  }
   updateHUD();
 
-  if (S.balls <= 0) {
+  if (S.shields <= 0) {
     S.mode = 'dead';
-    S.deadTimer = 0.9; // let the smash play out before the score screen
+    S.deadTimer = 1.0;
+    clearPointers();
   } else {
-    showMsg(`-${TUNING.balls.crashPenalty} BALLS`, 'neon-pink');
+    showMsg('SHIELD DOWN', 'neon-pink');
   }
 }
 
@@ -690,24 +1277,43 @@ function crash(pane) {
 // ---------------------------------------------------------------------------
 const el = (id) => document.getElementById(id);
 const hud = el('hud');
-const pipsBox = el('pips');
-for (let i = 0; i < TUNING.multiball.streakPerTier; i++) pipsBox.appendChild(document.createElement('span'));
 
 function updateHUD() {
-  el('ballCount').textContent = S.balls;
-  el('multiCount').textContent = S.multiTier;
-  const pips = pipsBox.children;
-  for (let i = 0; i < pips.length; i++) pips[i].classList.toggle('on', i < S.crystalStreak);
-  el('hudBalls').style.color = S.balls <= 5 ? '#ff2fd6' : '#cfefff';
+  el('ammoCount').textContent = S.ammo;
+  el('hudAmmo').style.color = S.ammo <= 3 ? '#ff2fd6' : '#dff6ff';
+  el('shardCount').textContent = S.stats.kills;
+  el('gateCount').textContent = S.stats.gates;
+  el('shields').textContent =
+    '◆'.repeat(Math.max(0, S.shields)) + '◇'.repeat(TUNING.player.shields - Math.max(0, S.shields));
 }
 
-let comboTimer = null;
-function showCombo(c) {
-  const box = el('hudCombo');
-  box.textContent = `COMBO ×${c}`;
-  box.classList.add('show');
-  clearTimeout(comboTimer);
-  comboTimer = setTimeout(() => box.classList.remove('show'), 900);
+function updateFocusBar() {
+  const k = S.focus / TUNING.time.focusMax;
+  el('focusBar').style.width = `${k * 100}%`;
+  el('focusBar').style.background = S.focusOk ? '#7fdcff' : '#ff2fd6';
+  const full = k >= 0.999;
+  el('focusTrack').classList.toggle('full', full);
+  el('focusLabel').classList.toggle('full', full);
+  el('focusLabel').textContent = full ? 'FOCUS FULL' : 'FOCUS';
+}
+
+// In-run directions: pop up at run start, fade out after 5 s.
+let howtoTimer = null, howtoFade = null;
+function showHowto() {
+  const h = el('howto');
+  clearTimeout(howtoTimer);
+  clearTimeout(howtoFade);
+  h.style.display = 'flex';
+  h.style.opacity = '1';
+  howtoTimer = setTimeout(() => {
+    h.style.opacity = '0';
+    howtoFade = setTimeout(() => { h.style.display = 'none'; }, 750);
+  }, 5000);
+}
+function hideHowto() {
+  clearTimeout(howtoTimer);
+  clearTimeout(howtoFade);
+  el('howto').style.display = 'none';
 }
 
 let msgTimer = null;
@@ -737,208 +1343,414 @@ function fillStats(container, rows) {
     .join('');
 }
 
-function showStart() {
+// Three-column score rows: rank · value · timestamp ("07.14.2026 01:05:26")
+function fmtDate(at) {
+  const d = new Date(at);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getMonth() + 1)}.${p(d.getDate())}.${d.getFullYear()} ` +
+    `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+function fillScoreRows(container, rows) {
+  container.innerHTML = rows
+    .map(([k, v, d]) => `<div class="dim">${k}</div><div class="v">${v}</div><div class="d">${d}</div>`)
+    .join('');
+}
+
+// One metric at a time on the start board, switched by chips — no glyph soup.
+// Ranks are computed against this device's top runs for the SELECTED metric
+// (they become global placements once the leaderboard backend lands).
+let startMetric = 'score';
+function renderStartBoard() {
   const s = scores.summary();
-  el('weekLabel').textContent = `${weekId()} GRID`;
-  fillStats(el('startStats'), [
-    ['WEEK BEST', s.weekBest],
-    ['ALL-TIME BEST', s.allTimeBest],
-    ['TODAY’S BEST', s.dayBest],
-    ['DAY STREAK', s.streak ? `${s.streak}\u{1F525}` : '—'],
-  ]);
+  el('startHead').textContent = s.history.length
+    ? `RECENT RUNS · BEST ${s.allTimeBest}` + (s.streak > 1 ? ` · ${s.streak}\u{1F525}` : '')
+    : '';
+  el('startChips').style.display = s.history.length ? 'flex' : 'none';
+  const val = (r) => startMetric === 'score' ? r.score : (r[startMetric] ?? 0);
+  fillScoreRows(el('startRecent'), s.history.slice(0, 3).map((r) => {
+    const better = s.top.filter((t) => val(t) > val(r)).length;
+    const onBoard = s.top.some((t) => t.at === r.at);
+    return [onBoard ? `#${better + 1}` : '—', String(val(r)), fmtDate(r.at)];
+  }));
+}
+for (const chip of document.querySelectorAll('#startChips .chip')) {
+  chip.addEventListener('click', () => {
+    startMetric = chip.dataset.m;
+    for (const c of document.querySelectorAll('#startChips .chip')) {
+      c.classList.toggle('on', c === chip);
+    }
+    renderStartBoard();
+  });
+}
+
+function showStart() {
+  renderStartBoard();
   el('startScreen').classList.add('visible');
   el('overScreen').classList.remove('visible');
+  el('pauseScreen').classList.remove('visible');
+  el('btnPause').style.display = 'none';
+  el('btnSound').style.display = 'block';
+  updateSoundLabel();
+  hideHowto();
+  hud.style.display = 'none';
+  S.mode = 'menu';
+}
+
+// ---------------------------------------------------------------------------
+// Pause menu (settings + local score history/leaderboard live here)
+// ---------------------------------------------------------------------------
+function pauseGame() {
+  if (S.mode !== 'playing') return;
+  S.mode = 'paused';
+  clearPointers();
+  audio.stopMusic();
+  el('pauseScore').textContent = `${S.score}m`;
+  el('pauseShards').textContent = `SHARDS ✦${S.stats.kills} · GATES ∩${S.stats.gates}`;
+  hideHowto();
+  const s = scores.summary();
+  const row = (r) => `${r.score} ✦${r.shards ?? 0} ∩${r.gates ?? 0}`;
+  fillStats(el('pauseTop'), s.top.length
+    ? s.top.slice(0, 5).map((r, i) => [`#${i + 1}  ${r.week}`, row(r)])
+    : [['NO RUNS YET', '—']]);
+  fillStats(el('pauseRecent'), s.history.length
+    ? s.history.slice(0, 5).map((r) => [new Date(r.at).toLocaleDateString(), row(r)])
+    : [['NO RUNS YET', '—']]);
+  updateSoundLabel();
+  el('pauseScreen').classList.add('visible');
   hud.style.display = 'none';
 }
 
-function showGameOver() {
-  const r = scores.recordRun(S.score);
-  el('finalScore').textContent = S.score;
+function resumeGame() {
+  if (S.mode !== 'paused') return;
+  S.mode = 'playing';
+  el('pauseScreen').classList.remove('visible');
+  hud.style.display = 'block';
+  if (!audio.muted) audio.startMusic();
+}
+
+let overShownAt = 0;
+function showGameOver(title = 'YOU DIED') {
+  const r = scores.recordRun(S.score, { shards: S.stats.kills, gates: S.stats.gates });
+  el('overTitle').textContent = title;
+  el('finalScore').textContent = `${S.score}m`;
   el('bestBadge').textContent = r.isAllTimeBest ? '★ NEW ALL-TIME BEST ★'
     : r.isWeekBest ? '★ NEW WEEK BEST ★'
     : r.isDayBest ? 'NEW DAILY BEST' : '';
+  const acc = S.stats.shots
+    ? Math.round(100 * (S.stats.kills + S.stats.deflects) / S.stats.shots) : 0;
   fillStats(el('overStats'), [
-    ['DISTANCE', `${Math.floor(S.distance)}m`],
-    ['SMASH PTS', S.smashPoints],
+    ['SHARDS', `✦${S.stats.kills}`],
+    ['GATES', `∩${S.stats.gates}`],
+    ['DEFLECTS', S.stats.deflects],
+    ['SOULS', S.stats.souls],
+    ['ACCURACY', `${acc}%`],
     ['WEEK BEST', r.weekBest],
     ['ALL-TIME BEST', r.allTimeBest],
-    ['RUNS THIS WEEK', r.weekRuns],
     ['DAY STREAK', `${r.streak}\u{1F525}`],
   ]);
+  const sum = scores.summary();
+  fillScoreRows(el('overRecent'), sum.history.slice(0, 3).map((h) => {
+    const better = sum.top.filter((t) => t.score > h.score).length;
+    const onBoard = sum.top.some((t) => t.at === h.at);
+    return [onBoard ? `#${better + 1}` : '—', String(h.score), fmtDate(h.at)];
+  }));
+  el('pauseScreen').classList.remove('visible');
   el('overScreen').classList.add('visible');
+  el('btnPause').style.display = 'none';
+  hideHowto();
   hud.style.display = 'none';
   audio.stopMusic();
   audio.gameOver();
+  overShownAt = performance.now();
 }
 
 // ---------------------------------------------------------------------------
 // Run lifecycle
 // ---------------------------------------------------------------------------
 function clearWorldObjects() {
-  for (const p of panes) if (!p.broken) disposePane(p);
-  panes.length = 0;
-  for (const c of crystals) if (!c.collected) { scene.remove(c.mesh); queueRemove(c.body); }
-  crystals.length = 0;
-  for (const b of balls) disposeBall(b);
-  balls.length = 0;
+  for (const d of drones) removeDrone(d);
+  drones.length = 0;
+  for (let i = bolts.length - 1; i >= 0; i--) removeBolt(i);
+  for (const s of souls) scene.remove(s.group);
+  souls.length = 0;
+  for (const s of shots) disposeShot(s);
+  shots.length = 0;
   for (const sh of shards) { scene.remove(sh.mesh); sh.mesh.material.dispose(); queueRemove(sh.body); }
   shards.length = 0;
+  for (const st of streaks) { scene.remove(st.mesh); st.mesh.material.dispose(); }
+  streaks.length = 0;
+  for (const z of zones) {
+    for (const m of z.meshes) {
+      scene.remove(m);
+      m.traverse?.((c) => c.geometry?.dispose());
+    }
+  }
+  zones.length = 0;
+  gates.length = 0; // gate meshes belong to their zones (already removed)
+  pendingEvents.length = 0;
   flushRemovals();
 }
 
 function startRun() {
   clearWorldObjects();
   Object.assign(S, {
-    mode: 'playing', camZ: 0, distance: 0, smashPoints: 0, score: 0,
-    balls: TUNING.balls.start, multiTier: 1, crystalStreak: 0, combo: 1,
-    lastBreakTime: -99, roomIndex: 0, nextRoomZ: -6,
-    speed: TUNING.speed.base, shakeT: 0, time: 0,
+    mode: 'playing', shields: TUNING.player.shields, ammo: TUNING.player.ammoStart,
+    score: 0, distance: 0, camZ: 0, camX: 0, steerX: 0,
+    trackHalf: ZONES.open.halfWidth, zoneIdx: 0, speed: TUNING.speed.base,
+    timeScale: 1, focus: TUNING.time.focusMax, focusOk: true, holdActive: false,
+    gameTime: 0, fovKick: 0, shakeT: 0, invulnT: 0, deadTimer: 0,
+    stats: { shots: 0, kills: 0, deflects: 0, souls: 0, gates: 0 },
   });
-  camera.position.set(0, TUNING.corridor.eyeHeight, 0);
-  levelGen = new LevelGen(weeklySeed(weeklyTag()));
-  streamRooms();
+  trackGen = new TrackGen(weeklySeed(weeklyTag()));
+  nextZoneZ = -8;
+  streamZones();
   el('startScreen').classList.remove('visible');
   el('overScreen').classList.remove('visible');
+  el('pauseScreen').classList.remove('visible');
+  el('btnPause').style.display = 'block';
+  el('btnSound').style.display = 'none';
   hud.style.display = 'block';
+  showHowto();
   updateHUD();
-  audio.startMusic();
+  if (!audio.muted) audio.startMusic();
 }
 
 // ---------------------------------------------------------------------------
-// Input
+// Input. One finger HELD = slow time; DRAG it = steer. A second finger's tap
+// (or a quick single tap) = fire. Mouse gets the same rules.
 // ---------------------------------------------------------------------------
-let overShownAt = 0;
+const pointers = new Map(); // pointerId -> {x0,y0,t0,lastX,hold}
+let primaryId = null;
+
+function clearPointers() {
+  pointers.clear();
+  primaryId = null;
+}
+
 window.addEventListener('pointerdown', (e) => {
-  if (e.target.closest('.cornerbtns')) return;
+  if (e.target.closest('.cornerbtns') || e.target.closest('button')) return;
   audio.unlock();
-  if (S.mode === 'menu') startRun();
-  else if (S.mode === 'playing') throwBalls(e.clientX, e.clientY);
-  else if (S.mode === 'dead' && S.deadTimer <= 0 && performance.now() - overShownAt > 600) {
-    startRun();
+
+  if (S.mode === 'menu') { startRun(); return; }
+  if (S.mode === 'dead') {
+    if (S.deadTimer <= 0 && performance.now() - overShownAt > 600) startRun();
+    return;
+  }
+  if (S.mode !== 'playing') return;
+
+  if (primaryId === null) {
+    primaryId = e.pointerId;
+    pointers.set(e.pointerId, {
+      x0: e.clientX, y0: e.clientY, t0: performance.now(),
+      lastX: e.clientX, hold: false,
+    });
+  } else {
+    // second finger while one is held: instant aimed shot
+    fireShot(e.clientX, e.clientY);
   }
 });
 
-el('btnSound').addEventListener('click', (e) => {
+window.addEventListener('pointermove', (e) => {
+  const p = pointers.get(e.pointerId);
+  if (!p || S.mode !== 'playing') return;
+  const moved = Math.hypot(e.clientX - p.x0, e.clientY - p.y0);
+  if (!p.hold && moved > TUNING.tap.maxMovePx) p.hold = true;
+  if (p.hold) {
+    const dx = e.clientX - p.lastX;
+    S.steerX += (dx / window.innerWidth) * TUNING.steer.sense;
+  }
+  p.lastX = e.clientX;
+});
+
+function onPointerEnd(e, canFire) {
+  const p = pointers.get(e.pointerId);
+  pointers.delete(e.pointerId);
+  if (e.pointerId === primaryId) primaryId = null;
+  if (!p || S.mode !== 'playing') return;
+  const quick = performance.now() - p.t0 < TUNING.tap.maxMs && !p.hold;
+  if (quick && canFire) fireShot(e.clientX, e.clientY);
+}
+window.addEventListener('pointerup', (e) => onPointerEnd(e, true));
+window.addEventListener('pointercancel', (e) => onPointerEnd(e, false));
+
+// a press becomes a "hold" purely by lasting long enough
+function primaryHoldActive() {
+  if (primaryId === null) return false;
+  const p = pointers.get(primaryId);
+  if (!p) return false;
+  return p.hold || performance.now() - p.t0 >= TUNING.tap.maxMs;
+}
+
+// Sound: ON by default, preference persisted. The toggle lives in the pause
+// menu (per playtest feedback — fewer floating buttons over the action).
+const SOUND_KEY = 'timeshard.sound.v1';
+try { audio.muted = localStorage.getItem(SOUND_KEY) === 'off'; } catch { /* private mode */ }
+audio.musicOn = !audio.muted;
+
+function updateSoundLabel() {
+  el('btnSoundToggle').textContent = audio.muted ? 'SOUND: OFF' : 'SOUND: ON';
+  el('btnSoundToggle').classList.toggle('off', audio.muted);
+  el('btnSound').classList.toggle('off', audio.muted);
+}
+
+el('btnPause').addEventListener('click', () => { audio.unlock(); pauseGame(); });
+el('btnResume').addEventListener('click', () => { audio.unlock(); resumeGame(); });
+el('btnRestart').addEventListener('click', () => { audio.unlock(); startRun(); });
+el('btnMenu').addEventListener('click', () => showStart());
+
+// END RUN: bank the run right here — record it and show the final screen.
+el('btnEndRun').addEventListener('click', () => {
+  if (S.mode !== 'paused') return;
+  S.mode = 'dead';
+  S.deadTimer = 0;
+  showGameOver('RUN ENDED');
+});
+
+function toggleSound() {
   audio.unlock();
   audio.setMuted(!audio.muted);
   audio.musicOn = !audio.muted;
-  if (audio.muted) audio.stopMusic();
-  else if (S.mode === 'playing') audio.startMusic();
-  e.target.classList.toggle('off', audio.muted);
-});
+  try { localStorage.setItem(SOUND_KEY, audio.muted ? 'off' : 'on'); } catch { /* private mode */ }
+  updateSoundLabel();
+}
+el('btnSoundToggle').addEventListener('click', toggleSound);
+el('btnSound').addEventListener('click', toggleSound);
+
+// iOS only counts touchend/click as an audio-unlock gesture — unlocking on
+// pointerdown alone left the context suspended until some button was pressed
+// (which is why sound seemed to arrive only after opening the pause menu).
+window.addEventListener('pointerup', () => audio.unlock());
+window.addEventListener('click', () => audio.unlock());
 
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) { lastT = null; audio.stopMusic(); }
-  else if (S.mode === 'playing' && !audio.muted) audio.startMusic();
+  if (document.hidden) {
+    lastT = null;
+    if (S.mode === 'playing') pauseGame(); // stepping away shouldn't cost a run
+    else { clearPointers(); audio.stopMusic(); }
+  }
 });
+
+// ---------------------------------------------------------------------------
+// Full-speed ↔ slow-mo presentation: fog, exposure, tint, audio filter
+// ---------------------------------------------------------------------------
+const flowTint = el('flowTint');
+const fogNow = new THREE.Color();
+
+function applyFlowLook(ts) {
+  const slow = THREE.MathUtils.clamp((1 - ts) / (1 - TUNING.time.slowScale), 0, 1);
+  fogNow.lerpColors(fogFast, fogSlow, slow);
+  scene.fog.color.copy(fogNow);
+  for (const m of gridMats) m.uniforms.uFog.value.copy(fogNow);
+  renderer.toneMappingExposure = 1.1 + slow * 0.25;
+  hemi.intensity = 0.9 - slow * 0.25;
+  flowTint.style.opacity = (slow * 0.35).toFixed(3);
+  audio.setFlow(ts);
+}
 
 // ---------------------------------------------------------------------------
 // Main loop
 // ---------------------------------------------------------------------------
-const FIXED = 1 / 60;
 let lastT = null;
 
 function tick(tNow) {
   requestAnimationFrame(tick);
   if (lastT === null) { lastT = tNow; return; }
-  let dt = Math.min(0.05, (tNow - lastT) / 1000);
+  const dt = Math.min(0.05, (tNow - lastT) / 1000);
   lastT = tNow;
   S.time += dt;
 
-  if (S.mode === 'playing') {
-    S.camZ -= S.speed * dt;
-    S.distance += S.speed * dt;
-    streamRooms();
-    checkCrash(dt);
-  } else if (S.mode === 'dead' && S.deadTimer > 0) {
+  if (S.mode === 'paused') { renderer.render(scene, camera); return; } // frozen frame
+
+  // --- the time dial (focus-limited) ---
+  const T = TUNING.time;
+  S.holdActive = S.mode === 'playing' && primaryHoldActive();
+  const wantSlow = S.holdActive && S.focusOk;
+  const target = wantSlow ? T.slowScale : 1;
+  const rate = target < S.timeScale ? T.rampDown : T.rampUp;
+  S.timeScale += (target - S.timeScale) * Math.min(1, rate * dt);
+  const slowed = S.timeScale < 0.5;
+  if (slowed) {
+    S.focus = Math.max(0, S.focus - T.focusDrain * dt);
+    if (S.focus <= 0) S.focusOk = false;
+  } else {
+    S.focus = Math.min(T.focusMax, S.focus + T.focusRegen * dt);
+    if (S.focus >= T.reengageAt) S.focusOk = true;
+  }
+  const dtGame = dt * S.timeScale;
+  S.gameTime += dtGame;
+  if (S.invulnT > 0) S.invulnT -= dt;
+
+  // --- forward motion + steering (steering reads REAL time: weaving through
+  // a slowed world is the whole power fantasy) ---
+  if (S.mode === 'playing' || S.mode === 'dead') {
+    const glide = S.mode === 'dead' ? Math.max(0, S.deadTimer) : 1;
+    S.camZ -= S.speed * dtGame * glide;
+    if (S.mode === 'playing') S.distance += S.speed * dtGame;
+    const clampX = Math.max(0.4, S.trackHalf - TUNING.steer.clampPad);
+    S.steerX = THREE.MathUtils.clamp(S.steerX, -clampX, clampX);
+    S.camX += (S.steerX - S.camX) * Math.min(1, TUNING.steer.lerp * dt);
+    streamZones();
+    triggerPendingEvents();
+    passGates();
+  } else if (S.mode === 'menu') {
+    // attract mode: drift down the track behind the title, drones and all
+    S.camZ -= 3 * dt;
+    streamZones();
+    triggerPendingEvents();
+    passGates(); // marks them silently (no fanfare outside a run)
+  }
+
+  // --- world update, all on the scaled clock ---
+  updateDrones(dtGame);
+  updateBolts(dtGame);
+  updateSouls(dtGame);
+  world.step(Math.max(1e-6, dtGame));
+  flushRemovals();
+  updateShots(dt, dtGame);
+  if (S.mode === 'playing') sweepShotsVsBolts();
+  updateShards(dtGame);
+  updateSparks(dt); // feedback runs on real time — always snappy
+  flushRemovals();
+
+  if (S.mode === 'dead' && S.deadTimer > 0) {
     S.deadTimer -= dt;
-    S.camZ -= S.speed * dt * Math.max(0, S.deadTimer); // glide to a stop
-    if (S.deadTimer <= 0) { overShownAt = performance.now(); showGameOver(); }
+    if (S.deadTimer <= 0) showGameOver();
   }
 
-  // animate kinematic panes
-  for (const pane of panes) {
-    if (pane.broken || !pane.motion) continue;
-    const m = pane.motion;
-    if (m.kind === 'slide') {
-      const x = pane.x0 + Math.sin(S.time * m.speed + m.phase) * m.range;
-      pane.body.position.x = x;
-      pane.mesh.position.x = x;
-    } else if (m.kind === 'spin') {
-      // blade hanging from a top pivot, spinning in the screen plane
-      const th = S.time * m.speed * 1.6 + m.phase;
-      const radius = pane.h / 2 + 0.7;
-      const pivotY = pane.y0 + radius;
-      const cx = pane.x0 + Math.sin(th) * radius;
-      const cy = pivotY - Math.cos(th) * radius;
-      pane.body.position.x = cx;
-      pane.body.position.y = cy;
-      pane.body.quaternion.setFromEuler(0, 0, th);
-      pane.mesh.position.set(cx, cy, pane.z);
-      pane.mesh.quaternion.copy(pane.body.quaternion);
-    }
+  // gate portals idle-spin; the label sprite stays upright (it's a sibling)
+  for (const g of gates) if (!g.passed) g.ring.rotation.z += dt * 0.5;
+
+  // gate-pass speed surge: hard fov punch that eases home slowly
+  if (S.fovKick > 0) {
+    S.fovKick = Math.max(0, S.fovKick - dt * 1.1);
+    camera.fov = 72 + S.fovKick * 18;
+    camera.updateProjectionMatrix();
   }
+  updateStreaks(dt);
 
-  // physics
-  for (const b of balls) { b.age += dt; b.body.gb.prevVel.copy(b.body.velocity); }
-  world.step(FIXED, dt, 3);
-  flushRemovals();
-
-  // sync dynamic meshes
-  for (const b of balls) {
-    b.mesh.position.copy(b.body.position);
-    b.mesh.quaternion.copy(b.body.quaternion);
-  }
-  for (let i = shards.length - 1; i >= 0; i--) {
-    const sh = shards[i];
-    sh.ttl -= dt;
-    if (sh.ttl <= 0 || sh.body.position.z > S.camZ + 8) {
-      scene.remove(sh.mesh);
-      sh.mesh.material.dispose();
-      queueRemove(sh.body);
-      shards.splice(i, 1);
-      continue;
-    }
-    sh.mesh.position.copy(sh.body.position);
-    sh.mesh.quaternion.copy(sh.body.quaternion);
-    if (sh.ttl < 0.6) sh.mesh.material.opacity = 0.6 * (sh.ttl / 0.6);
-  }
-
-  // crystals idle animation
-  for (const c of crystals) {
-    if (c.collected) continue;
-    c.mesh.rotation.y += dt * 1.6;
-    c.mesh.position.y = c.y0 + Math.sin(S.time * 2.2 + c.z) * 0.12;
-    c.body.position.y = c.mesh.position.y;
-  }
-
-  updateSparks(dt);
-  if (S.mode === 'playing' || S.mode === 'dead') cleanupBehind();
-  flushRemovals();
-
-  // camera: gentle sway + shake
-  const sway = Math.sin(S.distance * 0.06) * 0.1;
+  // --- camera: strafe bank + shake ---
   let sx = 0, sy = 0;
   if (S.shakeT > 0) {
     S.shakeT -= dt;
-    const m = S.shakeT * 0.5;
+    const m = S.shakeT * 0.4;
     sx = (Math.random() - 0.5) * m;
     sy = (Math.random() - 0.5) * m;
   }
-  camera.position.set(sway + sx, TUNING.corridor.eyeHeight + sy, S.camZ);
-  camera.rotation.z = sway * 0.12;
+  const strafeVel = (S.steerX - S.camX) * TUNING.steer.lerp;
+  camera.position.set(S.camX + sx, TUNING.track.eyeHeight + Math.sin(S.time * 0.8) * 0.02 + sy, S.camZ);
+  camera.rotation.z = THREE.MathUtils.clamp(-strafeVel * TUNING.steer.bank, -0.22, 0.22);
 
-  // environment follows the camera (infinite corridor)
-  floorMesh.position.z = S.camZ - 110;
-  wallL.position.z = wallR.position.z = S.camZ - 110;
-  rimL.position.z = rimR.position.z = S.camZ - 110;
-  floorMat.uniforms.uCam.value.copy(camera.position);
-  wallMat.uniforms.uCam.value.copy(camera.position);
+  // environment follows the camera (infinite floor)
+  floorMesh.position.z = S.camZ - 120;
+  floorMesh.position.x = S.camX * 0.4;
+  for (const m of gridMats) m.uniforms.uCam.value.copy(camera.position);
 
-  // score
+  applyFlowLook(S.timeScale);
+
   if (S.mode === 'playing') {
-    S.score = Math.floor(S.distance * TUNING.score.perMeter) + S.smashPoints;
-    el('hudScore').textContent = S.score;
+    S.score = Math.floor(S.distance * TUNING.score.perMeter);
+    el('hudScore').textContent = `${S.score}m`;
+    updateFocusBar();
   }
 
   renderer.render(scene, camera);

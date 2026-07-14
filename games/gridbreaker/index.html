@@ -5,30 +5,30 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-<meta name="theme-color" content="#05010f" />
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27%3E%3Ctext y=%27.9em%27 font-size=%2790%27%3E%F0%9F%94%A8%3C/text%3E%3C/svg%3E" />
-<title>GRIDBREAKER</title>
+<meta name="theme-color" content="#04101c" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27%3E%3Ctext y=%27.9em%27 font-size=%2790%27%3E%F0%9F%92%A0%3C/text%3E%3C/svg%3E" />
+<title>GRID BREAKER</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body {
-    height: 100%; overflow: hidden; background: #05010f;
+    height: 100%; overflow: hidden; background: #04101c;
     font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     touch-action: none; user-select: none; -webkit-user-select: none;
-    color: #cfefff;
+    color: #dff6ff;
   }
   #app { position: fixed; inset: 0; }
   canvas { display: block; touch-action: none; }
 
-  /* ------- shared neon type ------- */
+  /* ------- shared neon type (ice accent) ------- */
   .chrome {
     font-weight: 900; font-style: italic; letter-spacing: 0.06em;
-    background: linear-gradient(180deg, #ffffff 0%, #bfeaff 28%, #3ec8ff 47%, #072a4a 52%, #9ad8ff 58%, #ffffff 100%);
+    background: linear-gradient(180deg, #ffffff 0%, #d8f4ff 30%, #6fd8ff 47%, #0b3350 52%, #b6ecff 58%, #ffffff 100%);
     -webkit-background-clip: text; background-clip: text; color: transparent;
-    filter: drop-shadow(0 0 12px rgba(0, 234, 255, 0.55));
+    filter: drop-shadow(0 0 12px rgba(127, 220, 255, 0.55));
   }
+  .neon-ice { color: #7fdcff; text-shadow: 0 0 10px rgba(127,220,255,.85), 0 0 30px rgba(127,220,255,.4); }
   .neon-pink { color: #ff2fd6; text-shadow: 0 0 10px rgba(255,47,214,.8), 0 0 30px rgba(255,47,214,.4); }
-  .neon-cyan { color: #00eaff; text-shadow: 0 0 10px rgba(0,234,255,.8), 0 0 30px rgba(0,234,255,.4); }
-  .dim { color: #7a8fb5; }
+  .dim { color: #7f97b5; }
 
   /* ------- HUD ------- */
   #hud {
@@ -37,45 +37,136 @@
     display: none;
   }
   #hud .row { display: flex; justify-content: space-between; align-items: flex-start; }
-  #hudScore { font-size: 44px; line-height: 1; text-align: center; font-variant-numeric: tabular-nums; }
-  #hudBalls { font-size: 22px; font-weight: 800; }
-  #hudBalls .orb { display:inline-block; width: 14px; height: 14px; border-radius: 50%;
+  #shields { font-size: 22px; letter-spacing: .12em; color: #7fdcff;
+    text-shadow: 0 0 10px rgba(127,220,255,.8); }
+  #hudAmmo { font-size: 22px; font-weight: 800; text-align: right; }
+  #hudAmmo .orb { display:inline-block; width: 14px; height: 14px; border-radius: 50%;
     background: radial-gradient(circle at 35% 30%, #fff, #9ad8ff 40%, #274a6a 90%);
     box-shadow: 0 0 8px rgba(160,220,255,.9); vertical-align: -1px; margin-right: 6px; }
-  #hudMulti { text-align: right; font-size: 20px; font-weight: 800; }
-  #pips { margin-top: 5px; display: flex; gap: 3px; justify-content: flex-end; }
-  #pips span { width: 7px; height: 7px; border-radius: 50%; background: #1c2a4a; box-shadow: inset 0 0 2px #000; }
-  #pips span.on { background: #25ffc8; box-shadow: 0 0 6px rgba(37,255,200,.9); }
-  #hudCombo {
-    text-align: center; font-size: 20px; font-weight: 900; height: 26px; margin-top: 2px;
-    opacity: 0; transition: opacity .25s; letter-spacing: .1em;
+  #hudShards { font-size: 12px; font-weight: 800; text-align: right; letter-spacing: .18em;
+    color: #7f97b5; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  #hudShards .n { color: #dff6ff; }
+  #hudGates { font-size: 12px; font-weight: 800; letter-spacing: .18em;
+    color: #7f97b5; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  #hudGates .n { color: #dff6ff; }
+  #hudScore { font-size: 44px; line-height: 1; text-align: center; font-variant-numeric: tabular-nums; }
+  #focusTrack {
+    width: 140px; height: 5px; margin: 8px auto 0; border-radius: 999px;
+    background: rgba(127,220,255,.14); overflow: hidden;
   }
-  #hudCombo.show { opacity: 1; }
+  #focusTrack.full {
+    animation: focusPulse 1s ease-in-out infinite;
+  }
+  @keyframes focusPulse {
+    0%, 100% { box-shadow: 0 0 6px 1px rgba(127,220,255,.7); transform: scaleY(1); }
+    50% { box-shadow: 0 0 22px 5px rgba(127,220,255,1), 0 0 44px 10px rgba(127,220,255,.45);
+      transform: scaleY(1.7); }
+  }
+  #focusBar { height: 100%; width: 100%; background: #7fdcff; border-radius: 999px;
+    transition: width .12s linear, background .3s; }
+  #focusTrack.full #focusBar { background: #eaffff; }
+  #focusLabel { text-align: center; font-size: 9px; letter-spacing: .34em; text-indent: .34em;
+    color: #4d6f8a; margin-top: 5px; transition: color .3s; }
+  #focusLabel.full {
+    color: #eaffff; animation: focusLabelPulse 1s ease-in-out infinite;
+  }
+  @keyframes focusLabelPulse {
+    0%, 100% { text-shadow: 0 0 6px rgba(127,220,255,.7); }
+    50% { text-shadow: 0 0 14px rgba(127,220,255,1), 0 0 26px rgba(127,220,255,.7); }
+  }
   #hudMsg {
-    position: fixed; left: 0; right: 0; top: 34%; text-align: center; pointer-events: none;
-    font-size: 26px; font-weight: 900; letter-spacing: .14em; opacity: 0; transition: opacity .3s;
+    position: fixed; left: 0; right: 0; top: 32%; text-align: center; pointer-events: none;
+    font-size: 24px; font-weight: 900; letter-spacing: .12em; opacity: 0; transition: opacity .3s;
+    z-index: 6;
   }
   #hudMsg.show { opacity: 1; }
 
-  /* ------- flash ------- */
+  /* ------- time-state tints + flash ------- */
   #flash { position: fixed; inset: 0; pointer-events: none; opacity: 0; z-index: 8; }
+  #flowTint {
+    position: fixed; inset: 0; pointer-events: none; opacity: 0; z-index: 4;
+    background: radial-gradient(ellipse 105% 105% at 50% 50%, rgba(0,0,0,0) 55%, rgba(255,47,214,.5) 100%);
+  }
 
   /* ------- screens ------- */
   .screen {
     position: fixed; inset: 0; z-index: 10; display: none;
     flex-direction: column; align-items: center; justify-content: center; text-align: center;
-    padding: 24px; background: radial-gradient(ellipse at 50% 40%, rgba(10,2,32,.35), rgba(5,1,15,.82));
+    padding: 24px; background: radial-gradient(ellipse at 50% 40%, rgba(10,36,56,.35), rgba(4,16,28,.85));
   }
   .screen.visible { display: flex; }
+  /* start screen stays out of the way — the moving world IS the pitch */
+  .screen.clear {
+    justify-content: flex-start; padding-top: 16vh;
+    background: linear-gradient(180deg, rgba(4,16,28,.55) 0%, rgba(4,16,28,.06) 45%,
+      rgba(4,16,28,.06) 70%, rgba(4,16,28,.6) 100%);
+  }
+  /* enter + scores sit BELOW the horizon, over the dark grid floor */
+  .lowerblock {
+    position: fixed; left: 0; right: 0;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 8vh);
+    display: flex; flex-direction: column; align-items: center; text-align: center;
+  }
+  .pill {
+    background: rgba(2,8,16,.55); padding: 13px 30px; border-radius: 999px;
+    backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+  }
+  /* in-run directions overlay: readable, but never in the way */
+  #howto {
+    position: fixed; left: 50%; transform: translateX(-50%);
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 66px);
+    display: none; flex-direction: column; gap: 7px; z-index: 6;
+    pointer-events: none; padding: 12px 26px; border-radius: 14px;
+    background: rgba(2,8,16,.55); backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+    font-size: 13px; letter-spacing: .18em; color: #9fb9d8; text-align: center;
+    transition: opacity .7s;
+  }
+  #howto b { color: #eef9ff; }
+  .bestline { margin-top: 22px; font-size: 13px; letter-spacing: .14em; color: #7f97b5;
+    min-height: 17px; font-variant-numeric: tabular-nums; }
+  .lowerblock .boardhead { margin-top: 18px; }
+  .chips { display: none; gap: 8px; margin-top: 10px; }
+  button.chip {
+    padding: 6px 13px 5px; border-radius: 999px; font-size: 10px; font-weight: 900;
+    letter-spacing: .2em; text-indent: .2em; cursor: pointer; color: #7f97b5;
+    background: rgba(127,220,255,.05); border: 1px solid rgba(127,220,255,.25);
+  }
+  button.chip.on {
+    color: #eaffff; border-color: rgba(127,220,255,.8);
+    background: rgba(127,220,255,.14);
+    text-shadow: 0 0 8px rgba(127,220,255,.8);
+  }
+  .board.board3 { grid-template-columns: auto auto auto; }
+  .board.board3 .d { color: #4d6f8a; font-size: 11px; align-self: center;
+    font-variant-numeric: tabular-nums; }
+  .startboard { font-size: 14px; min-height: 20px; margin-top: 10px; gap: 4px 20px; }
+  .startboard .dim { color: #7fdcff; text-shadow: 0 0 8px rgba(127,220,255,.5); }
+  .lowerblock .boardhead { margin-top: 22px; }
+
+  /* ------- pause menu ------- */
+  .menubtns { margin-top: 26px; display: flex; gap: 12px; }
+  button.menubtn {
+    padding: 12px 20px; border-radius: 10px; font-weight: 900; letter-spacing: .14em;
+    font-size: 14px; cursor: pointer; color: #dff6ff;
+    background: rgba(127,220,255,.08); border: 1px solid rgba(127,220,255,.45);
+  }
+  button.menubtn:active { background: rgba(127,220,255,.22); }
+  button.menubtn.off { opacity: .45; }
+  .pausetitle { font-size: 15px; letter-spacing: .45em; text-indent: .45em; margin-bottom: 10px; }
+  .boardhead { margin-top: 26px; font-size: 11px; letter-spacing: .3em; text-indent: .3em; color: #4d6f8a; }
+  .board { margin-top: 8px; display: grid; grid-template-columns: auto auto; gap: 4px 26px;
+    font-size: 14px; text-align: left; font-variant-numeric: tabular-nums; }
+  .board .v { text-align: right; font-weight: 800; color: #eef9ff; }
   .logo { font-size: clamp(44px, 13vw, 74px); line-height: .95; }
   .tagline { margin-top: 10px; font-size: 14px; letter-spacing: .5em; text-indent: .5em; }
   .weektag { margin-top: 26px; font-size: 13px; letter-spacing: .3em; text-indent: .3em; }
   .weekname { font-size: 22px; font-weight: 900; margin-top: 4px; letter-spacing: .1em; }
-  .howto { margin-top: 26px; font-size: 14px; line-height: 1.75; color: #9db7dd; max-width: 320px; }
-  .howto b { color: #e8f6ff; }
+  .howto { margin-top: 26px; font-size: 14px; line-height: 1.75; color: #9fb9d8; max-width: 330px; }
+  .howto b { color: #eef9ff; }
   .stats { margin-top: 26px; display: grid; grid-template-columns: auto auto; gap: 6px 22px;
     font-size: 15px; text-align: left; font-variant-numeric: tabular-nums; }
-  .stats .v { text-align: right; font-weight: 800; color: #e8f6ff; }
+  .stats .v { text-align: right; font-weight: 800; color: #eef9ff; }
   .tap { margin-top: 34px; font-size: 18px; font-weight: 900; letter-spacing: .28em; text-indent: .28em;
     animation: pulse 1.4s ease-in-out infinite; }
   @keyframes pulse { 0%,100% { opacity: .45 } 50% { opacity: 1 } }
@@ -87,8 +178,8 @@
   .cornerbtns { position: fixed; right: 12px; bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
     z-index: 20; display: flex; gap: 10px; }
   .cornerbtns button {
-    width: 42px; height: 42px; border-radius: 50%; border: 1px solid rgba(0,234,255,.4);
-    background: rgba(5,10,30,.6); color: #00eaff; font-size: 18px; cursor: pointer;
+    width: 42px; height: 42px; border-radius: 50%; border: 1px solid rgba(127,220,255,.4);
+    background: rgba(6,20,34,.6); color: #7fdcff; font-size: 18px; cursor: pointer;
   }
   .cornerbtns button.off { opacity: .35; }
 </style>
@@ -98,42 +189,77 @@
 
   <div id="hud">
     <div class="row">
-      <div id="hudBalls"><span class="orb"></span><span id="ballCount">20</span></div>
-      <div id="hudMulti" class="neon-cyan">×<span id="multiCount">1</span>
-        <div id="pips"></div>
+      <div id="shields">◆◆◆</div>
+      <div>
+        <div id="hudAmmo"><span class="orb"></span><span id="ammoCount">14</span></div>
+        <div id="hudShards">SHARDS <span class="n" id="shardCount">0</span></div>
+        <div id="hudGates" style="text-align:right">GATES <span class="n" id="gateCount">0</span></div>
       </div>
     </div>
     <div id="hudScore" class="chrome">0</div>
-    <div id="hudCombo" class="neon-pink"></div>
+    <div id="focusTrack"><div id="focusBar"></div></div>
+    <div id="focusLabel">FOCUS</div>
   </div>
   <div id="hudMsg"></div>
+  <div id="flowTint"></div>
   <div id="flash"></div>
 
-  <div id="startScreen" class="screen visible">
+  <div id="startScreen" class="screen clear visible">
     <div class="logo chrome">GRID<br>BREAKER</div>
-    <div class="tagline neon-pink">SMASH · THE · GRID</div>
-    <div class="weektag dim">THIS WEEK'S GRID</div>
-    <div class="weekname neon-cyan" id="weekLabel">2026-W29</div>
-    <div class="howto">
-      <b>TAP</b> to hurl a chrome ball.<br>
-      <b>Shatter</b> every wall before you hit it.<br>
-      <b>Green crystals</b> = +3 balls. Chain <b>10 in a row</b> for multiball.<br>
-      Crash or miss a crystal and the chain breaks.
+    <div class="tagline neon-pink">TIME · OBEYS · YOU</div>
+    <div class="lowerblock">
+      <div class="tap neon-ice pill">TAP TO ENTER</div>
+      <div class="boardhead" id="startHead"></div>
+      <div class="chips" id="startChips">
+        <button class="chip on" data-m="score">DISTANCE</button>
+        <button class="chip" data-m="shards">SHARDS</button>
+        <button class="chip" data-m="gates">GATES</button>
+      </div>
+      <div class="board board3 startboard" id="startRecent"></div>
     </div>
-    <div class="stats" id="startStats"></div>
-    <div class="tap neon-cyan">TAP TO PLAY</div>
+  </div>
+
+  <!-- in-run directions: appear at run start, self-dismiss after 5s -->
+  <div id="howto">
+    <div><b>HOLD</b> — SLOW TIME</div>
+    <div><b>DRAG</b> — MOVE</div>
+    <div><b>TAP</b> — FIRE</div>
+  </div>
+
+  <div id="pauseScreen" class="screen">
+    <div class="pausetitle neon-ice">PAUSED</div>
+    <div class="bigscore chrome" id="pauseScore">0</div>
+    <div class="bestline" id="pauseShards"></div>
+    <div class="menubtns">
+      <button class="menubtn" id="btnResume">RESUME</button>
+      <button class="menubtn" id="btnRestart">RESTART</button>
+      <button class="menubtn" id="btnEndRun">END RUN</button>
+    </div>
+    <div class="menubtns">
+      <button class="menubtn" id="btnSoundToggle">SOUND: ON</button>
+    </div>
+    <div class="boardhead">TOP RUNS · THIS DEVICE</div>
+    <div class="board" id="pauseTop"></div>
+    <div class="boardhead">RECENT RUNS</div>
+    <div class="board" id="pauseRecent"></div>
   </div>
 
   <div id="overScreen" class="screen">
-    <div class="overtitle neon-pink">RUN TERMINATED</div>
+    <div class="overtitle neon-pink" id="overTitle">YOU DIED</div>
     <div class="bigscore chrome" id="finalScore">0</div>
-    <div class="newbest neon-cyan" id="bestBadge"></div>
+    <div class="newbest neon-ice" id="bestBadge"></div>
     <div class="stats" id="overStats"></div>
-    <div class="tap neon-cyan">TAP TO RETRY</div>
+    <div class="boardhead">RECENT RUNS</div>
+    <div class="board board3 startboard" id="overRecent"></div>
+    <div class="menubtns">
+      <button class="menubtn" id="btnMenu">MENU</button>
+    </div>
+    <div class="tap neon-ice">TAP TO RETRY</div>
   </div>
 
   <div class="cornerbtns">
-    <button id="btnSound" title="Sound">♪</button>
+    <button id="btnSound" title="Sound" style="display:none">♪</button>
+    <button id="btnPause" title="Pause" style="display:none">⏸</button>
   </div>
 
   <script type="importmap">
