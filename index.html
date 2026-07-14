@@ -48,6 +48,13 @@
           text-align:center; font-size:13px; font-weight:900; letter-spacing:.26em; color:#16181d; }
   #ammo.shotgun { color:#ff2d1a; }
 
+  /* virtual move-stick (left thumb) */
+  #stickbase, #sticknub { position:fixed; display:none; pointer-events:none; z-index:4;
+                          border-radius:50%; transform:translate(-50%,-50%); }
+  #stickbase { width:110px; height:110px; border:2px solid rgba(22,24,29,.25);
+               background:rgba(22,24,29,.05); }
+  #sticknub { width:44px; height:44px; background:rgba(22,24,29,.35); }
+
   /* ---- kill words ---- */
   #flash { position:absolute; left:0; right:0; top:22%; text-align:center; pointer-events:none; }
   .killword { display:inline-block; font-size:min(19vw, 96px); font-weight:900; letter-spacing:.06em; color:#ff2d1a;
@@ -99,21 +106,23 @@
   <div id="flash"></div>
   <div id="banner"></div>
   <div id="ammo">PISTOL · ∞</div>
-  <div id="hint">HOLD — TIME STOPS · DRAG — DODGE · RELEASE — FIRE</div>
+  <div id="hint">HOLD — TIME STOPS · L DRAG — MOVE · R DRAG — AIM · TAP — FIRE</div>
 </div>
 
 <div id="tint"></div>
 <div id="redflash"></div>
 <div class="lbar" id="lbtop"></div>
 <div class="lbar" id="lbbot"></div>
+<div id="stickbase"></div>
+<div id="sticknub"></div>
 
 <div id="overlay">
   <h1>TIME<br><em>SHARD</em></h1>
   <div class="sub">TIME MOVES ONLY WHEN YOU LET GO</div>
   <div class="rules">
     <div><span class="ic">✦</span><span><b>HOLD</b> — time freezes. Incoming fire hangs in the air around you.</span></div>
-    <div><span class="ic">➤</span><span><b>DRAG</b> — slide out of the way. Your aim tracks the nearest enemy — you steer your body, not the camera. One hit and you're done.</span></div>
-    <div><span class="ic">◉</span><span><b>RELEASE</b> — fire. Or tap with a second finger to shoot while time is frozen.</span></div>
+    <div><span class="ic">➤</span><span><b>LEFT thumb</b> — move &amp; dodge. <b>RIGHT thumb</b> — aim (it auto-tracks when you let it). One hit and you're done.</span></div>
+    <div><span class="ic">◉</span><span><b>TAP</b> — fire. <b>TAP A DROPPED GUN</b> — sprint to it and take it.</span></div>
   </div>
   <div class="go">TAP TO BEGIN</div>
 </div>

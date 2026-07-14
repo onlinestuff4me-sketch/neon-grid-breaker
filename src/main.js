@@ -34,9 +34,9 @@ const WEAPONS = {
   shotgun: { cd: 0.55, pellets: 6, spread: 0.055, ammo: 4, kick: 1.8 },
 };
 
-const MOVE_SCALE = 6.5;           // metres moved per full screen-width of drag
 const AIM_RATE_HOLD = 9;          // auto-aim easing rate while time is frozen
 const AIM_RATE_FREE = 3.5;        // ... and while time flows
+const AIM_RATE_BOOST = 16;        // snap-to-next-target rate just after a kill
 const FOV_NORMAL = 80;
 const FOV_SLOW = 66;              // bullet-time zoom
 
@@ -219,8 +219,10 @@ function hasLineOfSight(a, b) {
 // ---------------------------------------------------------------------------
 const player = {
   pos: new THREE.Vector3(0, 0, 14),
+  vel: new THREE.Vector3(),   // smoothed body velocity (the dodge feel)
   yaw: 0,                     // yaw 0 looks down -Z, toward the arena center
   pitch: 0,
+  roll: 0,                    // subtle strafe lean
   iframes: 0,
   fireCd: 0,
   weapon: 'pistol',
@@ -500,6 +502,7 @@ function spawnPickup(pos) {
 }
 
 function removePickup(i) {
+  if (pickups[i] === sprintTo) sprintTo = null;
   scene.remove(pickups[i].g);
   pickups.splice(i, 1);
 }
@@ -646,6 +649,7 @@ function killEnemy(i, impulseDir) {
   scene.remove(e.g);
   enemies.splice(i, 1);
   game.kills++;
+  aimBoost = 0.7;   // camera whips to the next target — keep the taps coming
   killWord();
   sfx.shatter();
   vibrate(30);
@@ -883,71 +887,128 @@ function updateBullets(sdt) {
 }
 
 // ---------------------------------------------------------------------------
-// Input — Pointer Events. HOLD freezes time, DRAG slides you out of the way
-// (screen-relative: up = forward, left = strafe left), RELEASE fires.
-// The camera auto-tracks the nearest enemy, so your finger steers your body.
+// Input — multi-touch, zone-based:
+//   any finger held            -> bullet time (time creeps while you move)
+//   LEFT-half drag             -> floating virtual stick: smooth move / dodge
+//   RIGHT-half drag            -> look / manual aim (auto-aim yields to it)
+//   quick tap                  -> fire at the crosshair
+//   quick tap on a dropped gun -> auto-sprint to it and equip
+// Both thumbs work at once: dodge with the left while aiming with the right,
+// tapping to fire — all inside bullet time.
 // ---------------------------------------------------------------------------
+const STICK_RADIUS = 70;        // px of thumb travel = full deflection
+const MOVE_SPEED = 5.5;         // m/s at full stick (real time)
+const SPRINT_SPEED = 9;         // m/s while auto-sprinting to a pickup
+const MOVE_EASE = 10;           // velocity smoothing rate — the "weight"
+const LOOK_SENS = 2.6;          // radians per screen-width of look drag
+const TAP_MS = 230, TAP_PX = 14;
+const PICKUP_TAP_PX = 64;       // screen-px hit radius for tapping a drop
+
 const input = {
-  primaryId: null,
+  pointers: new Map(),          // id -> {sx,sy,x,y,ox,oy,role,downT,moved}
   holding: false,
-  lastX: 0,
-  lastY: 0,
-  dragSpeed: 0,   // smoothed px/frame — time moves (a little) when you move
+  stickX: 0, stickY: 0,         // -1..1 move-stick deflection
+  lookIdle: 99,                 // seconds since the last manual look drag
 };
+let sprintTo = null;            // pickup currently being sprinted to
+let aimBoost = 0;               // snappy retarget window after a kill
+
+function stickUI(show, ox, oy, x, y) {
+  const base = el.stickBase, nub = el.stickNub;
+  base.style.display = nub.style.display = show ? 'block' : 'none';
+  if (!show) return;
+  base.style.left = `${ox}px`; base.style.top = `${oy}px`;
+  nub.style.left = `${x}px`; nub.style.top = `${y}px`;
+}
+
+function pickupAtScreen(px, py) {
+  for (const p of pickups) {
+    _v1.set(p.g.position.x, 0.9, p.g.position.z).project(camera);
+    if (_v1.z > 1) continue;   // behind the camera
+    const sx = (_v1.x * 0.5 + 0.5) * window.innerWidth;
+    const sy = (-_v1.y * 0.5 + 0.5) * window.innerHeight;
+    if (Math.hypot(sx - px, sy - py) < PICKUP_TAP_PX) return p;
+  }
+  return null;
+}
 
 function onPointerDown(ev) {
   ev.preventDefault();
   sfx.init();
   if (game.state === 'menu' || game.state === 'dead' || game.state === 'gameover') {
     advanceFromOverlay();
-    return;   // this pointer never becomes primary, so its release won't fire
+    return;   // this pointer is never registered, so its release is inert
   }
-  if (input.primaryId === null) {
-    input.primaryId = ev.pointerId;
-    input.holding = true;
-    input.lastX = ev.clientX;
-    input.lastY = ev.clientY;
-  } else {
-    playerFire();   // second finger taps fire while the first holds time frozen
-  }
+  input.pointers.set(ev.pointerId, {
+    sx: ev.clientX, sy: ev.clientY, x: ev.clientX, y: ev.clientY,
+    ox: ev.clientX, oy: ev.clientY, role: null, downT: performance.now(), moved: 0,
+  });
+  input.holding = true;
 }
 
 function onPointerMove(ev) {
-  if (ev.pointerId !== input.primaryId) return;
+  const p = input.pointers.get(ev.pointerId);
+  if (!p) return;
   ev.preventDefault();
-  const dx = ev.clientX - input.lastX;
-  const dy = ev.clientY - input.lastY;
-  input.lastX = ev.clientX;
-  input.lastY = ev.clientY;
-  input.dragSpeed = Math.min(input.dragSpeed + Math.hypot(dx, dy) * 0.02, 1);
-  if (!player.alive || (game.state !== 'play' && game.state !== 'intro' && game.state !== 'clear')) return;
-
-  // direct manipulation: finger displacement -> world displacement (real time,
-  // while the world is frozen — this is the dodge)
-  const w = window.innerWidth;
-  const sinY = Math.sin(player.yaw), cosY = Math.cos(player.yaw);
-  const fwdX = -sinY, fwdZ = -cosY;
-  const rightX = cosY, rightZ = -sinY;
-  const mx = (dx / w) * MOVE_SCALE;
-  const mz = (-dy / w) * MOVE_SCALE;
-  player.pos.x += rightX * mx + fwdX * mz;
-  player.pos.z += rightZ * mx + fwdZ * mz;
-  resolvePlayerCollisions();
+  const dx = ev.clientX - p.x, dy = ev.clientY - p.y;
+  p.x = ev.clientX; p.y = ev.clientY;
+  p.moved += Math.abs(dx) + Math.abs(dy);
+  if (!p.role && p.moved > TAP_PX) {
+    p.role = p.sx < window.innerWidth * 0.45 ? 'move' : 'look';
+    p.ox = p.x; p.oy = p.y;         // the stick anchors where the drag begins
+    if (p.role === 'move') sprintTo = null;   // manual move cancels a sprint
+  }
+  if (p.role === 'move') {
+    let ddx = p.x - p.ox, ddy = p.y - p.oy;
+    const len = Math.hypot(ddx, ddy);
+    if (len > STICK_RADIUS) {       // floating stick: the origin trails the thumb
+      p.ox = p.x - (ddx / len) * STICK_RADIUS;
+      p.oy = p.y - (ddy / len) * STICK_RADIUS;
+      ddx = p.x - p.ox; ddy = p.y - p.oy;
+    }
+    input.stickX = ddx / STICK_RADIUS;
+    input.stickY = ddy / STICK_RADIUS;
+    stickUI(true, p.ox, p.oy, p.x, p.y);
+  } else if (p.role === 'look') {
+    const w = window.innerWidth;
+    player.yaw -= (dx / w) * LOOK_SENS;
+    player.pitch -= (dy / w) * LOOK_SENS;
+    player.pitch = Math.min(Math.max(player.pitch, -1.2), 1.2);
+    input.lookIdle = 0;
+  }
 }
 
-function onPointerUp(ev) {
-  if (ev.pointerId !== input.primaryId) return;
+function releasePointer(ev, isTapEligible) {
+  const p = input.pointers.get(ev.pointerId);
+  if (!p) return;
   ev.preventDefault();
-  input.primaryId = null;
-  input.holding = false;
-  playerFire();   // releasing is the trigger: aim in frozen time, let go, bang
+  if (isTapEligible && !p.role && performance.now() - p.downT < TAP_MS) {
+    const hit = pickupAtScreen(p.x, p.y);
+    if (hit) {
+      sprintTo = hit;               // one tap: run there and take the gun
+      vibrate(10);
+    } else {
+      playerFire();
+    }
+  }
+  input.pointers.delete(ev.pointerId);
+  let stillMoving = false;
+  for (const q of input.pointers.values()) if (q.role === 'move') stillMoving = true;
+  if (!stillMoving && p.role === 'move') {
+    input.stickX = input.stickY = 0;
+    stickUI(false);
+  }
+  input.holding = input.pointers.size > 0;
 }
+
+function onPointerUp(ev) { releasePointer(ev, true); }
+function onPointerCancel(ev) { releasePointer(ev, false); }
 
 renderer.domElement.style.touchAction = 'none';
 window.addEventListener('pointerdown', onPointerDown, { passive: false });
 window.addEventListener('pointermove', onPointerMove, { passive: false });
 window.addEventListener('pointerup', onPointerUp, { passive: false });
-window.addEventListener('pointercancel', onPointerUp, { passive: false });
+window.addEventListener('pointercancel', onPointerCancel, { passive: false });
 window.addEventListener('contextmenu', (e) => e.preventDefault());
 
 function vibrate(ms) {
@@ -1053,6 +1114,8 @@ const el = {
   crosshair: document.getElementById('crosshair'),
   hint: document.getElementById('hint'),
   ammo: document.getElementById('ammo'),
+  stickBase: document.getElementById('stickbase'),
+  stickNub: document.getElementById('sticknub'),
 };
 
 function updateAmmoHud() {
@@ -1113,6 +1176,7 @@ function maxAlive() { return Math.min(2 + Math.floor(game.wave / 2), 5); }
 function hitPlayer() {
   if (!player.alive || player.iframes > 0) return;
   player.alive = false;
+  sprintTo = null;
   game.state = 'dead';
   game.stateT = 0;
   el.redflash.style.opacity = 1;
@@ -1149,8 +1213,14 @@ function advanceFromOverlay() {
     clearField();
     player.alive = true;
     player.pos.set(0, 0, 14);
-    player.yaw = 0; player.pitch = 0;
+    player.vel.set(0, 0, 0);
+    player.yaw = 0; player.pitch = 0; player.roll = 0;
     player.iframes = 1;
+    input.pointers.clear();
+    input.stickX = input.stickY = 0;
+    input.holding = false;
+    stickUI(false);
+    sprintTo = null;
     setWeapon('pistol');
     startWave(game.wave);
   }
@@ -1169,10 +1239,10 @@ function frame(now) {
   // --- time scale: frozen while a finger is down — but time moves (a little)
   // when YOU move, so dodging costs the world a few frames
   const playing = game.state === 'play' || game.state === 'intro';
-  input.dragSpeed *= Math.exp(-dt * 6);
   let target = TIME_FULL;
   if (playing && input.holding) {
-    target = TIME_SLOW + (TIME_MOVE_MAX - TIME_SLOW) * Math.min(input.dragSpeed, 1);
+    const speedNorm = Math.min(player.vel.length() / MOVE_SPEED, 1);
+    target = TIME_SLOW + (TIME_MOVE_MAX - TIME_SLOW) * speedNorm;
   }
   if (game.state === 'dead') target = 0.12;
   if (game.state === 'menu') target = 0;
@@ -1182,9 +1252,44 @@ function frame(now) {
   // --- player (real time)
   player.fireCd -= dt;
   player.iframes -= dt;
+  aimBoost -= dt;
+  input.lookIdle += dt;
 
-  // auto-aim: ease the camera toward the nearest enemy (prefer visible ones)
-  if (player.alive && playing && enemies.length) {
+  // movement: stick deflection (or an active sprint) sets a target velocity,
+  // and the body eases toward it — smooth in, smooth out
+  let tvx = 0, tvz = 0;
+  if (player.alive && playing) {
+    if (sprintTo) {
+      const dx = sprintTo.g.position.x - player.pos.x;
+      const dz = sprintTo.g.position.z - player.pos.z;
+      const d = Math.hypot(dx, dz);
+      if (d < 0.4) sprintTo = null;
+      else { tvx = (dx / d) * SPRINT_SPEED; tvz = (dz / d) * SPRINT_SPEED; }
+    } else {
+      let sx = input.stickX, sy = input.stickY;
+      const sm = Math.min(Math.hypot(sx, sy), 1);
+      if (sm > 0.02) {
+        sx /= Math.max(sm, 1e-6); sy /= Math.max(sm, 1e-6);
+        const sinY = Math.sin(player.yaw), cosY = Math.cos(player.yaw);
+        const dirX = cosY * sx + -sinY * -sy;   // right*stickX + fwd*(-stickY)
+        const dirZ = -sinY * sx + -cosY * -sy;
+        tvx = dirX * sm * MOVE_SPEED;
+        tvz = dirZ * sm * MOVE_SPEED;
+      }
+    }
+  }
+  const mk = 1 - Math.exp(-MOVE_EASE * dt);
+  player.vel.x += (tvx - player.vel.x) * mk;
+  player.vel.z += (tvz - player.vel.z) * mk;
+  if (player.vel.lengthSq() > 1e-4) {
+    player.pos.x += player.vel.x * dt;
+    player.pos.z += player.vel.z * dt;
+    resolvePlayerCollisions();
+  }
+
+  // auto-aim: ease toward the nearest enemy (prefer visible ones) — but yield
+  // to the player's own look drags, and snap fast to the next target on a kill
+  if (player.alive && playing && enemies.length && input.lookIdle > 0.8) {
     let best = null, bestD = 1e9, bestVisible = null, bestVD = 1e9;
     for (const e of enemies) {
       const dx = e.pos.x - player.pos.x, dz = e.pos.z - player.pos.z;
@@ -1203,15 +1308,21 @@ function frame(now) {
     let dYaw = wantYaw - player.yaw;
     while (dYaw > Math.PI) dYaw -= Math.PI * 2;
     while (dYaw < -Math.PI) dYaw += Math.PI * 2;
-    const k = 1 - Math.exp(-(input.holding ? AIM_RATE_HOLD : AIM_RATE_FREE) * dt);
+    const rate = aimBoost > 0 ? AIM_RATE_BOOST : (input.holding ? AIM_RATE_HOLD : AIM_RATE_FREE);
+    const k = 1 - Math.exp(-rate * dt);
     player.yaw += dYaw * k;
     player.pitch += (wantPitch - player.pitch) * k;
   }
+
+  // subtle lean into strafes — sells the dodge
+  const velRight = player.vel.x * Math.cos(player.yaw) + player.vel.z * -Math.sin(player.yaw);
+  player.roll += (-velRight / MOVE_SPEED * 0.05 - player.roll) * Math.min(dt * 8, 1);
 
   camera.position.set(player.pos.x, EYE_HEIGHT, player.pos.z);
   camera.rotation.order = 'YXZ';
   camera.rotation.y = player.yaw;
   camera.rotation.x = player.pitch;
+  camera.rotation.z = player.roll;
 
   // bullet-time zoom: FOV tightens as time slows
   const wantFov = FOV_SLOW + (FOV_NORMAL - FOV_SLOW) * Math.min(timeScale, 1);
@@ -1278,7 +1389,9 @@ document.addEventListener('visibilitychange', () => { lastT = performance.now();
 
 // Debug hook for automated tests.
 window.__ts = {
-  game, player, enemies, bullets, pickups, ripples, camera, fire: playerFire, setWeapon, spawnEnemy, spawnPickup,
+  game, player, enemies, bullets, pickups, ripples, camera, input,
+  sprint: () => sprintTo,
+  fire: playerFire, setWeapon, spawnEnemy, spawnPickup,
   shot: (px, py, pz, dx, dy, dz, fromPlayer) =>
     spawnBullet(new THREE.Vector3(px, py, pz), new THREE.Vector3(dx, dy, dz).normalize(), fromPlayer),
 };

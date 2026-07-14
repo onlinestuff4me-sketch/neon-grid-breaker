@@ -5,16 +5,17 @@ where **time only moves when you let go of the screen**.
 
 White world. Red enemies. One hit and you shatter — them, or you.
 
-## The one-finger control scheme
+## The touch control scheme
 
-The whole game is played with a single finger at a time:
+Everything runs off holds, drags, and taps — one thumb works, two thumbs sing:
 
 | Gesture | Effect |
 |---|---|
-| **Hold** | Time freezes (~5% speed); incoming fire hangs glowing in the air |
-| **Drag** (while holding) | Slide your body out of the bullets' paths — up = forward, left = strafe left. Your aim auto-tracks the nearest enemy, so the finger steers your body, not the camera |
-| **Release** | Fire — and time snaps back to full speed |
-| **Second-finger tap** *(optional)* | While holding, tap with another finger to fire without unfreezing time |
+| **Hold** (any finger) | Bullet time: ~5% speed standing still, creeping up to ~30% while you move — dodging costs the world a few frames |
+| **Left-half drag** | Floating virtual stick: smooth, velocity-eased movement to weave between hanging bullets |
+| **Right-half drag** | Manual look/aim. Let go of the camera and it auto-tracks the nearest visible enemy (with a fast snap to the next target after each kill) |
+| **Tap** | Fire at the crosshair — tap repeatedly to work through a whole squad in one freeze |
+| **Tap a dropped gun** | Auto-sprint to it and equip it, one tap; your aim recovers onto the remaining enemies |
 
 ## Features
 
