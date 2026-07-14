@@ -210,26 +210,27 @@ export class TimeshardAudio {
     n.start(t); n.stop(t + 0.32);
   }
 
-  // A drone charging its shot: a shimmering rise, ~1s, matches the telegraph.
-  charge() {
+  // A drone charging its shot: a shimmering rise matching the telegraph time.
+  charge(duration = 1) {
     if (!this.ctx || this.muted) return;
     const t = this.ctx.currentTime;
+    const D = Math.max(0.4, duration);
     const o = this.ctx.createOscillator();
     o.type = 'sine';
     o.frequency.setValueAtTime(520, t);
-    o.frequency.exponentialRampToValueAtTime(1560, t + 0.95);
+    o.frequency.exponentialRampToValueAtTime(1560, t + D * 0.95);
     const trem = this.ctx.createOscillator(); // flutter that quickens
     trem.frequency.setValueAtTime(7, t);
-    trem.frequency.linearRampToValueAtTime(18, t + 0.95);
+    trem.frequency.linearRampToValueAtTime(18, t + D * 0.95);
     const tg = this.ctx.createGain(); tg.gain.value = 0.03;
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.075, t + 0.85);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 1.0);
+    g.gain.exponentialRampToValueAtTime(0.075, t + D * 0.85);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + D);
     trem.connect(tg); tg.connect(g.gain);
     o.connect(g); g.connect(this.master);
-    o.start(t); o.stop(t + 1.05);
-    trem.start(t); trem.stop(t + 1.05);
+    o.start(t); o.stop(t + D + 0.05);
+    trem.start(t); trem.stop(t + D + 0.05);
   }
 
   // The release: a laser zap that reads as INCOMING — swells as it drops.
