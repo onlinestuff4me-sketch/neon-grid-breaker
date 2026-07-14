@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#e8eaee">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%23e8eaee'/><rect x='4' y='4' width='8' height='8' fill='%23ff2d1a'/></svg>">
+<title>TIMESHARD</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-user-select:none; user-select:none; -webkit-tap-highlight-color:transparent; }
+  html, body { height:100%; overflow:hidden; background:#e8eaee; touch-action:none; overscroll-behavior:none; }
+  body { font-family:-apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif; }
+  #game { position:fixed; inset:0; }
+  canvas { display:block; }
+
+  /* ---- HUD ---- */
+  #hud { position:fixed; inset:0; pointer-events:none;
+         padding:calc(env(safe-area-inset-top, 0px) + 10px) 14px calc(env(safe-area-inset-bottom, 0px) + 12px); }
+  #crosshair { position:absolute; left:50%; top:50%; width:26px; height:26px; transform:translate(-50%,-50%); opacity:.85; }
+  #crosshair::before, #crosshair::after { content:""; position:absolute; background:#111; }
+  #crosshair::before { left:50%; top:0; width:2px; height:100%; transform:translateX(-50%); }
+  #crosshair::after  { top:50%; left:0; height:2px; width:100%; transform:translateY(-50%); }
+  #crosshair.hot::before, #crosshair.hot::after { background:#ff2d1a; }
+
+  #topbar { position:absolute; top:calc(env(safe-area-inset-top, 0px) + 10px); left:14px; right:14px;
+            display:flex; justify-content:space-between; align-items:flex-start;
+            font-weight:800; letter-spacing:.12em; color:#16181d; font-size:14px; }
+  #timewrap { width:86px; }
+  #timewrap .lbl { font-size:9px; letter-spacing:.28em; color:#6b7078; text-align:right; margin-bottom:4px; }
+  #timebar { height:5px; background:rgba(20,22,28,.14); border-radius:3px; overflow:hidden; }
+  #timefill { height:100%; width:100%; background:#16181d; border-radius:3px; transition:background .15s; }
+  #timefill.slow { background:#ff2d1a; }
+
+  #hint { position:absolute; left:0; right:0; bottom:calc(env(safe-area-inset-bottom, 0px) + 16px);
+          text-align:center; font-size:11px; font-weight:700; letter-spacing:.24em; color:#7a8089; }
+
+  /* ---- kill words ---- */
+  #flash { position:absolute; left:0; right:0; top:22%; text-align:center; pointer-events:none; }
+  .killword { display:inline-block; font-size:min(19vw, 96px); font-weight:900; letter-spacing:.06em; color:#ff2d1a;
+              -webkit-text-stroke:2px #16181d; animation:kw .6s ease-out forwards; }
+  @keyframes kw { 0%{opacity:0; transform:scale(1.6)} 12%{opacity:1; transform:scale(1)} 70%{opacity:1} 100%{opacity:0; transform:scale(.92)} }
+
+  /* ---- banners (wave intro / clear) ---- */
+  #banner { position:absolute; left:0; right:0; top:38%; text-align:center; pointer-events:none;
+            font-weight:900; color:#16181d; font-size:min(13vw,64px); letter-spacing:.1em;
+            opacity:0; transition:opacity .3s; }
+  #banner.show { opacity:1; }
+  #banner small { display:block; font-size:min(4vw,18px); letter-spacing:.4em; color:#ff2d1a; margin-top:8px; }
+
+  /* ---- slow-mo tint & damage flash ---- */
+  #tint { position:fixed; inset:0; pointer-events:none; opacity:0;
+          background:radial-gradient(ellipse at center, rgba(80,140,255,0) 42%, rgba(60,110,235,.22) 100%); }
+  #redflash { position:fixed; inset:0; pointer-events:none; opacity:0; background:radial-gradient(ellipse at center, rgba(255,45,26,.25) 0%, rgba(255,45,26,.75) 100%); }
+
+  /* ---- full screen overlays ---- */
+  #overlay { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
+             background:rgba(232,234,238,.94); z-index:10; text-align:center; padding:28px; }
+  #overlay.hidden { display:none; }
+  #overlay h1 { font-size:min(17vw,84px); font-weight:900; line-height:.95; letter-spacing:.04em; color:#16181d; }
+  #overlay h1 em { font-style:normal; color:#ff2d1a; }
+  #overlay .sub { margin-top:10px; font-size:12px; font-weight:700; letter-spacing:.3em; color:#7a8089; }
+  #overlay .rules { margin:26px 0 8px; display:flex; flex-direction:column; gap:13px; font-size:13px; font-weight:600;
+                    color:#2a2d33; text-align:left; max-width:340px; }
+  #overlay .rules div { display:flex; align-items:center; gap:12px; }
+  #overlay .rules .ic { flex:0 0 44px; height:44px; border:2px solid #16181d; border-radius:50%;
+                        display:flex; align-items:center; justify-content:center; font-size:20px; }
+  #overlay .go { margin-top:30px; font-size:15px; font-weight:900; letter-spacing:.34em; color:#ff2d1a;
+                 animation:pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+  #overlay .stats { margin-top:14px; font-size:14px; font-weight:700; letter-spacing:.18em; color:#2a2d33; }
+</style>
+</head>
+<body>
+<div id="game"></div>
+
+<div id="hud">
+  <div id="crosshair"></div>
+  <div id="topbar">
+    <div id="score">WAVE 1&nbsp;&nbsp;·&nbsp;&nbsp;0</div>
+    <div id="timewrap">
+      <div class="lbl">TIME</div>
+      <div id="timebar"><div id="timefill"></div></div>
+    </div>
+  </div>
+  <div id="flash"></div>
+  <div id="banner"></div>
+  <div id="hint">HOLD — TIME STOPS · TAP — SHOOT · FLICK — DODGE</div>
+</div>
+
+<div id="tint"></div>
+<div id="redflash"></div>
+
+<div id="overlay">
+  <h1>TIME<br><em>SHARD</em></h1>
+  <div class="sub">TIME MOVES ONLY WHEN YOU LET GO</div>
+  <div class="rules">
+    <div><span class="ic">✦</span><span><b>HOLD &amp; DRAG</b> — time freezes. Look around, line up your shot, watch the bullets hang in the air.</span></div>
+    <div><span class="ic">◉</span><span><b>TAP</b> — fire. While holding with one finger, tap with a second to fire in frozen time.</span></div>
+    <div><span class="ic">➤</span><span><b>FLICK</b> — dash to dodge bullets. One hit and you're done.</span></div>
+  </div>
+  <div class="go">TAP TO BEGIN</div>
+</div>
+
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
