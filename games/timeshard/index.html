@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="theme-color" content="#04101c" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27%3E%3Ctext y=%27.9em%27 font-size=%2790%27%3E%F0%9F%92%A0%3C/text%3E%3C/svg%3E" />
+<title>TIMESHARD</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    height: 100%; overflow: hidden; background: #04101c;
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    touch-action: none; user-select: none; -webkit-user-select: none;
+    color: #dff6ff;
+  }
+  #app { position: fixed; inset: 0; }
+  canvas { display: block; touch-action: none; }
+
+  /* ------- shared neon type (ice accent) ------- */
+  .chrome {
+    font-weight: 900; font-style: italic; letter-spacing: 0.06em;
+    background: linear-gradient(180deg, #ffffff 0%, #d8f4ff 30%, #6fd8ff 47%, #0b3350 52%, #b6ecff 58%, #ffffff 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    filter: drop-shadow(0 0 12px rgba(127, 220, 255, 0.55));
+  }
+  .neon-ice { color: #7fdcff; text-shadow: 0 0 10px rgba(127,220,255,.85), 0 0 30px rgba(127,220,255,.4); }
+  .neon-pink { color: #ff2fd6; text-shadow: 0 0 10px rgba(255,47,214,.8), 0 0 30px rgba(255,47,214,.4); }
+  .dim { color: #7f97b5; }
+
+  /* ------- HUD ------- */
+  #hud {
+    position: fixed; inset: 0; pointer-events: none; z-index: 5;
+    padding: calc(env(safe-area-inset-top, 0px) + 12px) 16px 0;
+    display: none;
+  }
+  #hud .row { display: flex; justify-content: space-between; align-items: flex-start; }
+  #shields { font-size: 22px; letter-spacing: .12em; color: #7fdcff;
+    text-shadow: 0 0 10px rgba(127,220,255,.8); }
+  #hudMoment { font-size: 15px; font-weight: 800; text-align: right; letter-spacing: .18em; }
+  #hudScore { font-size: 44px; line-height: 1; text-align: center; font-variant-numeric: tabular-nums; }
+  #flowTrack {
+    width: 140px; height: 5px; margin: 8px auto 0; border-radius: 999px;
+    background: rgba(127,220,255,.14); overflow: hidden;
+  }
+  #flowBar { height: 100%; width: 100%; background: #7fdcff; border-radius: 999px;
+    transition: width .12s linear; }
+  #flowLabel { text-align: center; font-size: 9px; letter-spacing: .34em; text-indent: .34em;
+    color: #4d6f8a; margin-top: 4px; }
+  #hudMsg {
+    position: fixed; left: 0; right: 0; top: 32%; text-align: center; pointer-events: none;
+    font-size: 24px; font-weight: 900; letter-spacing: .12em; opacity: 0; transition: opacity .3s;
+    z-index: 6;
+  }
+  #hudMsg.show { opacity: 1; }
+
+  /* ------- time-state tints + flash ------- */
+  #flash { position: fixed; inset: 0; pointer-events: none; opacity: 0; z-index: 8; }
+  #flowTint {
+    position: fixed; inset: 0; pointer-events: none; opacity: 0; z-index: 4;
+    background: radial-gradient(ellipse 105% 105% at 50% 50%, rgba(0,0,0,0) 55%, rgba(255,47,214,.5) 100%);
+  }
+  #freezeTint {
+    position: fixed; inset: 0; pointer-events: none; opacity: 0; z-index: 4;
+    background: radial-gradient(ellipse 105% 105% at 50% 50%, rgba(0,0,0,0) 60%, rgba(180,235,255,.45) 100%);
+  }
+
+  /* ------- aim reticle ------- */
+  #reticle {
+    position: fixed; left: 0; top: 0; width: 46px; height: 46px; display: none;
+    border: 2px solid rgba(223,246,255,.9); border-radius: 50%;
+    box-shadow: 0 0 14px rgba(127,220,255,.8), inset 0 0 8px rgba(127,220,255,.5);
+    pointer-events: none; z-index: 7;
+  }
+  #reticle::after {
+    content: ''; position: absolute; left: 50%; top: 50%; width: 4px; height: 4px;
+    transform: translate(-50%, -50%); border-radius: 50%; background: #fff;
+  }
+
+  /* ------- screens ------- */
+  .screen {
+    position: fixed; inset: 0; z-index: 10; display: none;
+    flex-direction: column; align-items: center; justify-content: center; text-align: center;
+    padding: 24px; background: radial-gradient(ellipse at 50% 40%, rgba(10,36,56,.35), rgba(4,16,28,.85));
+  }
+  .screen.visible { display: flex; }
+  .logo { font-size: clamp(44px, 13vw, 74px); line-height: .95; }
+  .tagline { margin-top: 10px; font-size: 14px; letter-spacing: .5em; text-indent: .5em; }
+  .weektag { margin-top: 26px; font-size: 13px; letter-spacing: .3em; text-indent: .3em; }
+  .weekname { font-size: 22px; font-weight: 900; margin-top: 4px; letter-spacing: .1em; }
+  .howto { margin-top: 26px; font-size: 14px; line-height: 1.75; color: #9fb9d8; max-width: 330px; }
+  .howto b { color: #eef9ff; }
+  .stats { margin-top: 26px; display: grid; grid-template-columns: auto auto; gap: 6px 22px;
+    font-size: 15px; text-align: left; font-variant-numeric: tabular-nums; }
+  .stats .v { text-align: right; font-weight: 800; color: #eef9ff; }
+  .tap { margin-top: 34px; font-size: 18px; font-weight: 900; letter-spacing: .28em; text-indent: .28em;
+    animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: .45 } 50% { opacity: 1 } }
+  .bigscore { font-size: clamp(56px, 20vw, 96px); line-height: 1; font-variant-numeric: tabular-nums; }
+  .newbest { margin-top: 8px; font-size: 15px; font-weight: 900; letter-spacing: .2em; min-height: 20px; }
+  .overtitle { font-size: 15px; letter-spacing: .45em; text-indent: .45em; margin-bottom: 14px; }
+
+  /* ------- corner buttons ------- */
+  .cornerbtns { position: fixed; right: 12px; bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+    z-index: 20; display: flex; gap: 10px; }
+  .cornerbtns button {
+    width: 42px; height: 42px; border-radius: 50%; border: 1px solid rgba(127,220,255,.4);
+    background: rgba(6,20,34,.6); color: #7fdcff; font-size: 18px; cursor: pointer;
+  }
+  .cornerbtns button.off { opacity: .35; }
+</style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <div id="hud">
+    <div class="row">
+      <div id="shields">◆◆◆</div>
+      <div id="hudMoment" class="neon-ice">MOMENT <span id="momentNum">1</span></div>
+    </div>
+    <div id="hudScore" class="chrome">0</div>
+    <div id="flowTrack"><div id="flowBar"></div></div>
+    <div id="flowLabel">TIME BONUS</div>
+  </div>
+  <div id="hudMsg"></div>
+  <div id="flowTint"></div>
+  <div id="freezeTint"></div>
+  <div id="flash"></div>
+  <div id="reticle"></div>
+
+  <div id="startScreen" class="screen visible">
+    <div class="logo chrome">TIME<br>SHARD</div>
+    <div class="tagline neon-pink">TIME · OBEYS · YOU</div>
+    <div class="weektag dim">THIS WEEK'S MOMENTS</div>
+    <div class="weekname neon-ice" id="weekLabel">2026-W29</div>
+    <div class="howto">
+      The world is frozen. <b>Time moves only while you touch.</b><br>
+      <b>Press &amp; drag</b> to aim — danger creeps closer.<br>
+      <b>Release</b> to fire a shard. Shatter every crystal drone.<br>
+      Shoot bolts out of the air. Clear each moment <b>fast</b> for bonus.
+    </div>
+    <div class="stats" id="startStats"></div>
+    <div class="tap neon-ice">TAP TO ENTER</div>
+  </div>
+
+  <div id="overScreen" class="screen">
+    <div class="overtitle neon-pink">TIME CAUGHT YOU</div>
+    <div class="bigscore chrome" id="finalScore">0</div>
+    <div class="newbest neon-ice" id="bestBadge"></div>
+    <div class="stats" id="overStats"></div>
+    <div class="tap neon-ice">TAP TO RETRY</div>
+  </div>
+
+  <div class="cornerbtns">
+    <button id="btnSound" title="Sound">♪</button>
+  </div>
+
+  <script type="importmap">
+  { "imports": { "three": "../../vendor/three.module.js", "cannon-es": "../../vendor/cannon-es.js" } }
+  </script>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
