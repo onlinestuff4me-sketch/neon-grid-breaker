@@ -653,7 +653,7 @@ function buildEnemyMesh(type) {
 const ENEMY_TYPES = {
   gunner: { speed: 2.0, scale: [1, 1, 1], drop: 0.25, aimTime: 0.55, cd: [0.9, 0.8], mul: 1, pellets: 1 },
   rusher: { speed: 3.4, scale: [0.85, 0.97, 0.85], drop: 0 },
-  heavy: { speed: 1.6, scale: [1.14, 1.05, 1.14], drop: 0.6, aimTime: 0.55, cd: [1.8, 1.0], mul: 1, pellets: 1, burst: true },
+  heavy: { speed: 1.6, scale: [1.14, 1.05, 1.14], drop: 0.6, aimTime: 0.55, cd: [1.8, 1.0], mul: 1, pellets: 1, burst: 3 },
   shotgunner: { speed: 1.8, scale: [1.06, 1, 1.06], drop: 0.8, aimTime: 0.65, cd: [1.6, 0.9], mul: 0.85, pellets: 5, spread: 0.09, engage: [8, 4] },
   armored: { speed: 1.4, scale: [1.1, 1.06, 1.1], drop: 0.35, aimTime: 0.6, cd: [1.2, 0.8], mul: 1, pellets: 1, armored: true },
   sniper: { speed: 1.2, scale: [0.92, 1.05, 0.92], drop: 'sniper', aimTime: 1.35, cd: [2.4, 1.0], mul: 2.3, pellets: 1, engage: [26, 4] },
@@ -700,7 +700,7 @@ function spawnEnemy(type = 'gunner') {
     walkPhase: Math.random() * Math.PI * 2,
     strafe: Math.random() < 0.5 ? 1 : -1,
     strafeT: 1 + Math.random() * 2,
-    fireCd: (type === 'sniper' ? 1.2 : 0.15) + Math.random() * 0.35,
+    fireCd: ((type === 'sniper' ? 1.2 : 0.15) + Math.random() * 0.35) * aimSpeedFactor(),
     engageDist: spec.engage
       ? spec.engage[0] + Math.random() * spec.engage[1]
       : 15 + Math.random() * 6,           // open fire from range, not point-blank
@@ -756,6 +756,12 @@ function egunFlashTarget(e) {
   return e.egun.isGroup ? e.egun.children[0] : e.egun;
 }
 
+// Enemies get on the trigger faster as waves progress: a touch quicker at
+// wave 1 (x0.95), down to x0.6 telegraphs and cooldowns by wave ~8.
+function aimSpeedFactor() {
+  return Math.max(0.6, 0.95 - (game.wave - 1) * 0.05);
+}
+
 function updateEnemy(e, sdt) {
   const toPlayer = _v1.set(player.pos.x - e.pos.x, 0, player.pos.z - e.pos.z);
   const dist = toPlayer.length();
@@ -766,7 +772,8 @@ function updateEnemy(e, sdt) {
 
   let moveSpeed = 0;
 
-  if (dist < 1.5 && e.state !== 'melee') { e.state = 'melee'; e.stateT = 0; }
+  // a burst, once started, always completes — no melee interrupt mid-volley
+  if (dist < 1.5 && e.state !== 'melee' && e.state !== 'burst') { e.state = 'melee'; e.stateT = 0; }
 
   switch (e.state) {
     case 'advance': {
@@ -812,19 +819,19 @@ function updateEnemy(e, sdt) {
     case 'aim': {
       // telegraph: raise the gun arm, flash the gun white just before firing
       const spec = ENEMY_TYPES[e.type];
-      const aimT = spec.aimTime;
+      const aimT = spec.aimTime * aimSpeedFactor();
       const t = Math.min(e.stateT / aimT, 1);
       e.armR.rotation.x = -t * (Math.PI / 2 - 0.06);
       egunFlashTarget(e).material = e.stateT > aimT * 0.7 ? MAT_WHITEFLASH : MAT_BLACK;
       if (e.stateT >= aimT) {
         enemyFire(e, toPlayer);
         egunFlashTarget(e).material = MAT_BLACK;
-        if (spec.burst) {   // heavies fire a 3-round burst
+        if (spec.burst) {   // heavies always fire exactly spec.burst rounds
           e.state = 'burst'; e.stateT = 0;
-          e.burstLeft = 2; e.burstT = 0.22;
+          e.burstLeft = spec.burst - 1; e.burstT = 0.22;
         } else {
           e.state = 'recover'; e.stateT = 0;
-          e.fireCd = spec.cd[0] + Math.random() * spec.cd[1];
+          e.fireCd = (spec.cd[0] + Math.random() * spec.cd[1]) * aimSpeedFactor();
         }
       }
       break;
@@ -838,7 +845,7 @@ function updateEnemy(e, sdt) {
         if (e.burstLeft <= 0) {
           const spec = ENEMY_TYPES[e.type];
           e.state = 'recover'; e.stateT = 0;
-          e.fireCd = spec.cd[0] + Math.random() * spec.cd[1];
+          e.fireCd = (spec.cd[0] + Math.random() * spec.cd[1]) * aimSpeedFactor();
         }
       }
       break;
