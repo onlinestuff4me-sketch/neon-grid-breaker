@@ -30,7 +30,7 @@
   #hud { position:fixed; inset:0; pointer-events:none; z-index:7;
          padding:calc(env(safe-area-inset-top, 0px) + 10px) 14px calc(env(safe-area-inset-bottom, 0px) + 12px); }
   /* HUD text sits on the letterbox bars in bullet time — flip it light */
-  body.slowmo #topbar, body.slowmo #ammo, body.slowmo #hint { color:#eef0f3; }
+  body.slowmo #topbar, body.slowmo #ammo { color:#eef0f3; }
   body.slowmo #ammo.shotgun { color:#ff5d4a; }
   body.inmenu #hud { opacity:0; }
 
@@ -47,9 +47,7 @@
             display:flex; justify-content:space-between; align-items:flex-start;
             font-weight:800; letter-spacing:.12em; color:#16181d; font-size:14px; }
 
-  #hint { position:absolute; left:0; right:0; bottom:calc(env(safe-area-inset-bottom, 0px) + 16px);
-          text-align:center; font-size:11px; font-weight:700; letter-spacing:.24em; color:#7a8089; }
-  #ammo { position:absolute; left:0; right:0; bottom:calc(env(safe-area-inset-bottom, 0px) + 40px);
+  #ammo { position:absolute; left:0; right:0; bottom:calc(env(safe-area-inset-bottom, 0px) + 18px);
           text-align:center; font-size:13px; font-weight:900; letter-spacing:.26em; color:#16181d; }
   #ammo.shotgun { color:#ff2d1a; }
 
@@ -109,12 +107,9 @@
   #overlay h1 em { font-style:normal; color:#ff2d1a; -webkit-text-stroke:2.5px #16181d; }
   #overlay .sub { margin-top:14px; font-size:11px; font-weight:800; letter-spacing:.3em; color:#40444c;
                   text-shadow:0 0 10px rgba(232,234,238,.95); }
-  #overlay .rules { margin:18px 0 4px; display:flex; flex-direction:column; gap:12px; font-size:13px; font-weight:600;
-                    color:#2a2d33; text-align:left; max-width:330px;
-                    background:rgba(238,240,243,.9); border-radius:16px; padding:18px 20px; }
-  #overlay .rules div { display:flex; align-items:center; gap:12px; }
-  #overlay .rules .ic { flex:0 0 40px; height:40px; border:2px solid #16181d; border-radius:50%;
-                        display:flex; align-items:center; justify-content:center; font-size:18px; }
+  #overlay .rules { margin:16px 0 4px; display:flex; flex-direction:column; gap:9px; font-size:13px; font-weight:700;
+                    letter-spacing:.12em; color:#8a9099; text-align:center;
+                    text-shadow:0 0 10px rgba(232,234,238,.95); }
   #best { margin-top:14px; font-size:11px; font-weight:800; letter-spacing:.26em; color:#7a8089;
           text-shadow:0 0 10px rgba(232,234,238,.95); }
   #howto { margin-top:26px; font-size:11px; font-weight:800; letter-spacing:.3em; color:#40444c;
@@ -140,7 +135,6 @@
   <div id="warn"></div>
   <div id="banner"></div>
   <div id="ammo">PISTOL · ∞</div>
-  <div id="hint">HOLD — TIME STOPS · L DRAG — MOVE · R DRAG — AIM · TAP — FIRE</div>
 </div>
 
 <div id="tint"></div>
@@ -164,9 +158,10 @@
   <div id="best"></div>
   <div id="howto">HOW TO PLAY ▾</div>
   <div class="rules" style="display:none">
-    <div><span class="ic">✦</span><span><b>HOLD</b> — time freezes. Bullets hang in the air.</span></div>
-    <div><span class="ic">➤</span><span><b>LEFT</b> thumb moves. <b>RIGHT</b> thumb aims.</span></div>
-    <div><span class="ic">◉</span><span><b>TAP</b> — fire. Tap a dropped gun to grab it. One hit kills.</span></div>
+    <div>HOLD — freezes time</div>
+    <div>LEFT thumb — move</div>
+    <div>RIGHT thumb — look</div>
+    <div>TAP anywhere — shoot</div>
   </div>
   <div id="menubtn">MAIN MENU</div>
 </div>

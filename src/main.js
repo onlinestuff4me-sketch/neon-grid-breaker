@@ -1444,7 +1444,6 @@ const el = {
   tint: document.getElementById('tint'),
   redflash: document.getElementById('redflash'),
   crosshair: document.getElementById('crosshair'),
-  hint: document.getElementById('hint'),
   ammo: document.getElementById('ammo'),
   stickBase: document.getElementById('stickbase'),
   stickNub: document.getElementById('sticknub'),
