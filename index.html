@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#05010f" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27%3E%3Ctext y=%27.9em%27 font-size=%2790%27%3E%F0%9F%95%B9%EF%B8%8F%3C/text%3E%3C/svg%3E" />
+<title>NEON ARCADE</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    min-height: 100%; background: #05010f;
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: #cfefff;
+  }
+  body {
+    background:
+      radial-gradient(ellipse 120% 55% at 50% -10%, #1b0533 0%, rgba(27,5,51,0) 60%),
+      linear-gradient(180deg, #05010f 0%, #090218 100%);
+    display: flex; flex-direction: column; align-items: center;
+    padding: 12vh 20px 60px; gap: 0;
+  }
+  .chrome {
+    font-weight: 900; font-style: italic; letter-spacing: 0.06em;
+    background: linear-gradient(180deg, #ffffff 0%, #bfeaff 28%, #3ec8ff 47%, #072a4a 52%, #9ad8ff 58%, #ffffff 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    filter: drop-shadow(0 0 14px rgba(0, 234, 255, 0.5));
+  }
+  h1 { font-size: clamp(40px, 11vw, 72px); line-height: 0.95; text-align: center; }
+  .tagline {
+    margin-top: 12px; font-size: 13px; letter-spacing: 0.5em; text-indent: 0.5em;
+    color: #ff2fd6; text-shadow: 0 0 10px rgba(255,47,214,.8);
+    text-align: center;
+  }
+  .cabinet {
+    margin-top: 8vh; width: 100%; max-width: 480px; display: flex; flex-direction: column; gap: 22px;
+  }
+  a.game {
+    display: block; text-decoration: none; color: inherit;
+    border: 1px solid rgba(0,234,255,.35); border-radius: 14px;
+    padding: 22px 24px; position: relative; overflow: hidden;
+    background: linear-gradient(160deg, rgba(0,234,255,.07), rgba(255,47,214,.05) 70%);
+    transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+  }
+  a.game:hover, a.game:focus-visible {
+    transform: translateY(-2px);
+    border-color: rgba(0,234,255,.8);
+    box-shadow: 0 6px 40px rgba(0,234,255,.18);
+    outline: none;
+  }
+  .game h2 { font-size: 30px; margin-bottom: 6px; }
+  .game p { color: #9db7dd; font-size: 14px; line-height: 1.6; }
+  .badge {
+    position: absolute; top: 16px; right: 16px; font-size: 10px; font-weight: 800;
+    letter-spacing: .22em; text-indent: .22em; padding: 5px 9px 4px; border-radius: 999px;
+  }
+  .badge.live { color: #25ffc8; border: 1px solid rgba(37,255,200,.5); text-shadow: 0 0 8px rgba(37,255,200,.7); }
+  .badge.soon { color: #7a8fb5; border: 1px solid rgba(122,143,181,.4); }
+  .game.soon { pointer-events: none; opacity: .55; }
+  footer { margin-top: 10vh; font-size: 12px; color: #4d5f80; letter-spacing: .12em; text-align: center; line-height: 2; }
+</style>
+</head>
+<body>
+  <h1 class="chrome">NEON<br>ARCADE</h1>
+  <div class="tagline">PHYSICS · SKILL · HIGH SCORES</div>
+
+  <nav class="cabinet">
+    <a class="game" href="./games/gridbreaker/">
+      <span class="badge live">PLAYABLE</span>
+      <h2 class="chrome">GRIDBREAKER</h2>
+      <p>Fly down a TRON corridor. Hurl chrome balls, shatter real-physics glass,
+      chain crystals for multiball. New generated level every week.</p>
+    </a>
+    <a class="game soon" href="./games/timeshard/" aria-disabled="true">
+      <span class="badge soon">IN DEVELOPMENT</span>
+      <h2 class="chrome">TIMESHARD</h2>
+      <p>Time moves only when you move. Shatter your way through frozen moments.</p>
+    </a>
+  </nav>
+
+  <footer>BEST PLAYED ON A PHONE · PORTRAIT<br>BUILT WITH THREE.JS + CANNON-ES</footer>
+</body>
+</html>
