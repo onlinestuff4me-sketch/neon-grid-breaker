@@ -574,6 +574,83 @@ function updateGrenades(sdt) {
 }
 
 // ---------------------------------------------------------------------------
+// Homing missiles — slow but they steer toward you with a limited turn rate.
+// Dodge with a hard sideways cut, or put a wall between you and it.
+// ---------------------------------------------------------------------------
+const missiles = [];   // {mesh, pos, vel, life, rippleAcc}
+const MISSILE_SPEED = 7.5;
+const MISSILE_TURN = 1.7;      // rad/s of steering authority (world time)
+const MISSILE_BLAST = 1.6;
+
+function spawnMissile(e) {
+  const pos = new THREE.Vector3(e.pos.x, 1.5, e.pos.z);
+  const dir = new THREE.Vector3(player.pos.x - e.pos.x, 0, player.pos.z - e.pos.z).normalize();
+  const mesh = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.09, 0.34), MAT_BLACK);
+  const glow = new THREE.Mesh(
+    new THREE.SphereGeometry(0.09, 8, 8),
+    new THREE.MeshBasicMaterial({ color: 0xff2d1a })
+  );
+  glow.position.z = 0.2;   // exhaust at the tail
+  mesh.add(body, glow);
+  mesh.position.copy(pos);
+  scene.add(mesh);
+  missiles.push({ mesh, pos, vel: dir.multiplyScalar(MISSILE_SPEED), life: 8, rippleAcc: 0 });
+  sfx.rocket();
+}
+
+function explodeMissile(i) {
+  const m = missiles[i];
+  const at = m.pos.clone();
+  scene.remove(m.mesh);
+  missiles.splice(i, 1);
+  spawnSparks(at, 0xff2d1a);
+  spawnSparks(at, 0x16181d);
+  spawnRipple(at, _v1.set(0, 1, 0), true);
+  sfx.boom();
+  if (player.alive && player.iframes <= 0 &&
+      Math.hypot(player.pos.x - at.x, player.pos.z - at.z) < MISSILE_BLAST) {
+    hitPlayer();
+  }
+  for (let j = enemies.length - 1; j >= 0; j--) {
+    const e = enemies[j];
+    if (Math.hypot(e.pos.x - at.x, e.pos.z - at.z) < MISSILE_BLAST * 0.8) {
+      killEnemy(j, _v1.set(e.pos.x - at.x, 0.5, e.pos.z - at.z).normalize());
+    }
+  }
+}
+
+function updateMissiles(sdt) {
+  for (let i = missiles.length - 1; i >= 0; i--) {
+    const m = missiles[i];
+    m.life -= sdt;
+    if (m.life <= 0) { explodeMissile(i); continue; }
+    // limited-authority homing: blend flight dir toward the player
+    _v1.set(player.pos.x - m.pos.x, 1.1 - m.pos.y, player.pos.z - m.pos.z).normalize();
+    m.vel.normalize().addScaledVector(_v1, MISSILE_TURN * sdt).normalize().multiplyScalar(MISSILE_SPEED);
+    const prev = _v2.copy(m.pos);
+    m.pos.addScaledVector(m.vel, sdt);
+    m.mesh.position.copy(m.pos);
+    m.mesh.lookAt(_v3.copy(m.pos).add(m.vel));
+    // smoke wake
+    m.rippleAcc += m.pos.distanceTo(prev);
+    if (m.rippleAcc > 0.5) { m.rippleAcc = 0; spawnRipple(m.pos, m.vel, false); }
+    // detonate on player proximity, terrain, or cover
+    const pd = Math.hypot(player.pos.x - m.pos.x, player.pos.z - m.pos.z);
+    if ((pd < 0.6 && Math.abs(m.pos.y - 1.1) < 1.2) || m.pos.y <= 0.1 ||
+        Math.abs(m.pos.x) > ARENA_HALF || Math.abs(m.pos.z) > ARENA_HALF) {
+      explodeMissile(i);
+      continue;
+    }
+    let hitWall = false;
+    for (const o of obstacles) {
+      if (segAABB(prev, m.pos, o) >= 0) { hitWall = true; break; }
+    }
+    if (hitWall) explodeMissile(i);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Weapon pickups — shattered gunners sometimes drop a shotgun. Dash over it.
 // ---------------------------------------------------------------------------
 const pickups = [];   // {g, spin, ring, t, life}
@@ -694,28 +771,43 @@ function buildEnemyMesh(type) {
   const armRMesh = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.5, 0.13), bodyMat);
   armRMesh.position.y = -0.25;
   armR.add(armRMesh);
+  // Guns live in the gun arm's local space, where -y runs from the shoulder
+  // down the arm and out past the hand. Barrels extend along -y, so when the
+  // arm raises to horizontal the barrel points straight at the player —
+  // every gun reads as grip + receiver + barrel, not a floating handle.
   let egun = null;
   if (type === 'bomber') {   // a grenade in the throwing hand
     egun = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8), MAT_BLACK);
     egun.position.set(0, -0.52, -0.05);
     armR.add(egun);
   } else if (type !== 'rusher') {   // rushers come at you bare-handed
+    egun = new THREE.Group();
+    const addBarrel = (len, thick, x = 0) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(thick, len, thick), MAT_BLACK);
+      m.position.set(x, -0.62 - len / 2, 0);
+      egun.add(m);   // first barrel added = the flash target
+      return m;
+    };
     if (type === 'sniper') {
-      // the looming silhouette: a long, thin rifle with a scope
-      egun = new THREE.Group();
-      const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.06, 0.78), MAT_BLACK);
-      barrel.position.z = -0.18;
-      const scope = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.16), MAT_BLACK);
-      scope.position.set(0, 0.07, 0.02);
-      egun.add(barrel, scope);
-      egun.position.set(0, -0.52, -0.1);
-    } else {
-      const w = type === 'shotgunner' ? 0.1 : type === 'heavy' ? 0.08 : 0.06;
-      const h = type === 'heavy' ? 0.11 : 0.09;
-      const l = type === 'shotgunner' ? 0.36 : type === 'heavy' ? 0.42 : 0.3;
-      egun = new THREE.Mesh(new THREE.BoxGeometry(w, h, l), MAT_BLACK);
-      egun.position.set(0, -0.52, -0.1);
+      addBarrel(0.55, 0.04);
+      const scope = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.12, 0.045), MAT_GUNMETAL);
+      scope.position.set(0, -0.62, 0.08);
+      egun.add(scope);
+    } else if (type === 'shotgunner') {
+      addBarrel(0.3, 0.05, -0.035);
+      addBarrel(0.3, 0.05, 0.035);
+    } else if (type === 'heavy') {
+      addBarrel(0.32, 0.07);
+    } else if (type === 'rocketeer') {   // a fat launch tube
+      addBarrel(0.44, 0.12);
+    } else {   // gunner, armored, shieldbearer: a pistol
+      addBarrel(0.2, 0.05);
     }
+    const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.16, 0.1), MAT_BLACK);
+    receiver.position.set(0, -0.55, 0);
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.06, 0.13), MAT_BLACK);
+    grip.position.set(0, -0.49, 0.08);
+    egun.add(receiver, grip);
     armR.add(egun);
   }
 
@@ -755,6 +847,7 @@ const ENEMY_TYPES = {
   sniper: { speed: 1.2, scale: [0.92, 1.05, 0.92], drop: 'sniper', aimTime: 1.35, cd: [2.4, 1.0], mul: 2.3, pellets: 1, engage: [26, 4] },
   bomber: { speed: 1.7, scale: [1.05, 1, 1.05], drop: 0.3, aimTime: 0.8, cd: [2.4, 1.2], mul: 1, pellets: 1, engage: [9, 5] },
   shieldbearer: { speed: 1.5, scale: [1.08, 1, 1.08], drop: 0.4, aimTime: 0.7, cd: [1.6, 1.0], mul: 1, pellets: 1, shielded: true },
+  rocketeer: { speed: 1.4, scale: [1.05, 1.02, 1.05], drop: 0.4, aimTime: 1.0, cd: [3.4, 1.4], mul: 1, pellets: 1, engage: [13, 6] },
 };
 
 function pointInObstacle(x, z, pad) {
@@ -830,6 +923,10 @@ function enemyFire(e, toPlayer) {
   const spec = ENEMY_TYPES[e.type];
   if (e.type === 'bomber') {   // bombers lob instead of shooting
     spawnGrenade(e);
+    return;
+  }
+  if (e.type === 'rocketeer') {   // rocketeers launch a homing missile
+    spawnMissile(e);
     return;
   }
   const origin = _v2.set(e.pos.x, 1.35, e.pos.z).addScaledVector(toPlayer, 0.45);
@@ -1195,8 +1292,11 @@ function onPointerDown(ev) {
     }
     return;
   }
-  if (el.enm.style.display === 'flex') {   // enemies modal open: any tap closes
+  if (el.enm.style.display === 'flex') {   // enemies modal open
     el.enm.style.display = 'none';
+    if (ev.target && ev.target.closest && ev.target.closest('#enmback')) {
+      el.htp.style.display = 'flex';   // back to how-to
+    }
     return;
   }
   if (game.state === 'menu' || game.state === 'dead' || game.state === 'gameover') {
@@ -1551,6 +1651,7 @@ const sfx = (() => {
     die() { tone(220, 40, 0.7, 0.4, 'sawtooth', 1, 0.5); noise(0.5, 400, 0.8, 0.4, 1, 0.5); },
     wave() { tone(440, 880, 0.18, 0.2, 'triangle'); },
     lob() { const r = worldRate(); noise(0.16, 420, 1.1, 0.28, r, 0.3); },
+    rocket() { const r = worldRate(); noise(0.5, 600, 0.7, 0.5, r, 0.5); tone(240, 90, 0.4, 0.2, 'sawtooth', r, 0.4); },
     boom() {
       const r = worldRate();
       noise(0.6, 180, 0.5, 0.85, r, 0.55);
@@ -1616,9 +1717,8 @@ function renderScores() {
   el.scores.style.display = 'block';
   // a real leaderboard: sorted by the chosen metric, so #1 IS your best
   display.sort((a, b) => (b[scoreMetric] - a[scoreMetric]) || (b.at - a.at));
-  const rows = display.slice(0, 5).map((r, i) =>
-    `<div class="scrow"><span class="scrank">#${i + 1}</span>` +
-    `<span class="scval">${r[scoreMetric]}</span>` +
+  const rows = display.slice(0, 5).map((r) =>
+    `<div class="scrow"><span class="scval">${r[scoreMetric]}</span>` +
     `<span class="scdate">${fmtWhen(r.at)}</span></div>`).join('');
   el.scores.innerHTML =
     '<div class="schead">TOP RUNS</div>' +
@@ -1638,6 +1738,7 @@ function composeWave(n) {
   if (n >= 4) for (let i = 0; i < Math.floor(total / 4); i++) queue.push('heavy');
   if (n >= 4) for (let i = 0; i < Math.floor(total / 5); i++) queue.push('shieldbearer');
   if (n >= 5) for (let i = 0; i < Math.floor(total / 5); i++) queue.push('armored');
+  if (n >= 6) for (let i = 0; i < Math.floor(total / 6); i++) queue.push('rocketeer');
   if (n >= 4) queue.push('sniper');
   queue.length = Math.min(queue.length, total);
   while (queue.length < total) queue.push('gunner');
@@ -1876,6 +1977,10 @@ function clearField() {
     scene.remove(grenades[i].ring);
     grenades[i].ring.material.dispose();
     grenades.splice(i, 1);
+  }
+  for (let i = missiles.length - 1; i >= 0; i--) {
+    scene.remove(missiles[i].mesh);
+    missiles.splice(i, 1);
   }
   for (let i = pickups.length - 1; i >= 0; i--) removePickup(i);
 }
@@ -2116,6 +2221,7 @@ function frame(now) {
   updateDebris(sdt);
   updateRipples(sdt);
   updateGrenades(sdt);
+  updateMissiles(sdt);
   updatePickups(dt, sdt);
 
   // --- HUD
