@@ -1,6 +1,6 @@
 # TIMESHARD
 
-A SUPERHOT-inspired first-person arcade shooter built for **portrait-mode mobile**,
+A first-person time-manipulation arcade shooter built for **portrait-mode mobile**,
 where **time only moves when you let go of the screen**.
 
 White world. Red enemies. One hit and you shatter — them, or you.
@@ -26,7 +26,7 @@ The whole game is played with a single finger at a time:
 - **Enemy AI**: advance with strafing, steer around cover, keep separation, telegraphed aiming (white gun flash before firing), melee when they get close
 - **Three enemy types**: gunners, fast bare-handed rushers (from wave 2), and slow heavies that fire 3-round bursts (from wave 4)
 - **Weapon pickups**: shattered gunners and heavies sometimes drop a shotgun (marked with a red ring) — dash over it to grab 4 shells of 6-pellet spread, then you're back to the infinite pistol
-- **Superhot rules**: one hit kills you; one hit shatters them; endless escalating waves with enemy bullets creeping faster each wave
+- **TIMESHARD rules**: one hit kills you; one hit shatters them; endless escalating waves with enemy bullets creeping faster each wave
 - **Rotating arenas**: the cover layout changes every 3 waves (scattered cover → pillar court → corridors)
 - Synthesized sound effects (WebAudio, no assets), haptic feedback, kill-word flashes, best-wave tracking (localStorage)
 
