@@ -210,6 +210,36 @@ export class TimeshardAudio {
     n.start(t); n.stop(t + 0.32);
   }
 
+  // Passing a gateway: glass burst that blends into a rising whoosh.
+  gate() {
+    if (!this.ctx || this.muted) return;
+    this.shatter(1.15);
+    const t = this.ctx.currentTime + 0.06;
+
+    // the speed-up: bandpass noise sweeping upward, swelling then gone
+    const n = this._noise(1.0);
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.Q.value = 0.9;
+    bp.frequency.setValueAtTime(240, t);
+    bp.frequency.exponentialRampToValueAtTime(3400, t + 0.85);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.42, t + 0.5);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.95);
+    n.connect(bp); bp.connect(g); g.connect(this.master);
+    n.start(t); n.stop(t + 1.0);
+
+    // a quiet rising tone underneath glues the two halves together
+    const o = this.ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(160, t);
+    o.frequency.exponentialRampToValueAtTime(660, t + 0.8);
+    const og = this.ctx.createGain();
+    this._env(og, t, 0.12, 0.3, 0.55);
+    o.connect(og); og.connect(this.master);
+    o.start(t); o.stop(t + 0.95);
+  }
+
   // Moment cleared: ascending crystal chime.
   clear() {
     if (!this.ctx || this.muted) return;
