@@ -20,8 +20,15 @@ export const TUNING = {
   // --- Forward speed (the pace dial) --------------------------------------------
   speed: {
     base: 9.5,          // m/s at run start
-    perZone: 0.45,      // added per zone crossed
+    perZone: 0.25,      // gentle creep per zone crossed
+    perGate: 1.3,       // the REAL jumps happen at gateways
     max: 24,
+  },
+
+  // --- Gateways: pass through to shift up a speed tier ----------------------------
+  gates: {
+    everyZones: 3,      // a gate stands at the start of every Nth zone
+    scoreBonus: 40,     // points for reaching one
   },
 
   // --- Steering (drag the held finger to weave) ----------------------------------
@@ -76,7 +83,7 @@ export const TUNING = {
     doorTime: 0.5,      // game-seconds for a door to slide open
     emergeTime: 0.5,    // game-seconds for the drone to rise/pop out
     diveTime: 0.7,      // game-seconds for an "from above" dive-in
-    telegraph: 0.7,     // core-glow warning before each bolt
+    telegraph: 0.6,     // core-glow warning before each bolt
     scoreKill: 50,
     triggerAhead: 26,   // door starts opening when you're this close
   },
@@ -96,7 +103,7 @@ export const TUNING = {
 
   // --- Souls (the ammo economy) ---------------------------------------------------------
   souls: {
-    ammoBonus: 3,       // ammo per soul absorbed
+    ammoBonus: 1,       // ammo per soul absorbed — every shot has to count
     scoreBonus: 15,
     captureRadius: 1.3, // fly this close to absorb
     homingRadius: 4.5,  // souls drift toward you inside this radius…
@@ -121,10 +128,10 @@ export const TUNING = {
 
   // --- Difficulty curve (zone index → parameters) ----------------------------------------------
   difficulty: {
-    enemiesPerZone: { from: 1,   to: 3.4, at: 12 },
+    enemiesPerZone: { from: 1,   to: 3.4, at: 12 }, // spawn cadence unchanged…
     concurrent:     { from: 1,   to: 3,   at: 14 }, // max drones attacking at once
-    boltSpeed:      { from: 7,   to: 13,  at: 16 },
-    fireInterval:   { from: 2.7, to: 1.4, at: 18 },
+    boltSpeed:      { from: 8,   to: 15,  at: 16 }, // …but their fire is meaner
+    fireInterval:   { from: 2.4, to: 1.2, at: 18 },
     engageTime:     { from: 5,   to: 8,   at: 15 }, // how long a drone harasses you
     tunnelChance:   { from: 0.15,to: 0.45,at: 10 }, // zones get more claustrophobic
   },

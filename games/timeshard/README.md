@@ -38,13 +38,14 @@ and steer).
 | Bullet time | **Your shards live outside time**: they fly at full speed while the world crawls — firing in slow-mo is precision mode, not a dead trigger. |
 | Pause | ⏸ button: resume/restart/**end run** (banks the score, shows the final screen), the sound toggle, and local top-10 + recent-run boards — every row shows score + shards (✦). |
 | Sound | ON by default, toggle on the start screen (♪) and in pause; survives the iPhone mute switch; unlocks on touch-end (iOS gesture rules). |
-| HUD | Shields · ammo · **SHARDS** kill counter · score · FOCUS bar that glows/pulses and reads **FOCUS FULL** when topped up. |
+| HUD | Shields · ammo · **SHARDS** + **GATES** counters · score · FOCUS bar that glows/pulses and reads **FOCUS FULL** when topped up. Boards show `score ✦shards ∩gates`. |
 | Menu | Minimal: three control lines, your last run + best + local placement, and the live game world drifting behind the title (attract mode, drones firing). |
 | Ammo | You start with 14 shards, max 30. Empty tank = dry click — go soul hunting. |
 | Enemies | Drones emerge from doors in the floor/walls (or dive from the sky), match your speed ahead of you, and fire. One hit shatters them (**+50**). |
 | Telegraph | A drone's magenta core swells ~0.7 s before each bolt — readable even in slow-mo. |
 | Bolts | Ethereal comet-wisps with a spiral tail (the true path is straight = fair). Dodge them or shoot them down (**DEFLECT +40**). |
-| Souls | Kills leave a glowing wisp (**+3 ammo, +15**) that drifts gently toward you if you pass close. Some zones carry a free ambient soul. |
+| Souls | Kills leave a glowing wisp (**+1 ammo, +15**) that drifts gently toward you if you pass close. Some zones carry a free ambient soul. Every shot has to count. |
+| Gateways | A double-frame gate stands at every 3rd zone: passing it **shifts you up a speed tier** (+40 pts) — the GATES count is its own tracked score. |
 | Shields | You can take **3 hits** (brief invulnerability after each). Third hit ends the run. |
 
 ## Weekly generated track

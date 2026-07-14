@@ -46,23 +46,34 @@
   #hudShards { font-size: 12px; font-weight: 800; text-align: right; letter-spacing: .18em;
     color: #7f97b5; margin-top: 4px; font-variant-numeric: tabular-nums; }
   #hudShards .n { color: #dff6ff; }
+  #hudGates { font-size: 12px; font-weight: 800; letter-spacing: .18em;
+    color: #7f97b5; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  #hudGates .n { color: #dff6ff; }
   #hudScore { font-size: 44px; line-height: 1; text-align: center; font-variant-numeric: tabular-nums; }
   #focusTrack {
     width: 140px; height: 5px; margin: 8px auto 0; border-radius: 999px;
     background: rgba(127,220,255,.14); overflow: hidden;
   }
   #focusTrack.full {
-    animation: focusPulse 1.3s ease-in-out infinite;
+    animation: focusPulse 1s ease-in-out infinite;
   }
   @keyframes focusPulse {
-    0%, 100% { box-shadow: 0 0 4px rgba(127,220,255,.5); }
-    50% { box-shadow: 0 0 16px rgba(127,220,255,1); }
+    0%, 100% { box-shadow: 0 0 6px 1px rgba(127,220,255,.7); transform: scaleY(1); }
+    50% { box-shadow: 0 0 22px 5px rgba(127,220,255,1), 0 0 44px 10px rgba(127,220,255,.45);
+      transform: scaleY(1.7); }
   }
   #focusBar { height: 100%; width: 100%; background: #7fdcff; border-radius: 999px;
-    transition: width .12s linear; }
+    transition: width .12s linear, background .3s; }
+  #focusTrack.full #focusBar { background: #eaffff; }
   #focusLabel { text-align: center; font-size: 9px; letter-spacing: .34em; text-indent: .34em;
-    color: #4d6f8a; margin-top: 4px; transition: color .3s; }
-  #focusLabel.full { color: #7fdcff; text-shadow: 0 0 8px rgba(127,220,255,.85); }
+    color: #4d6f8a; margin-top: 5px; transition: color .3s; }
+  #focusLabel.full {
+    color: #eaffff; animation: focusLabelPulse 1s ease-in-out infinite;
+  }
+  @keyframes focusLabelPulse {
+    0%, 100% { text-shadow: 0 0 6px rgba(127,220,255,.7); }
+    50% { text-shadow: 0 0 14px rgba(127,220,255,1), 0 0 26px rgba(127,220,255,.7); }
+  }
   #hudMsg {
     position: fixed; left: 0; right: 0; top: 32%; text-align: center; pointer-events: none;
     font-size: 24px; font-weight: 900; letter-spacing: .12em; opacity: 0; transition: opacity .3s;
@@ -90,14 +101,20 @@
     background: linear-gradient(180deg, rgba(4,16,28,.55) 0%, rgba(4,16,28,.06) 45%,
       rgba(4,16,28,.06) 70%, rgba(4,16,28,.6) 100%);
   }
-  .controls { margin-top: 26px; display: flex; flex-direction: column; gap: 8px;
+  /* instructions + scores sit BELOW the horizon, over the dark grid floor */
+  .lowerblock {
+    position: fixed; left: 0; right: 0;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 9vh);
+    display: flex; flex-direction: column; align-items: center; text-align: center;
+  }
+  .controls { display: flex; flex-direction: column; gap: 9px;
     font-size: 14px; letter-spacing: .18em; color: #9fb9d8; }
   .controls b { color: #eef9ff; }
-  .bestline { margin-top: 20px; font-size: 13px; letter-spacing: .14em; color: #7f97b5;
+  .bestline { margin-top: 22px; font-size: 13px; letter-spacing: .14em; color: #7f97b5;
     min-height: 17px; font-variant-numeric: tabular-nums; }
   .rankline { margin-top: 6px; font-size: 10px; letter-spacing: .26em; text-indent: .26em;
     color: #4d6f8a; min-height: 13px; }
-  .screen.clear .tap { position: fixed; bottom: calc(env(safe-area-inset-bottom, 0px) + 15vh); }
+  .lowerblock .tap { margin-top: 26px; }
 
   /* ------- pause menu ------- */
   .menubtns { margin-top: 26px; display: flex; gap: 12px; }
@@ -148,6 +165,7 @@
       <div>
         <div id="hudAmmo"><span class="orb"></span><span id="ammoCount">14</span></div>
         <div id="hudShards">SHARDS <span class="n" id="shardCount">0</span></div>
+        <div id="hudGates" style="text-align:right">GATES <span class="n" id="gateCount">0</span></div>
       </div>
     </div>
     <div id="hudScore" class="chrome">0</div>
@@ -161,14 +179,16 @@
   <div id="startScreen" class="screen clear visible">
     <div class="logo chrome">TIME<br>SHARD</div>
     <div class="tagline neon-pink">TIME · OBEYS · YOU</div>
-    <div class="controls">
-      <div><b>HOLD</b> — SLOW TIME</div>
-      <div><b>DRAG</b> — WEAVE</div>
-      <div><b>TAP</b> — FIRE</div>
+    <div class="lowerblock">
+      <div class="controls">
+        <div><b>HOLD</b> — SLOW TIME</div>
+        <div><b>DRAG</b> — WEAVE</div>
+        <div><b>TAP</b> — FIRE</div>
+      </div>
+      <div class="bestline" id="startBest"></div>
+      <div class="rankline" id="startRank"></div>
+      <div class="tap neon-ice">TAP TO ENTER</div>
     </div>
-    <div class="bestline" id="startBest"></div>
-    <div class="rankline" id="startRank"></div>
-    <div class="tap neon-ice">TAP TO ENTER</div>
   </div>
 
   <div id="pauseScreen" class="screen">
@@ -190,7 +210,7 @@
   </div>
 
   <div id="overScreen" class="screen">
-    <div class="overtitle neon-pink" id="overTitle">TIME CAUGHT YOU</div>
+    <div class="overtitle neon-pink" id="overTitle">YOU DIED</div>
     <div class="bigscore chrome" id="finalScore">0</div>
     <div class="newbest neon-ice" id="bestBadge"></div>
     <div class="stats" id="overStats"></div>
