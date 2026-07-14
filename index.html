@@ -32,6 +32,7 @@
   /* HUD text sits on the letterbox bars in bullet time — flip it light */
   body.slowmo #topbar, body.slowmo #ammo, body.slowmo #hint { color:#eef0f3; }
   body.slowmo #ammo.shotgun { color:#ff5d4a; }
+  body.inmenu #hud { opacity:0; }
 
   /* edge arrows: enemies in that direction, off-screen */
   .edgearrow { position:absolute; display:none; font-size:26px; font-weight:900; color:#ff2d1a;
@@ -101,16 +102,24 @@
 
   /* ---- full screen overlays ---- */
   #overlay { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
-             background:rgba(232,234,238,.94); z-index:10; text-align:center; padding:28px; }
+             background:rgba(232,234,238,.55); z-index:10; text-align:center; padding:28px; }
   #overlay.hidden { display:none; }
-  #overlay h1 { font-size:min(17vw,84px); font-weight:900; line-height:.95; letter-spacing:.04em; color:#16181d; }
-  #overlay h1 em { font-style:normal; color:#ff2d1a; }
-  #overlay .sub { margin-top:10px; font-size:12px; font-weight:700; letter-spacing:.3em; color:#7a8089; }
-  #overlay .rules { margin:26px 0 8px; display:flex; flex-direction:column; gap:13px; font-size:13px; font-weight:600;
-                    color:#2a2d33; text-align:left; max-width:340px; }
+  #overlay h1 { font-size:min(22vw,104px); font-weight:900; line-height:.82; letter-spacing:.01em; color:#16181d;
+                transform:skewX(-6deg); text-shadow:0 0 24px rgba(232,234,238,.95), 0 0 60px rgba(232,234,238,.9); }
+  #overlay h1 em { font-style:normal; color:#ff2d1a; -webkit-text-stroke:2.5px #16181d; }
+  #overlay .sub { margin-top:14px; font-size:11px; font-weight:800; letter-spacing:.3em; color:#40444c;
+                  text-shadow:0 0 10px rgba(232,234,238,.95); }
+  #overlay .rules { margin:18px 0 4px; display:flex; flex-direction:column; gap:12px; font-size:13px; font-weight:600;
+                    color:#2a2d33; text-align:left; max-width:330px;
+                    background:rgba(238,240,243,.9); border-radius:16px; padding:18px 20px; }
   #overlay .rules div { display:flex; align-items:center; gap:12px; }
-  #overlay .rules .ic { flex:0 0 44px; height:44px; border:2px solid #16181d; border-radius:50%;
-                        display:flex; align-items:center; justify-content:center; font-size:20px; }
+  #overlay .rules .ic { flex:0 0 40px; height:40px; border:2px solid #16181d; border-radius:50%;
+                        display:flex; align-items:center; justify-content:center; font-size:18px; }
+  #best { margin-top:14px; font-size:11px; font-weight:800; letter-spacing:.26em; color:#7a8089;
+          text-shadow:0 0 10px rgba(232,234,238,.95); }
+  #howto { margin-top:26px; font-size:11px; font-weight:800; letter-spacing:.3em; color:#40444c;
+           padding:10px 22px; border:1.5px solid rgba(22,24,29,.35); border-radius:999px;
+           background:rgba(238,240,243,.55); }
   #overlay .go { margin-top:30px; font-size:15px; font-weight:900; letter-spacing:.34em; color:#ff2d1a;
                  animation:pulse 1.2s ease-in-out infinite; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
@@ -151,12 +160,14 @@
 <div id="overlay">
   <h1>TIME<br><em>SHARD</em></h1>
   <div class="sub">TIME MOVES ONLY WHEN YOU LET GO</div>
-  <div class="rules">
-    <div><span class="ic">✦</span><span><b>HOLD</b> — time freezes. Incoming fire hangs in the air around you.</span></div>
-    <div><span class="ic">➤</span><span><b>LEFT thumb</b> — move &amp; dodge. <b>RIGHT thumb</b> — aim (it auto-tracks when you let it). One hit and you're done.</span></div>
-    <div><span class="ic">◉</span><span><b>TAP</b> — fire. <b>TAP A DROPPED GUN</b> — sprint to it and take it.</span></div>
-  </div>
   <div class="go">TAP TO BEGIN</div>
+  <div id="best"></div>
+  <div id="howto">HOW TO PLAY ▾</div>
+  <div class="rules" style="display:none">
+    <div><span class="ic">✦</span><span><b>HOLD</b> — time freezes. Bullets hang in the air.</span></div>
+    <div><span class="ic">➤</span><span><b>LEFT</b> thumb moves. <b>RIGHT</b> thumb aims.</span></div>
+    <div><span class="ic">◉</span><span><b>TAP</b> — fire. Tap a dropped gun to grab it. One hit kills.</span></div>
+  </div>
   <div id="menubtn">MAIN MENU</div>
 </div>
 

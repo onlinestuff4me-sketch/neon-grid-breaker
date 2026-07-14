@@ -1071,6 +1071,16 @@ function onPointerDown(ev) {
       showMenu();
       return;
     }
+    if (game.state === 'menu' && ev.target && ev.target.closest) {
+      if (ev.target.closest('#howto')) {   // expander, not a game start
+        const r = el.overlay.querySelector('.rules');
+        const open = r.style.display !== 'none';
+        r.style.display = open ? 'none' : 'flex';
+        el.howto.textContent = open ? 'HOW TO PLAY ▾' : 'HOW TO PLAY ▴';
+        return;
+      }
+      if (ev.target.closest('.rules')) return;   // reading, not starting
+    }
     advanceFromOverlay();
     return;   // this pointer is never registered, so its release is inert
   }
@@ -1423,6 +1433,7 @@ function composeWave(n) {
 }
 
 let timeScale = 1;
+let demoT = 0, demoSpawnT = 0.3, demoKillT = 4;   // menu attract-mode clocks
 
 const el = {
   overlay: document.getElementById('overlay'),
@@ -1439,7 +1450,10 @@ const el = {
   stickNub: document.getElementById('sticknub'),
   warn: document.getElementById('warn'),
   guide: document.getElementById('guide'),
+  howto: document.getElementById('howto'),
+  best: document.getElementById('best'),
 };
+el.best.textContent = bestWave > 1 ? `BEST WAVE ${bestWave}` : '';
 
 // the title screen's original copy, so MAIN MENU can restore it after a death
 const MENU_HTML = {
@@ -1464,10 +1478,16 @@ function showMenu() {
   game.state = 'menu';
   game.wave = 1;
   game.kills = 0;
+  game.noFireBefore = 0;
   el.overlay.querySelector('h1').innerHTML = MENU_HTML.h1;
   el.overlay.querySelector('.sub').innerHTML = MENU_HTML.sub;
   el.overlay.querySelector('.rules').innerHTML = MENU_HTML.rules;
   el.overlay.querySelector('.go').innerHTML = MENU_HTML.go;
+  el.overlay.querySelector('.rules').style.display = 'none';
+  el.howto.style.display = 'block';
+  el.howto.textContent = 'HOW TO PLAY ▾';
+  el.best.style.display = 'block';
+  el.best.textContent = bestWave > 1 ? `BEST WAVE ${bestWave}` : '';
   el.menubtn.style.display = 'none';
   el.redflash.style.opacity = 0;
   el.overlay.classList.remove('hidden');
@@ -1594,8 +1614,11 @@ function hitPlayer() {
     if (game.state !== 'dead') return;   // already retried — don't resurrect the overlay
     el.overlay.querySelector('h1').innerHTML = 'YOU<br><em>DIED</em>';
     el.overlay.querySelector('.sub').textContent = 'ONE HIT IS ALL IT TAKES';
-    el.overlay.querySelector('.rules').innerHTML =
-      `<div class="stats">WAVE ${game.wave} · ${game.kills} SHATTERED · BEST WAVE ${bestWave}</div>`;
+    const r = el.overlay.querySelector('.rules');
+    r.innerHTML = `<div class="stats">WAVE ${game.wave} · ${game.kills} SHATTERED · BEST WAVE ${bestWave}</div>`;
+    r.style.display = 'flex';
+    el.howto.style.display = 'none';
+    el.best.style.display = 'none';
     el.overlay.querySelector('.go').textContent = 'TAP TO RETRY WAVE';
     el.menubtn.style.display = 'inline-block';
     el.overlay.classList.remove('hidden');
@@ -1628,6 +1651,14 @@ function advanceFromOverlay() {
   el.overlay.classList.add('hidden');
   el.redflash.style.opacity = 0;
   if (game.state === 'menu') {
+    clearField();   // sweep away the attract-mode fight
+    player.alive = true;
+    player.pos.set(0, 0, 14);
+    player.vel.set(0, 0, 0);
+    player.yaw = 0; player.pitch = 0; player.roll = 0;
+    player.iframes = 1;
+    game.kills = 0;
+    setWeapon('pistol');
     startWave(1);
     showGuide();
   } else {   // retry current wave
@@ -1666,7 +1697,7 @@ function frame(now) {
     target = TIME_SLOW + (TIME_MOVE_MAX - TIME_SLOW) * speedNorm;
   }
   if (game.state === 'dead') target = 0.12;
-  if (game.state === 'menu') target = 0;
+  if (game.state === 'menu') target = 0.5;   // dreamy half-speed attract mode
   timeScale += (target - timeScale) * Math.min(dt * TIME_EASE, 1);
   const sdt = dt * timeScale;   // scaled dt: the world's clock
 
@@ -1733,11 +1764,20 @@ function frame(now) {
   const velRight = player.vel.x * Math.cos(player.yaw) + player.vel.z * -Math.sin(player.yaw);
   player.roll += (-velRight / MOVE_SPEED * 0.05 - player.roll) * Math.min(dt * 8, 1);
 
-  camera.position.set(player.pos.x, EYE_HEIGHT, player.pos.z);
-  camera.rotation.order = 'YXZ';
-  camera.rotation.y = player.yaw;
-  camera.rotation.x = player.pitch;
-  camera.rotation.z = player.roll;
+  if (game.state === 'menu') {
+    // attract mode: slow orbit around the arena, gun hidden
+    gun.visible = false;
+    const a = demoT * 0.07;
+    camera.position.set(Math.sin(a) * 12, 4.2 + Math.sin(demoT * 0.11), Math.cos(a) * 12);
+    camera.lookAt(0, 1.2, 0);
+  } else {
+    gun.visible = true;
+    camera.position.set(player.pos.x, EYE_HEIGHT, player.pos.z);
+    camera.rotation.order = 'YXZ';
+    camera.rotation.y = player.yaw;
+    camera.rotation.x = player.pitch;
+    camera.rotation.z = player.roll;
+  }
 
   // bullet-time zoom: FOV tightens as time slows
   const wantFov = FOV_SLOW + (FOV_NORMAL - FOV_SLOW) * Math.min(timeScale, 1);
@@ -1785,6 +1825,28 @@ function frame(now) {
   } else if (game.state === 'dead') {
     for (const e of enemies) updateEnemy(e, sdt);
     updateBullets(sdt);
+  } else if (game.state === 'menu') {
+    // the arena fights itself behind the title: enemies stalk and shoot at a
+    // ghost target, and every few seconds one of them shatters
+    demoT += dt;
+    player.iframes = 2;   // the ghost can't die
+    player.pos.set(Math.sin(demoT * 0.23) * 6, 0, Math.cos(demoT * 0.31) * 6);
+    if (enemies.length < 4) {
+      demoSpawnT -= sdt;
+      if (demoSpawnT <= 0) {
+        game.waveBearing = Math.random() * Math.PI * 2;
+        spawnEnemy(['gunner', 'gunner', 'rusher', 'shotgunner', 'heavy'][Math.floor(Math.random() * 5)]);
+        demoSpawnT = 0.9;
+      }
+    }
+    demoKillT -= sdt;
+    if (demoKillT <= 0 && enemies.length > 1) {
+      const a = Math.random() * Math.PI * 2;
+      killEnemy(Math.floor(Math.random() * enemies.length), _v1.set(Math.sin(a), 0.3, Math.cos(a)));
+      demoKillT = 3 + Math.random() * 2.5;
+    }
+    for (const e of enemies) updateEnemy(e, sdt);
+    updateBullets(sdt);
   }
   updateDebris(sdt);
   updateRipples(sdt);
@@ -1794,6 +1856,7 @@ function frame(now) {
   el.score.textContent = `WAVE ${game.wave}  ·  ${game.kills}`;
   el.tint.style.opacity = playing ? (1 - timeScale / TIME_FULL) : 0;
   document.body.classList.toggle('slowmo', playing && timeScale < 0.55);
+  document.body.classList.toggle('inmenu', game.state === 'menu');
   sfx.update(playing || game.state === 'clear' ? timeScale : 1, dt);
   el.crosshair.classList.toggle('hot', player.fireCd > 0);
 
