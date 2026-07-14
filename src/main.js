@@ -31,7 +31,7 @@ const BULLET_GRAVITY = 4;         // gentle drop, visible on long shots
 
 const WEAPONS = {
   pistol: { cd: 0.22, pellets: 1, spread: 0, ammo: Infinity, kick: 1, speed: 46 },
-  shotgun: { cd: 0.55, pellets: 6, spread: 0.055, ammo: 4, kick: 1.8, speed: 46 },
+  shotgun: { cd: 0.55, pellets: 6, spread: 0.055, ammo: 3, kick: 1.8, speed: 46 },
   sniper: { cd: 0.9, pellets: 1, spread: 0, ammo: 3, kick: 2.4, speed: 95, pierce: 3 },
 };
 
@@ -503,10 +503,82 @@ function updateDebris(sdt) {
 }
 
 // ---------------------------------------------------------------------------
+// Grenades — bombers lob these in an arc onto a marked red landing ring.
+// Anything inside the blast when it lands goes down, enemies included.
+// ---------------------------------------------------------------------------
+const grenades = [];   // {mesh, ring, pos, vel, t}
+const grenadeGeo = new THREE.SphereGeometry(0.14, 10, 10);
+const BLAST_R = 2.3;
+
+function spawnGrenade(e) {
+  const origin = new THREE.Vector3(e.pos.x, 1.4, e.pos.z);
+  const target = new THREE.Vector3(
+    player.pos.x + (Math.random() - 0.5) * 0.8, 0.12,
+    player.pos.z + (Math.random() - 0.5) * 0.8
+  );
+  const T = 1.15;   // world-seconds of hang time — plenty to see it coming
+  const vel = new THREE.Vector3(
+    (target.x - origin.x) / T,
+    (target.y - origin.y + 0.5 * 9.8 * T * T) / T,
+    (target.z - origin.z) / T
+  );
+  const mesh = new THREE.Mesh(grenadeGeo, MAT_BLACK);
+  mesh.position.copy(origin);
+  scene.add(mesh);
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.6, 0.78, 24),
+    new THREE.MeshBasicMaterial({ color: 0xff2d1a, transparent: true, opacity: 0.5, side: THREE.DoubleSide })
+  );
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.set(target.x, 0.02, target.z);
+  scene.add(ring);
+  grenades.push({ mesh, ring, pos: origin.clone(), vel, t: 0 });
+  sfx.lob();
+}
+
+function explodeGrenade(i) {
+  const gr = grenades[i];
+  const at = gr.pos.clone();
+  scene.remove(gr.mesh);
+  scene.remove(gr.ring);
+  gr.ring.material.dispose();
+  grenades.splice(i, 1);
+  spawnSparks(at, 0xff2d1a);
+  spawnSparks(at, 0x16181d);
+  spawnRipple(new THREE.Vector3(at.x, 0.5, at.z), _v1.set(0, 1, 0), true);   // shockwave
+  sfx.boom();
+  vibrate(30);
+  if (player.alive && player.iframes <= 0 &&
+      Math.hypot(player.pos.x - at.x, player.pos.z - at.z) < BLAST_R) {
+    hitPlayer();
+  }
+  for (let j = enemies.length - 1; j >= 0; j--) {   // friendly fire is fair game
+    const e = enemies[j];
+    if (Math.hypot(e.pos.x - at.x, e.pos.z - at.z) < BLAST_R * 0.8) {
+      killEnemy(j, _v1.set(e.pos.x - at.x, 0.5, e.pos.z - at.z).normalize());
+    }
+  }
+}
+
+function updateGrenades(sdt) {
+  for (let i = grenades.length - 1; i >= 0; i--) {
+    const gr = grenades[i];
+    gr.t += sdt;
+    gr.vel.y -= 9.8 * sdt;
+    gr.pos.addScaledVector(gr.vel, sdt);
+    gr.mesh.position.copy(gr.pos);
+    gr.mesh.rotation.x += sdt * 7;
+    gr.ring.material.opacity = 0.35 + 0.3 * Math.abs(Math.sin(gr.t * 9));   // pulse
+    if (gr.pos.y <= 0.12) explodeGrenade(i);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Weapon pickups — shattered gunners sometimes drop a shotgun. Dash over it.
 // ---------------------------------------------------------------------------
 const pickups = [];   // {g, spin, ring, t, life}
-const PICKUP_LIFE = 14;
+const PICKUP_LIFE = 12;
+const PICKUP_SINK = 1.2;   // final seconds: the gun sinks into the floor
 
 function spawnPickup(pos, type = 'shotgun') {
   const g = new THREE.Group();
@@ -559,7 +631,13 @@ function updatePickups(dt, sdt) {
     p.spin.rotation.y += dt * 2; // but it keeps spinning so you can spot it
     p.spin.position.y = 0.85 + Math.sin(p.t * 2.2) * 0.07;
     if (p.life <= 0) { removePickup(i); continue; }
-    p.ring.material.opacity = p.life < 3 ? 0.5 * (0.4 + 0.6 * Math.abs(Math.sin(p.t * 6))) : 0.5;
+    if (p.life < PICKUP_SINK) {   // time's up: the gun sinks into the ground
+      const s = 1 - p.life / PICKUP_SINK;
+      p.spin.position.y = 0.85 - s * 1.7;
+      p.ring.material.opacity = 0.5 * (1 - s);
+      continue;   // no bob, no magnet chase while sinking
+    }
+    p.ring.material.opacity = 0.5;
     if (player.alive) {
       const dx = p.g.position.x - player.pos.x, dz = p.g.position.z - player.pos.z;
       const d2 = dx * dx + dz * dz;
@@ -617,7 +695,11 @@ function buildEnemyMesh(type) {
   armRMesh.position.y = -0.25;
   armR.add(armRMesh);
   let egun = null;
-  if (type !== 'rusher') {   // rushers come at you bare-handed
+  if (type === 'bomber') {   // a grenade in the throwing hand
+    egun = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8), MAT_BLACK);
+    egun.position.set(0, -0.52, -0.05);
+    armR.add(egun);
+  } else if (type !== 'rusher') {   // rushers come at you bare-handed
     if (type === 'sniper') {
       // the looming silhouette: a long, thin rifle with a scope
       egun = new THREE.Group();
@@ -646,6 +728,18 @@ function buildEnemyMesh(type) {
   blob.position.y = 0.01;
 
   g.add(torso, head, hips, legL, legR, armL, armR, blob);
+  if (type === 'bomber') {   // grenadier's backpack
+    const pack = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.42, 0.2), MAT_BLACK);
+    pack.position.set(0, 1.12, -0.26);
+    g.add(pack);
+  }
+  if (type === 'shieldbearer') {   // riot shield held toward the player
+    const shield = new THREE.Mesh(new THREE.BoxGeometry(0.95, 1.5, 0.07), MAT_GUNMETAL);
+    shield.position.set(0, 0.95, 0.44);
+    const slit = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.09, 0.02), MAT_RED);
+    slit.position.set(0, 1.35, 0.49);
+    g.add(shield, slit);
+  }
   return { g, legL, legR, armL, armR, egun };
 }
 
@@ -659,6 +753,8 @@ const ENEMY_TYPES = {
   shotgunner: { speed: 1.8, scale: [1.06, 1, 1.06], drop: 0.8, aimTime: 0.65, cd: [1.6, 0.9], mul: 0.85, pellets: 5, spread: 0.09, engage: [8, 4] },
   armored: { speed: 1.4, scale: [1.1, 1.06, 1.1], drop: 0.35, aimTime: 0.6, cd: [1.2, 0.8], mul: 1, pellets: 1, armored: true },
   sniper: { speed: 1.2, scale: [0.92, 1.05, 0.92], drop: 'sniper', aimTime: 1.35, cd: [2.4, 1.0], mul: 2.3, pellets: 1, engage: [26, 4] },
+  bomber: { speed: 1.7, scale: [1.05, 1, 1.05], drop: 0.3, aimTime: 0.8, cd: [2.4, 1.2], mul: 1, pellets: 1, engage: [9, 5] },
+  shieldbearer: { speed: 1.5, scale: [1.08, 1, 1.08], drop: 0.4, aimTime: 0.7, cd: [1.6, 1.0], mul: 1, pellets: 1, shielded: true },
 };
 
 function pointInObstacle(x, z, pad) {
@@ -732,6 +828,10 @@ function killEnemy(i, impulseDir) {
 
 function enemyFire(e, toPlayer) {
   const spec = ENEMY_TYPES[e.type];
+  if (e.type === 'bomber') {   // bombers lob instead of shooting
+    spawnGrenade(e);
+    return;
+  }
   const origin = _v2.set(e.pos.x, 1.35, e.pos.z).addScaledVector(toPlayer, 0.45);
   // shots go where you ARE — if you don't slide out of the way, they connect
   const target = _v3.set(
@@ -993,6 +1093,18 @@ function updateBullets(sdt) {
           bodyshot = segSegDistSq(b.prev, b.pos, _v2, _v3) < 0.34 * 0.34;
         }
         if (!headshot && !bodyshot) continue;
+        if (ENEMY_TYPES[e.type].shielded) {
+          // the riot shield eats anything arriving from the front — flank him
+          const fx = Math.sin(e.g.rotation.y), fz = Math.cos(e.g.rotation.y);   // shield faces this way
+          const bl = Math.max(Math.hypot(b.vel.x, b.vel.z), 1e-6);
+          const frontal = (b.vel.x / bl) * fx + (b.vel.z / bl) * fz < -0.35;
+          if (frontal) {
+            spawnSparks(b.pos, 0xf4f5f7);
+            sfx.clank();
+            consumed = true;
+            break;
+          }
+        }
         if (bodyshot && e.type === 'armored') {
           // armor shrugs it off — only headshots take these down
           spawnSparks(b.pos, 0xf4f5f7);
@@ -1048,6 +1160,7 @@ const input = {
   lookIdle: 99,                 // seconds since the last manual look drag
 };
 let sprintTo = null;            // pickup currently being sprinted to
+let sprintStuckT = 0;           // time spent blocked against a wall mid-sprint
 
 function stickUI(show, ox, oy, x, y) {
   const base = el.stickBase, nub = el.stickNub;
@@ -1061,6 +1174,10 @@ function pickupAtScreen(px, py) {
   for (const p of pickups) {
     _v1.set(p.g.position.x, 0.9, p.g.position.z).project(camera);
     if (_v1.z > 1) continue;   // behind the camera
+    // no sprinting at guns hidden behind cover — you'd just run into the wall
+    if (!hasLineOfSight(
+      _v2.set(player.pos.x, EYE_HEIGHT, player.pos.z),
+      _v3.set(p.g.position.x, 0.9, p.g.position.z))) continue;
     const sx = (_v1.x * 0.5 + 0.5) * window.innerWidth;
     const sy = (-_v1.y * 0.5 + 0.5) * window.innerHeight;
     if (Math.hypot(sx - px, sy - py) < PICKUP_TAP_PX) return p;
@@ -1071,8 +1188,15 @@ function pickupAtScreen(px, py) {
 function onPointerDown(ev) {
   ev.preventDefault();
   sfx.init();
-  if (el.htp.style.display === 'flex') {   // how-to modal open: any tap closes it
+  if (el.htp.style.display === 'flex') {   // how-to modal open
     el.htp.style.display = 'none';
+    if (ev.target && ev.target.closest && ev.target.closest('#enmlink')) {
+      el.enm.style.display = 'flex';   // hop over to the enemies page
+    }
+    return;
+  }
+  if (el.enm.style.display === 'flex') {   // enemies modal open: any tap closes
+    el.enm.style.display = 'none';
     return;
   }
   if (game.state === 'menu' || game.state === 'dead' || game.state === 'gameover') {
@@ -1426,6 +1550,13 @@ const sfx = (() => {
     shatter() { const r = worldRate(); noise(0.5, 2600, 0.4, 0.5, r, 0.35); noise(0.35, 4200, 0.6, 0.3, r, 0.35); },
     die() { tone(220, 40, 0.7, 0.4, 'sawtooth', 1, 0.5); noise(0.5, 400, 0.8, 0.4, 1, 0.5); },
     wave() { tone(440, 880, 0.18, 0.2, 'triangle'); },
+    lob() { const r = worldRate(); noise(0.16, 420, 1.1, 0.28, r, 0.3); },
+    boom() {
+      const r = worldRate();
+      noise(0.6, 180, 0.5, 0.85, r, 0.55);
+      noise(0.3, 900, 0.6, 0.4, r, 0.4);
+      tone(110, 26, 0.55, 0.5, 'sine', r, 0.5);
+    },
   };
 })();
 
@@ -1476,21 +1607,19 @@ function fmtWhen(t) {
 }
 
 function renderScores() {
-  const display = loadRuns();
-  // a best wave recorded before the table existed still deserves the top spot
-  const maxW = display.reduce((m, r) => Math.max(m, r.w), 0);
-  if (bestWave > 1 && bestWave > maxW) display.push({ id: 'legacy', w: bestWave, k: null, at: 0 });
+  // only real, complete runs make the table — no placeholder rows
+  const display = loadRuns().filter((r) => r.w != null && r.k != null && r.at);
   if (!display.length) {   // nothing to show until you've played
     el.scores.style.display = 'none';
     return;
   }
   el.scores.style.display = 'block';
   // a real leaderboard: sorted by the chosen metric, so #1 IS your best
-  display.sort((a, b) => ((b[scoreMetric] ?? -1) - (a[scoreMetric] ?? -1)) || (b.at - a.at));
+  display.sort((a, b) => (b[scoreMetric] - a[scoreMetric]) || (b.at - a.at));
   const rows = display.slice(0, 5).map((r, i) =>
     `<div class="scrow"><span class="scrank">#${i + 1}</span>` +
-    `<span class="scval">${r[scoreMetric] ?? '—'}</span>` +
-    `<span class="scdate">${r.at ? fmtWhen(r.at) : '—'}</span></div>`).join('');
+    `<span class="scval">${r[scoreMetric]}</span>` +
+    `<span class="scdate">${fmtWhen(r.at)}</span></div>`).join('');
   el.scores.innerHTML =
     '<div class="schead">TOP RUNS</div>' +
     `<div class="scpills">` +
@@ -1499,13 +1628,15 @@ function renderScores() {
     `</div>${rows}`;
 }
 
-// Mix of enemy types for wave n: shotgunners from wave 3, heavies + one
-// sniper from 4, armored (headshot-only) from 5.
+// Mix of enemy types for wave n: shotgunners + bombers from wave 3, heavies,
+// shield-bearers + one sniper from 4, armored (headshot-only) from 5.
 function composeWave(n) {
   const total = Math.min(1 + n, 12);
   const queue = [];
   if (n >= 3) for (let i = 0; i < Math.floor(total / 3); i++) queue.push('shotgunner');
+  if (n >= 3) for (let i = 0; i < Math.floor(total / 4); i++) queue.push('bomber');
   if (n >= 4) for (let i = 0; i < Math.floor(total / 4); i++) queue.push('heavy');
+  if (n >= 4) for (let i = 0; i < Math.floor(total / 5); i++) queue.push('shieldbearer');
   if (n >= 5) for (let i = 0; i < Math.floor(total / 5); i++) queue.push('armored');
   if (n >= 4) queue.push('sniper');
   queue.length = Math.min(queue.length, total);
@@ -1538,11 +1669,21 @@ const el = {
   sndbtn: document.getElementById('sndbtn'),
   howtolink: document.getElementById('howtolink'),
   htp: document.getElementById('htp'),
+  enm: document.getElementById('enm'),
+  menurow: document.getElementById('menurow'),
 };
 renderScores();
 
+// flat, single-color speaker glyphs
+const SND_ON_SVG =
+  '<svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/>' +
+  '<path d="M16 8.6a4.4 4.4 0 010 6.8M18.6 6.2a8 8 0 010 11.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
+const SND_OFF_SVG =
+  '<svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/>' +
+  '<path d="M16.2 9.7l4.6 4.6M20.8 9.7l-4.6 4.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
+
 function updateSndBtn() {
-  el.sndbtn.textContent = sfx.isMuted() ? '🔇' : '🔊';
+  el.sndbtn.innerHTML = sfx.isMuted() ? SND_OFF_SVG : SND_ON_SVG;
   el.sndbtn.classList.toggle('muted', sfx.isMuted());
 }
 updateSndBtn();
@@ -1578,8 +1719,7 @@ function showMenu() {
   el.overlay.querySelector('.rules').innerHTML = MENU_HTML.rules;
   el.overlay.querySelector('.go').innerHTML = MENU_HTML.go;
   el.overlay.querySelector('.rules').style.display = 'none';
-  el.sndbtn.style.display = 'flex';
-  el.howtolink.style.display = 'block';
+  el.menurow.style.display = 'flex';
   renderScores();
   updateSndBtn();
   el.menubtn.style.display = 'none';
@@ -1712,11 +1852,10 @@ function hitPlayer() {
     el.overlay.querySelector('h1').innerHTML = 'YOU<br><em>DIED</em>';
     el.overlay.querySelector('.sub').textContent = 'ONE HIT IS ALL IT TAKES';
     const r = el.overlay.querySelector('.rules');
-    r.innerHTML = `<div class="stats">WAVE ${game.wave} · ${game.kills} SHATTERED · BEST WAVE ${bestWave}</div>`;
+    r.innerHTML = `<div class="stats">${game.wave} WAVES · ${game.kills} SHATTERED · BEST ${bestWave} WAVES</div>`;
     r.style.display = 'flex';
     el.scores.style.display = 'none';
-    el.sndbtn.style.display = 'none';
-    el.howtolink.style.display = 'none';
+    el.menurow.style.display = 'none';
     el.overlay.querySelector('.go').textContent = 'TAP TO RETRY WAVE';
     el.menubtn.style.display = 'inline-block';
     el.overlay.classList.remove('hidden');
@@ -1732,10 +1871,19 @@ function clearField() {
     ripples[i].mesh.material.dispose();
     ripples.splice(i, 1);
   }
+  for (let i = grenades.length - 1; i >= 0; i--) {
+    scene.remove(grenades[i].mesh);
+    scene.remove(grenades[i].ring);
+    grenades[i].ring.material.dispose();
+    grenades.splice(i, 1);
+  }
   for (let i = pickups.length - 1; i >= 0; i--) removePickup(i);
 }
 
 function showGuide() {
+  // the guide IS the intro — suppress the WAVE 1 banner underneath it
+  clearTimeout(showBanner._t);
+  el.banner.classList.remove('show');
   const g = el.guide;
   g.style.display = 'flex';
   g.style.opacity = 1;
@@ -1832,9 +1980,20 @@ function frame(now) {
   player.vel.x += (tvx - player.vel.x) * mk;
   player.vel.z += (tvz - player.vel.z) * mk;
   if (player.vel.lengthSq() > 1e-4) {
+    const preX = player.pos.x, preZ = player.pos.z;
     player.pos.x += player.vel.x * dt;
     player.pos.z += player.vel.z * dt;
     resolvePlayerCollisions();
+    // a sprint grinding against a wall gives up instead of pinning you there
+    if (sprintTo) {
+      const moved = Math.hypot(player.pos.x - preX, player.pos.z - preZ);
+      if (moved < SPRINT_SPEED * dt * 0.25) {
+        sprintStuckT += dt;
+        if (sprintStuckT > 0.35) { sprintTo = null; sprintStuckT = 0; }
+      } else {
+        sprintStuckT = 0;
+      }
+    }
   }
 
   // soft aim assist: slow-motion only, and only after a stretch of free
@@ -1941,7 +2100,7 @@ function frame(now) {
       demoSpawnT -= sdt;
       if (demoSpawnT <= 0) {
         game.waveBearing = Math.random() * Math.PI * 2;
-        spawnEnemy(['gunner', 'gunner', 'shotgunner', 'heavy'][Math.floor(Math.random() * 4)]);
+        spawnEnemy(['gunner', 'gunner', 'shotgunner', 'heavy', 'bomber', 'shieldbearer'][Math.floor(Math.random() * 6)]);
         demoSpawnT = 0.9;
       }
     }
@@ -1956,6 +2115,7 @@ function frame(now) {
   }
   updateDebris(sdt);
   updateRipples(sdt);
+  updateGrenades(sdt);
   updatePickups(dt, sdt);
 
   // --- HUD

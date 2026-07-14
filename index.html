@@ -63,12 +63,12 @@
            opacity:0; transition:opacity 2s ease; }
   #guide .gdiv { position:absolute; top:12%; bottom:12%; left:50%; width:0;
                  border-left:2px dashed rgba(22,24,29,.3); }
-  #guide .gt { position:absolute; bottom:42%; transform:translateX(-50%);
+  #guide .gt { position:absolute; bottom:48%; transform:translateX(-50%);
                font-size:22px; font-weight:900; letter-spacing:.26em; color:#16181d;
                text-shadow:0 0 10px rgba(232,234,238,.95), 0 0 22px rgba(232,234,238,.9); }
   #guide .gtL { left:25%; }
   #guide .gtR { left:75%; }
-  #guide .gfire { position:absolute; left:0; right:0; top:30%; text-align:center;
+  #guide .gfire { position:absolute; left:0; right:0; top:38%; text-align:center;
                   font-size:15px; font-weight:900; letter-spacing:.3em; color:#ff2d1a;
                   text-shadow:0 0 10px rgba(232,234,238,.95); }
 
@@ -127,25 +127,30 @@
   #scores .scval { flex:0 0 44px; text-align:left; font-size:17px; color:#16181d; }
   #scores .scdate { margin-left:auto; font-size:11px; font-weight:600; letter-spacing:.04em; color:#8a9099; }
 
-  /* round sound toggle, bottom-right */
-  #sndbtn { position:absolute; right:18px; bottom:calc(env(safe-area-inset-bottom, 0px) + 76px);
-            width:52px; height:52px; border-radius:50%; display:flex; align-items:center; justify-content:center;
-            border:1.5px solid rgba(22,24,29,.35); background:rgba(238,240,243,.6);
-            font-size:20px; }
-  #sndbtn.muted { opacity:.55; border-color:rgba(22,24,29,.18); }
-
-  /* small how-to link + modal */
-  #howtolink { position:absolute; left:0; right:0; bottom:calc(env(safe-area-inset-bottom, 0px) + 28px);
-               text-align:center; font-size:11px; font-weight:800; letter-spacing:.28em; color:#7a8089;
+  /* bottom row: how-to link + flat speaker toggle */
+  #menurow { position:absolute; left:0; right:0; bottom:calc(env(safe-area-inset-bottom, 0px) + 26px);
+             display:flex; align-items:center; justify-content:center; gap:30px; }
+  #howtolink { font-size:11px; font-weight:800; letter-spacing:.28em; color:#7a8089;
                text-shadow:0 0 10px rgba(232,234,238,.95); text-decoration:underline;
                text-underline-offset:4px; text-decoration-color:rgba(122,128,137,.5); }
-  #htp { position:fixed; inset:0; z-index:12; display:none; align-items:center; justify-content:center;
-         background:rgba(22,24,29,.35); }
-  #htp .htpcard { background:#eef0f3; border-radius:20px; padding:30px 36px; text-align:center;
-                  display:flex; flex-direction:column; gap:11px; box-shadow:0 12px 48px rgba(22,24,29,.35);
-                  font-size:13px; font-weight:700; letter-spacing:.12em; color:#40444c; }
-  #htp h2 { font-size:15px; font-weight:900; letter-spacing:.26em; color:#16181d; margin-bottom:6px; }
-  #htp .htpclose { margin-top:14px; font-size:10px; font-weight:800; letter-spacing:.28em; color:#9aa0ab; }
+  #sndbtn { width:32px; height:32px; display:flex; align-items:center; justify-content:center; color:#7a8089; }
+  #sndbtn svg { width:24px; height:24px; }
+  #sndbtn.muted { opacity:.55; }
+
+  /* modals: how-to + enemies */
+  #htp, #enm { position:fixed; inset:0; z-index:12; display:none; align-items:center; justify-content:center;
+               background:rgba(22,24,29,.35); }
+  .htpcard { background:#eef0f3; border-radius:20px; padding:30px 34px; text-align:center;
+             display:flex; flex-direction:column; gap:11px; box-shadow:0 12px 48px rgba(22,24,29,.35);
+             font-size:13px; font-weight:700; letter-spacing:.12em; color:#40444c;
+             max-width:min(330px, 86vw); }
+  .htpcard h2 { font-size:15px; font-weight:900; letter-spacing:.26em; color:#16181d; margin-bottom:6px; }
+  .htpcard .htpclose { margin-top:14px; font-size:10px; font-weight:800; letter-spacing:.28em; color:#9aa0ab; }
+  #enmlink { margin-top:10px; align-self:center; font-size:11px; font-weight:900; letter-spacing:.24em;
+             color:#ff2d1a; padding:9px 20px; border:1.5px solid rgba(255,45,26,.5); border-radius:999px; }
+  .enmcard .enrow { text-align:left; letter-spacing:.04em; }
+  .enmcard .enrow b { display:block; font-size:12px; letter-spacing:.18em; color:#16181d; }
+  .enmcard .enrow span { font-size:12px; font-weight:600; color:#6b7078; }
   #overlay .go { margin-top:30px; font-size:15px; font-weight:900; letter-spacing:.34em; color:#ff2d1a;
                  animation:pulse 1.2s ease-in-out infinite; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
@@ -188,8 +193,10 @@
   <div class="go">TAP TO BEGIN</div>
   <div id="scores"></div>
   <div class="rules"></div>
-  <div id="howtolink">HOW TO PLAY</div>
-  <div id="sndbtn">🔊</div>
+  <div id="menurow">
+    <div id="howtolink">HOW TO PLAY</div>
+    <div id="sndbtn"></div>
+  </div>
   <div id="menubtn">MAIN MENU</div>
 </div>
 
@@ -200,6 +207,21 @@
     <div>LEFT thumb — move</div>
     <div>RIGHT thumb — look</div>
     <div>TAP anywhere — shoot</div>
+    <div id="enmlink">ENEMIES ▸</div>
+    <div class="htpclose">TAP TO CLOSE</div>
+  </div>
+</div>
+
+<div id="enm">
+  <div class="htpcard enmcard">
+    <h2>ENEMIES</h2>
+    <div class="enrow"><b>GUNNER</b><span>advances and fires single shots</span></div>
+    <div class="enrow"><b>SHOTGUNNER</b><span>closes in, fires a 5-pellet spread</span></div>
+    <div class="enrow"><b>BOMBER</b><span>lobs grenades — get off the red ring</span></div>
+    <div class="enrow"><b>HEAVY</b><span>always fires a 3-round burst</span></div>
+    <div class="enrow"><b>SHIELD-BEARER</b><span>blocks shots from the front — flank him</span></div>
+    <div class="enrow"><b>SNIPER</b><span>long range, very fast rounds — drops his rifle</span></div>
+    <div class="enrow"><b>ARMORED</b><span>the red head is the only weak point</span></div>
     <div class="htpclose">TAP TO CLOSE</div>
   </div>
 </div>
