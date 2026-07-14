@@ -778,13 +778,14 @@ function updateDrones(dtGame) {
       // the charge-up is audible, not just visible
       if (!d.chargeSounded && warn > 0 && S.mode === 'playing') {
         d.chargeSounded = true;
-        audio.charge();
+        audio.charge(E.telegraph);
       }
       // menu (attract mode) drones fire too — bolts just sail past the camera;
       // without this the telegraph wisp sticks at full swell forever
       if (d.nextFire <= 0 && (S.mode === 'playing' || S.mode === 'menu')) {
         fireBolt(d);
-        d.nextFire = d.fireEvery;
+        // a shard can never fire faster than it charges
+        d.nextFire = Math.max(d.fireEvery, E.telegraph);
         d.chargeSounded = false;
       }
 

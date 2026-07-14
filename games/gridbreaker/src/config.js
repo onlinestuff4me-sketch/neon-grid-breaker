@@ -82,7 +82,7 @@ export const TUNING = {
     doorTime: 0.5,      // game-seconds for a door to slide open
     emergeTime: 0.5,    // game-seconds for the drone to rise/pop out
     diveTime: 0.7,      // game-seconds for an "from above" dive-in
-    telegraph: 1.0,     // energy builds inside the crystal this long, then fires
+    telegraph: 2.0,     // energy builds inside the crystal this long, then fires
     triggerAhead: 26,   // door starts opening when you're this close
   },
 
