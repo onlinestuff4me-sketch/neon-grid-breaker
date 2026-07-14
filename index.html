@@ -27,8 +27,17 @@
   body.slowmo .lbar { transform:scaleY(1); }
 
   /* ---- HUD ---- */
-  #hud { position:fixed; inset:0; pointer-events:none;
+  #hud { position:fixed; inset:0; pointer-events:none; z-index:7;
          padding:calc(env(safe-area-inset-top, 0px) + 10px) 14px calc(env(safe-area-inset-bottom, 0px) + 12px); }
+  /* HUD text sits on the letterbox bars in bullet time — flip it light */
+  body.slowmo #topbar, body.slowmo #ammo, body.slowmo #hint { color:#eef0f3; }
+  body.slowmo #timewrap .lbl { color:#9aa0ab; }
+  body.slowmo #timebar { background:rgba(238,240,243,.22); }
+  body.slowmo #ammo.shotgun { color:#ff5d4a; }
+
+  /* edge arrows: enemies in that direction, off-screen */
+  .edgearrow { position:absolute; display:none; font-size:26px; font-weight:900; color:#ff2d1a;
+               text-shadow:0 0 6px rgba(255,45,26,.35); pointer-events:none; }
   #crosshair { position:absolute; left:50%; top:50%; width:26px; height:26px; transform:translate(-50%,-50%); opacity:.85; }
   #crosshair::before, #crosshair::after { content:""; position:absolute; background:#111; }
   #crosshair::before { left:50%; top:0; width:2px; height:100%; transform:translateX(-50%); }
@@ -59,14 +68,14 @@
 
   /* first-wave onboarding guide: move / look zones + fire hint */
   #guide { position:fixed; inset:0; display:none; z-index:6; pointer-events:none;
-           opacity:0; transition:opacity 1s ease; }
+           opacity:0; transition:opacity 2s ease; background:rgba(232,234,238,.45); }
   #guide .gz { position:absolute; top:0; bottom:0; display:flex; flex-direction:column;
-               align-items:center; justify-content:center; gap:8px; }
-  #guide .gzL { left:0; width:70%; background:rgba(22,24,29,.07);
-                border-right:2px dashed rgba(22,24,29,.35); }
-  #guide .gzR { right:0; width:30%; background:rgba(255,45,26,.07); }
-  #guide .gt { font-size:22px; font-weight:900; letter-spacing:.22em; color:#16181d; }
-  #guide .gs { font-size:11px; font-weight:700; letter-spacing:.28em; color:#6b7078; }
+               align-items:center; justify-content:center; gap:10px; }
+  #guide .gzL { left:0; width:70%; background:rgba(22,24,29,.16);
+                border-right:3px dashed rgba(22,24,29,.55); }
+  #guide .gzR { right:0; width:30%; background:rgba(255,45,26,.16); }
+  #guide .gt { font-size:26px; font-weight:900; letter-spacing:.22em; color:#16181d; }
+  #guide .gs { font-size:12px; font-weight:800; letter-spacing:.24em; color:#40444c; }
   #guide .gring { width:64px; height:64px; border-radius:50%; border:3px solid rgba(22,24,29,.5);
                   display:flex; align-items:center; justify-content:center; font-size:24px; color:rgba(22,24,29,.6); }
   #guide .gfire { position:absolute; left:0; right:0; bottom:22%; text-align:center;

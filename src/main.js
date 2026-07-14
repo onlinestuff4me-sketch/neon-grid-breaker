@@ -30,14 +30,17 @@ const ENEMY_BULLET_SPEED = 11;    // base; creeps up slightly with each wave
 const BULLET_GRAVITY = 4;         // gentle drop, visible on long shots
 
 const WEAPONS = {
-  pistol: { cd: 0.22, pellets: 1, spread: 0, ammo: Infinity, kick: 1 },
-  shotgun: { cd: 0.55, pellets: 6, spread: 0.055, ammo: 4, kick: 1.8 },
+  pistol: { cd: 0.22, pellets: 1, spread: 0, ammo: Infinity, kick: 1, speed: 46 },
+  shotgun: { cd: 0.55, pellets: 6, spread: 0.055, ammo: 4, kick: 1.8, speed: 46 },
+  sniper: { cd: 0.9, pellets: 1, spread: 0, ammo: 3, kick: 2.4, speed: 95, pierce: 3 },
 };
 
-const AIM_RATE_HOLD = 9;          // auto-aim easing rate while time is frozen
-const AIM_RATE_FREE = 3.5;        // ... and while time flows
-const AIM_RATE_BOOST = 7.5;       // swing-to-next-target rate just after a kill
-                                  // (a smooth swing, not a jerk)
+// Soft aim assist: the camera never swings on its own — it only eases onto a
+// target that's already near your crosshair. Off-screen threats get edge arrows.
+const AIM_ASSIST_CONE = 0.3;      // radians off-crosshair where assist engages
+const AIM_ASSIST_HOLD = 5;        // easing rate while time is frozen
+const AIM_ASSIST_FREE = 2.5;      // ... and while time flows
+const EDGE_ARROW_MIN = 0.34;      // bearing (rad) beyond which an enemy gets an arrow
 const FOV_NORMAL = 80;
 const FOV_SLOW = 66;              // bullet-time zoom
 
@@ -80,6 +83,7 @@ const MAT_WHITE = new THREE.MeshLambertMaterial({ color: 0xf4f5f7 });
 const MAT_RED = new THREE.MeshLambertMaterial({ color: 0xff2d1a });
 const MAT_DARKRED = new THREE.MeshLambertMaterial({ color: 0xc61703 });
 const MAT_BLACK = new THREE.MeshLambertMaterial({ color: 0x16181d });
+const MAT_GUNMETAL = new THREE.MeshLambertMaterial({ color: 0x3a3d45 });
 
 function makeFloorTexture() {
   const c = document.createElement('canvas');
@@ -191,6 +195,16 @@ function segSegDistSq(p1, q1, p2, q2) {
   return dx * dx + dy * dy + dz * dz;
 }
 
+// Squared distance from point c to segment p->q.
+function segPointDistSq(p, q, cx, cy, cz) {
+  const dx = q.x - p.x, dy = q.y - p.y, dz = q.z - p.z;
+  const len2 = dx * dx + dy * dy + dz * dz;
+  let t = len2 > 1e-9 ? ((cx - p.x) * dx + (cy - p.y) * dy + (cz - p.z) * dz) / len2 : 0;
+  t = Math.min(Math.max(t, 0), 1);
+  const ex = p.x + dx * t - cx, ey = p.y + dy * t - cy, ez = p.z + dz * t - cz;
+  return ex * ex + ey * ey + ez * ez;
+}
+
 // Segment vs AABB (slab test). Returns entry fraction [0,1] or -1.
 function segAABB(p, q, box) {
   let tmin = 0, tmax = 1;
@@ -282,7 +296,22 @@ const shotgunVM = new THREE.Group();
   shotgunVM.add(barrelL, barrelR, receiver, grip);
 }
 shotgunVM.visible = false;
-gun.add(pistolVM, shotgunVM);
+
+const sniperVM = new THREE.Group();
+{
+  const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.04, 0.85), MAT_BLACK);
+  barrel.position.set(0, 0.02, -0.32);
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.09, 0.32), MAT_BLACK);
+  body.position.set(0, 0, 0.05);
+  const scope = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.16), MAT_GUNMETAL);
+  scope.position.set(0, 0.08, 0.02);
+  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.15, 0.08), MAT_BLACK);
+  grip.position.set(0, -0.1, 0.14);
+  grip.rotation.x = 0.3;
+  sniperVM.add(barrel, body, scope, grip);
+}
+sniperVM.visible = false;
+gun.add(pistolVM, shotgunVM, sniperVM);
 
 const muzzle = new THREE.Mesh(
   new THREE.SphereGeometry(0.045, 8, 8),
@@ -302,6 +331,7 @@ function setWeapon(type) {
   player.ammo = WEAPONS[type].ammo;
   pistolVM.visible = type === 'pistol';
   shotgunVM.visible = type === 'shotgun';
+  sniperVM.visible = type === 'sniper';
   updateAmmoHud();
 }
 
@@ -317,7 +347,9 @@ const bulletMatHalo = new THREE.MeshBasicMaterial({
   color: 0xff2d1a, transparent: true, opacity: 0.22, depthWrite: false,
 });
 
-function spawnBullet(pos, dir, fromPlayer) {
+// fromPlayer: opt = absolute speed (m/s), pierce = enemies it can pass through
+// enemy fire: opt = multiplier on the wave-scaled base speed
+function spawnBullet(pos, dir, fromPlayer, opt = 0, pierce = 0) {
   const mesh = new THREE.Mesh(bulletGeo, fromPlayer ? bulletMatP : bulletMatE);
   mesh.position.copy(pos);
   if (!fromPlayer) {
@@ -338,13 +370,13 @@ function spawnBullet(pos, dir, fromPlayer) {
   }));
   scene.add(trail);
   const speed = fromPlayer
-    ? PLAYER_BULLET_SPEED
-    : Math.min(ENEMY_BULLET_SPEED + (game.wave - 1) * 0.5, 16);
+    ? (opt || PLAYER_BULLET_SPEED)
+    : Math.min(ENEMY_BULLET_SPEED + (game.wave - 1) * 0.5, 16) * (opt || 1);
   bullets.push({
     mesh, trail,
     pos: pos.clone(), prev: pos.clone(),
     vel: dir.clone().multiplyScalar(speed),
-    fromPlayer, life: 6, rippleAcc: 0, whizzed: false,
+    fromPlayer, pierce, life: 6, rippleAcc: 0, whizzed: false,
   });
 }
 
@@ -474,16 +506,25 @@ function updateDebris(sdt) {
 const pickups = [];   // {g, spin, ring, t, life}
 const PICKUP_LIFE = 14;
 
-function spawnPickup(pos) {
+function spawnPickup(pos, type = 'shotgun') {
   const g = new THREE.Group();
   const spin = new THREE.Group();
-  const barrelL = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 0.8), MAT_BLACK);
-  barrelL.position.x = -0.04;
-  const barrelR = barrelL.clone();
-  barrelR.position.x = 0.04;
-  const stock = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.13, 0.3), MAT_BLACK);
-  stock.position.set(0, -0.03, 0.45);
-  spin.add(barrelL, barrelR, stock);
+  if (type === 'sniper') {
+    const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 1.15), MAT_BLACK);
+    const scope = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 0.2), MAT_GUNMETAL);
+    scope.position.set(0, 0.08, 0.15);
+    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, 0.28), MAT_BLACK);
+    stock.position.set(0, -0.03, 0.55);
+    spin.add(barrel, scope, stock);
+  } else {
+    const barrelL = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 0.8), MAT_BLACK);
+    barrelL.position.x = -0.04;
+    const barrelR = barrelL.clone();
+    barrelR.position.x = 0.04;
+    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.13, 0.3), MAT_BLACK);
+    stock.position.set(0, -0.03, 0.45);
+    spin.add(barrelL, barrelR, stock);
+  }
   spin.position.y = 0.85;
   spin.rotation.z = 0.25;
   const ring = new THREE.Mesh(
@@ -495,10 +536,10 @@ function spawnPickup(pos) {
   g.add(spin, ring);
   g.position.set(pos.x, 0, pos.z);
   scene.add(g);
-  pickups.push({ g, spin, ring, t: Math.random() * 6, life: PICKUP_LIFE });
+  pickups.push({ g, spin, ring, type, t: Math.random() * 6, life: PICKUP_LIFE });
   if (!spawnPickup.hinted) {   // one-time tutorial nudge
     spawnPickup.hinted = true;
-    showBanner('SHOTGUN DROP<small>DRAG UP TO RUN OVER IT</small>', 1600);
+    showBanner('WEAPON DROP<small>TAP IT TO SPRINT &amp; EQUIP</small>', 1600);
   }
 }
 
@@ -528,7 +569,7 @@ function updatePickups(dt, sdt) {
         p.g.position.z -= (dz / d) * pull;
       }
       if (d2 < 1.8 * 1.8) {
-        setWeapon('shotgun');
+        setWeapon(p.type);
         sfx.pickup();
         vibrate(20);
         removePickup(i);
@@ -544,34 +585,53 @@ const enemies = [];
 
 function buildEnemyMesh(type) {
   const g = new THREE.Group();
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.62, 0.26), type === 'rusher' ? MAT_DARKRED : MAT_RED);
+  // armored units are gunmetal with a bright red head — the head is the target
+  const bodyMat = type === 'armored' ? MAT_GUNMETAL
+    : (type === 'rusher' || type === 'sniper') ? MAT_DARKRED : MAT_RED;
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.62, 0.26), bodyMat);
   torso.position.y = 1.12;
   const head = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.28, 0.26), MAT_RED);
   head.position.y = 1.62;
-  const hips = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.2, 0.24), MAT_DARKRED);
+  if (type === 'armored') head.scale.setScalar(1.25);
+  const hips = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.2, 0.24), type === 'armored' ? MAT_GUNMETAL : MAT_DARKRED);
   hips.position.y = 0.74;
 
-  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.64, 0.17), MAT_RED);
+  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.64, 0.17), bodyMat);
+  legL.geometry = legL.geometry.clone();
   legL.geometry.translate(0, -0.32, 0);
   legL.position.set(-0.11, 0.66, 0);
   const legR = legL.clone();
   legR.position.x = 0.11;
 
-  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.5, 0.13), MAT_RED);
+  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.5, 0.13), bodyMat);
+  armL.geometry = armL.geometry.clone();
   armL.geometry.translate(0, -0.25, 0);
   armL.position.set(-0.29, 1.4, 0);
 
   // gun arm: pivots at the shoulder, raises to horizontal when aiming
   const armR = new THREE.Group();
   armR.position.set(0.29, 1.4, 0);
-  const armRMesh = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.5, 0.13), MAT_RED);
+  const armRMesh = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.5, 0.13), bodyMat);
   armRMesh.position.y = -0.25;
   armR.add(armRMesh);
   let egun = null;
   if (type !== 'rusher') {   // rushers come at you bare-handed
-    const big = type === 'heavy';
-    egun = new THREE.Mesh(new THREE.BoxGeometry(big ? 0.08 : 0.06, big ? 0.11 : 0.09, big ? 0.42 : 0.3), MAT_BLACK);
-    egun.position.set(0, -0.52, -0.1);
+    if (type === 'sniper') {
+      // the looming silhouette: a long, thin rifle with a scope
+      egun = new THREE.Group();
+      const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.06, 0.78), MAT_BLACK);
+      barrel.position.z = -0.18;
+      const scope = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.16), MAT_BLACK);
+      scope.position.set(0, 0.07, 0.02);
+      egun.add(barrel, scope);
+      egun.position.set(0, -0.52, -0.1);
+    } else {
+      const w = type === 'shotgunner' ? 0.1 : type === 'heavy' ? 0.08 : 0.06;
+      const h = type === 'heavy' ? 0.11 : 0.09;
+      const l = type === 'shotgunner' ? 0.36 : type === 'heavy' ? 0.42 : 0.3;
+      egun = new THREE.Mesh(new THREE.BoxGeometry(w, h, l), MAT_BLACK);
+      egun.position.set(0, -0.52, -0.1);
+    }
     armR.add(egun);
   }
 
@@ -587,11 +647,16 @@ function buildEnemyMesh(type) {
   return { g, legL, legR, armL, armR, egun };
 }
 
-// type -> movement speed / silhouette scale / chance to drop a shotgun
+// Per-type combat config. drop: chance of a shotgun, or a weapon name for a
+// guaranteed named drop. mul: bullet speed multiplier. armored: body shots
+// bounce off — only headshots kill.
 const ENEMY_TYPES = {
-  gunner: { speed: 2.0, scale: [1, 1, 1], drop: 0.25 },
+  gunner: { speed: 2.0, scale: [1, 1, 1], drop: 0.25, aimTime: 0.55, cd: [0.9, 0.8], mul: 1, pellets: 1 },
   rusher: { speed: 3.4, scale: [0.85, 0.97, 0.85], drop: 0 },
-  heavy: { speed: 1.6, scale: [1.14, 1.05, 1.14], drop: 0.6 },
+  heavy: { speed: 1.6, scale: [1.14, 1.05, 1.14], drop: 0.6, aimTime: 0.55, cd: [1.8, 1.0], mul: 1, pellets: 1, burst: true },
+  shotgunner: { speed: 1.8, scale: [1.06, 1, 1.06], drop: 0.8, aimTime: 0.65, cd: [1.6, 0.9], mul: 0.85, pellets: 5, spread: 0.09, engage: [8, 4] },
+  armored: { speed: 1.4, scale: [1.1, 1.06, 1.1], drop: 0.35, aimTime: 0.6, cd: [1.2, 0.8], mul: 1, pellets: 1, armored: true },
+  sniper: { speed: 1.2, scale: [0.92, 1.05, 0.92], drop: 'sniper', aimTime: 1.35, cd: [2.4, 1.0], mul: 2.3, pellets: 1, engage: [26, 4] },
 };
 
 function pointInObstacle(x, z, pad) {
@@ -610,7 +675,7 @@ function spawnEnemy(type = 'gunner') {
   let x = 0, z = 0, placed = false;
   for (let tries = 0; tries < 24 && !placed; tries++) {
     const a = game.waveBearing + (Math.random() - 0.5) * 1.1;   // ±32°
-    const d = 12 + Math.random() * 7;
+    const d = type === 'sniper' ? 16 + Math.random() * 4 : 12 + Math.random() * 7;
     x = player.pos.x + Math.sin(a) * d;
     z = player.pos.z + Math.cos(a) * d;
     const lim = ARENA_HALF - 2;
@@ -635,41 +700,36 @@ function spawnEnemy(type = 'gunner') {
     walkPhase: Math.random() * Math.PI * 2,
     strafe: Math.random() < 0.5 ? 1 : -1,
     strafeT: 1 + Math.random() * 2,
-    fireCd: 0.15 + Math.random() * 0.35,
-    engageDist: 15 + Math.random() * 6,   // open fire from range, not point-blank
+    fireCd: (type === 'sniper' ? 1.2 : 0.15) + Math.random() * 0.35,
+    engageDist: spec.engage
+      ? spec.engage[0] + Math.random() * spec.engage[1]
+      : 15 + Math.random() * 6,           // open fire from range, not point-blank
     burstLeft: 0,
     burstT: 0,
     alive: true,
   });
+  if (type === 'sniper') {
+    warnFlash(['SNIPER.']);
+    sfx.wave();
+  }
 }
 
 function killEnemy(i, impulseDir) {
   const e = enemies[i];
   spawnShatter(e.pos, impulseDir);
-  if (Math.random() < ENEMY_TYPES[e.type].drop) spawnPickup(e.pos);
+  const drop = ENEMY_TYPES[e.type].drop;
+  if (typeof drop === 'string') spawnPickup(e.pos, drop);           // named loot
+  else if (Math.random() < drop) spawnPickup(e.pos, 'shotgun');
   scene.remove(e.g);
   enemies.splice(i, 1);
   game.kills++;
-  aimBoost = 1.0;   // camera swings to the next target — keep the taps coming
-  // big swing coming? warn with style
-  if (enemies.length) {
-    let nd = 1e9, nx = 0, nz = 0;
-    for (const o of enemies) {
-      const dx = o.pos.x - player.pos.x, dz = o.pos.z - player.pos.z;
-      const d2 = dx * dx + dz * dz;
-      if (d2 < nd) { nd = d2; nx = dx; nz = dz; }
-    }
-    let dYaw = Math.atan2(-nx, -nz) - player.yaw;
-    while (dYaw > Math.PI) dYaw -= Math.PI * 2;
-    while (dYaw < -Math.PI) dYaw += Math.PI * 2;
-    if (Math.abs(dYaw) > 0.7) warnFlash();
-  }
   killWord();
   sfx.shatter();
   vibrate(30);
 }
 
 function enemyFire(e, toPlayer) {
+  const spec = ENEMY_TYPES[e.type];
   const origin = _v2.set(e.pos.x, 1.35, e.pos.z).addScaledVector(toPlayer, 0.45);
   // shots go where you ARE — if you don't slide out of the way, they connect
   const target = _v3.set(
@@ -677,8 +737,23 @@ function enemyFire(e, toPlayer) {
     EYE_HEIGHT - 0.25 + (Math.random() - 0.5) * 0.24,
     player.pos.z + (Math.random() - 0.5) * 0.24
   );
-  spawnBullet(origin, target.sub(origin).normalize(), false);
+  const baseDir = target.sub(origin).normalize();
+  for (let p = 0; p < (spec.pellets || 1); p++) {
+    const d = baseDir.clone();
+    if (spec.spread) {
+      d.x += (Math.random() - 0.5) * 2 * spec.spread;
+      d.y += (Math.random() - 0.5) * 2 * spec.spread;
+      d.z += (Math.random() - 0.5) * 2 * spec.spread;
+      d.normalize();
+    }
+    spawnBullet(origin, d, false, spec.mul || 1);
+  }
   sfx.enemyShot();
+}
+
+// snipers carry their gun as a Group — flash its barrel, not the group
+function egunFlashTarget(e) {
+  return e.egun.isGroup ? e.egun.children[0] : e.egun;
 }
 
 function updateEnemy(e, sdt) {
@@ -728,6 +803,7 @@ function updateEnemy(e, sdt) {
       e.pos.z = Math.min(Math.max(e.pos.z, -lim), lim);
 
       if (e.type !== 'rusher' && dist < e.engageDist && e.fireCd <= 0 &&
+          performance.now() >= game.noFireBefore &&
           hasLineOfSight(_v2.set(e.pos.x, 1.35, e.pos.z), _v3.set(player.pos.x, EYE_HEIGHT - 0.3, player.pos.z))) {
         e.state = 'aim'; e.stateT = 0;
       }
@@ -735,18 +811,20 @@ function updateEnemy(e, sdt) {
     }
     case 'aim': {
       // telegraph: raise the gun arm, flash the gun white just before firing
-      const t = Math.min(e.stateT / 0.55, 1);
+      const spec = ENEMY_TYPES[e.type];
+      const aimT = spec.aimTime;
+      const t = Math.min(e.stateT / aimT, 1);
       e.armR.rotation.x = -t * (Math.PI / 2 - 0.06);
-      e.egun.material = e.stateT > 0.38 ? MAT_WHITEFLASH : MAT_BLACK;
-      if (e.stateT >= 0.55) {
+      egunFlashTarget(e).material = e.stateT > aimT * 0.7 ? MAT_WHITEFLASH : MAT_BLACK;
+      if (e.stateT >= aimT) {
         enemyFire(e, toPlayer);
-        e.egun.material = MAT_BLACK;
-        if (e.type === 'heavy') {   // heavies fire a 3-round burst
+        egunFlashTarget(e).material = MAT_BLACK;
+        if (spec.burst) {   // heavies fire a 3-round burst
           e.state = 'burst'; e.stateT = 0;
           e.burstLeft = 2; e.burstT = 0.22;
         } else {
           e.state = 'recover'; e.stateT = 0;
-          e.fireCd = 0.9 + Math.random() * 0.8;
+          e.fireCd = spec.cd[0] + Math.random() * spec.cd[1];
         }
       }
       break;
@@ -758,8 +836,9 @@ function updateEnemy(e, sdt) {
         e.burstLeft--;
         e.burstT = 0.22;
         if (e.burstLeft <= 0) {
+          const spec = ENEMY_TYPES[e.type];
           e.state = 'recover'; e.stateT = 0;
-          e.fireCd = 1.8 + Math.random() * 1.0;
+          e.fireCd = spec.cd[0] + Math.random() * spec.cd[1];
         }
       }
       break;
@@ -820,7 +899,7 @@ function playerFire() {
       d.z += (Math.random() - 0.5) * 2 * spec.spread;
       d.normalize();
     }
-    spawnBullet(origin, d, true);
+    spawnBullet(origin, d, true, spec.speed, spec.pierce || 0);
   }
   gunKick = spec.kick;
   muzzle.material.opacity = 1;
@@ -886,17 +965,36 @@ function updateBullets(sdt) {
     if (hit) continue;
 
     if (b.fromPlayer) {
+      let consumed = false;
       for (let j = enemies.length - 1; j >= 0; j--) {
         const e = enemies[j];
-        _v2.set(e.pos.x, 0.15, e.pos.z);
-        _v3.set(e.pos.x, 1.76, e.pos.z);
-        if (segSegDistSq(b.prev, b.pos, _v2, _v3) < 0.34 * 0.34) {
-          const impulse = _v1.copy(b.vel).normalize();
-          killBullet(i, null);
-          killEnemy(j, impulse);
-          hit = true;
+        const sy = e.g.scale.y, sx = Math.max(e.g.scale.x, 1);
+        // head first: a sphere around the skull (bigger on armored units)
+        const headR = (e.type === 'armored' ? 0.3 : 0.24) * sx;
+        const headshot = segPointDistSq(b.prev, b.pos, e.pos.x, 1.62 * sy, e.pos.z) < headR * headR;
+        let bodyshot = false;
+        if (!headshot) {
+          _v2.set(e.pos.x, 0.15, e.pos.z);
+          _v3.set(e.pos.x, 1.5 * sy, e.pos.z);
+          bodyshot = segSegDistSq(b.prev, b.pos, _v2, _v3) < 0.34 * 0.34;
+        }
+        if (!headshot && !bodyshot) continue;
+        if (bodyshot && e.type === 'armored') {
+          // armor shrugs it off — only headshots take these down
+          spawnSparks(b.pos, 0xf4f5f7);
+          sfx.clank();
+          consumed = true;
           break;
         }
+        const impulse = _v1.copy(b.vel).normalize();
+        killEnemy(j, impulse);
+        if (b.pierce > 0) { b.pierce--; continue; }   // sniper rounds keep going
+        consumed = true;
+        break;
+      }
+      if (consumed) {
+        killBullet(i, null);
+        continue;
       }
     } else if (player.alive && player.iframes <= 0) {
       _v2.set(player.pos.x, 0.2, player.pos.z);
@@ -930,13 +1028,12 @@ const PICKUP_TAP_PX = 120;      // generous screen-px hit radius for tapping a
                                 // drop — near-misses should grab, not fire
 
 const input = {
-  pointers: new Map(),          // id -> {sx,sy,x,y,ox,oy,role,downT,moved}
+  pointers: new Map(),          // id -> {sx,sy,x,y,ox,oy,role,downT}
   holding: false,
   stickX: 0, stickY: 0,         // -1..1 move-stick deflection
   lookIdle: 99,                 // seconds since the last manual look drag
 };
 let sprintTo = null;            // pickup currently being sprinted to
-let aimBoost = 0;               // snappy retarget window after a kill
 
 function stickUI(show, ox, oy, x, y) {
   const base = el.stickBase, nub = el.stickNub;
@@ -1172,7 +1269,7 @@ const sfx = (() => {
       g.connect(s); s.connect(echoIn);
     }
   }
-  function noise(dur, freq, q, gainV, rate = 1, send = 0.2) {
+  function noise(dur, freq, q, gainV, rate = 1, send = 0.2, at = 0) {
     if (!ctx) return;
     const n = Math.floor(ctx.sampleRate * dur);
     const buf = ctx.createBuffer(1, n, ctx.sampleRate);
@@ -1187,20 +1284,21 @@ const sfx = (() => {
     g.gain.value = gainV;
     src.connect(filt).connect(g);
     route(g, send);
-    src.start();
+    src.start(ctx.currentTime + at);
   }
-  function tone(f0, f1, dur, gainV, type = 'square', rate = 1, send = 0.15) {
+  function tone(f0, f1, dur, gainV, type = 'square', rate = 1, send = 0.15, at = 0) {
     if (!ctx) return;
+    const t0 = ctx.currentTime + at;
     const o = ctx.createOscillator();
     o.type = type;
-    o.frequency.setValueAtTime(f0 * rate, ctx.currentTime);
-    o.frequency.exponentialRampToValueAtTime(Math.max(f1 * rate, 1), ctx.currentTime + dur / rate);
+    o.frequency.setValueAtTime(f0 * rate, t0);
+    o.frequency.exponentialRampToValueAtTime(Math.max(f1 * rate, 1), t0 + dur / rate);
     const g = ctx.createGain();
-    g.gain.setValueAtTime(gainV, ctx.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + dur / rate);
+    g.gain.setValueAtTime(gainV, t0);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur / rate);
     o.connect(g);
     route(g, send);
-    o.start(); o.stop(ctx.currentTime + dur / rate);
+    o.start(t0); o.stop(t0 + dur / rate);
   }
 
   // world sounds sink in pitch & speed as time slows; your own gun less so
@@ -1235,7 +1333,16 @@ const sfx = (() => {
     shot(weapon) {
       const r = selfRate();
       if (weapon === 'shotgun') { noise(0.28, 550, 0.5, 0.75, r, 0.3); tone(160, 40, 0.18, 0.3, 'square', r); }
+      else if (weapon === 'sniper') {   // a whip-crack with a long tail
+        noise(0.09, 3200, 0.6, 0.7, r, 0.2);
+        noise(0.45, 900, 0.5, 0.55, r, 0.5);
+        tone(520, 45, 0.3, 0.35, 'sawtooth', r, 0.4);
+      }
       else { noise(0.14, 1600, 0.7, 0.5, r, 0.25); tone(320, 70, 0.1, 0.25, 'square', r); }
+    },
+    clank() {   // armor shrugging off a body shot
+      noise(0.06, 3200, 2.2, 0.45, 1, 0.25);
+      tone(950, 320, 0.11, 0.3, 'square', 1, 0.25);
     },
     whizz() {   // an enemy round passing your head — long and cavernous when slowed
       const r = worldRate();
@@ -1244,7 +1351,12 @@ const sfx = (() => {
       noise(0.7, 950, 1.8, 0.3 * loud, r, 0.6);
       tone(420, 90, 0.8, 0.22 * loud, 'sine', r, 0.6);
     },
-    pickup() { tone(520, 1040, 0.16, 0.25, 'triangle'); tone(780, 1560, 0.2, 0.18, 'triangle'); },
+    pickup() {   // the pump-action "shk-SHK": grab, slide back, slam forward
+      noise(0.035, 1900, 1.4, 0.5, 1, 0.08, 0);
+      noise(0.1, 750, 0.9, 0.5, 1, 0.12, 0.09);
+      noise(0.05, 2500, 1.6, 0.65, 1, 0.15, 0.21);
+      tone(230, 150, 0.09, 0.35, 'square', 1, 0.1, 0.21);
+    },
     enemyShot() {
       const r = worldRate();
       const loud = 1 + (1 - timeScale) * 0.7;
@@ -1268,19 +1380,24 @@ const game = {
   spawnTimer: 0,
   stateT: 0,
   waveBearing: 0,
+  noFireBefore: 0,   // enemies hold fire until this timestamp (onboarding grace)
+  introLen: 1.2,
 };
 
 let bestWave = 1;
 try { bestWave = Math.max(1, +localStorage.getItem('timeshard_best') || 1); } catch { /* private mode */ }
 
-// Mix of enemy types for wave n: rushers join at wave 2, heavies at wave 4.
+// Mix of enemy types for wave n: rushers from wave 2, shotgunners from 3,
+// heavies + one sniper from 4, armored (headshot-only) from 5.
 function composeWave(n) {
   const total = Math.min(1 + n, 12);
-  const rushers = n >= 2 ? Math.floor(total / 3) : 0;
-  const heavies = n >= 4 ? Math.floor(total / 4) : 0;
   const queue = [];
-  for (let i = 0; i < rushers; i++) queue.push('rusher');
-  for (let i = 0; i < heavies; i++) queue.push('heavy');
+  if (n >= 2) for (let i = 0; i < Math.floor(total / 3); i++) queue.push('rusher');
+  if (n >= 3) for (let i = 0; i < Math.floor(total / 4); i++) queue.push('shotgunner');
+  if (n >= 4) for (let i = 0; i < Math.floor(total / 4); i++) queue.push('heavy');
+  if (n >= 5) for (let i = 0; i < Math.floor(total / 5); i++) queue.push('armored');
+  if (n >= 4) queue.push('sniper');
+  queue.length = Math.min(queue.length, total);
   while (queue.length < total) queue.push('gunner');
   for (let i = queue.length - 1; i > 0; i--) {   // shuffle
     const j = Math.floor(Math.random() * (i + 1));
@@ -1313,20 +1430,57 @@ function updateAmmoHud() {
     el.ammo.textContent = 'PISTOL · ∞';
     el.ammo.classList.remove('shotgun');
   } else {
-    el.ammo.textContent = 'SHOTGUN · ' + '▮'.repeat(Math.max(player.ammo, 0));
+    el.ammo.textContent = `${player.weapon.toUpperCase()} · ` + '▮'.repeat(Math.max(player.ammo, 0));
     el.ammo.classList.add('shotgun');
   }
 }
 
 let lastWarnAt = -10;
-function warnFlash() {
+function warnFlash(words) {
   const now = performance.now() / 1000;
   if (now - lastWarnAt < 4) return;   // don't nag
   lastWarnAt = now;
-  el.warn.innerHTML =
-    '<span class="warnword">LOOK.</span><span class="warnword w2">OUT.</span>';
+  el.warn.innerHTML = words
+    .map((w, i) => `<span class="warnword${i ? ' w2' : ''}">${w}</span>`)
+    .join('');
   clearTimeout(warnFlash._t);
   warnFlash._t = setTimeout(() => { el.warn.innerHTML = ''; }, 1500);
+}
+
+// red chevrons at the screen edge pointing toward off-screen enemies
+const edgeArrows = [];
+function updateEdgeArrows(playing) {
+  const dirs = [];
+  if (playing && player.alive) {
+    for (const e of enemies) {
+      let dYaw = Math.atan2(-(e.pos.x - player.pos.x), -(e.pos.z - player.pos.z)) - player.yaw;
+      while (dYaw > Math.PI) dYaw -= Math.PI * 2;
+      while (dYaw < -Math.PI) dYaw += Math.PI * 2;
+      if (Math.abs(dYaw) > EDGE_ARROW_MIN) dirs.push(dYaw);
+      if (dirs.length >= 6) break;
+    }
+  }
+  while (edgeArrows.length < dirs.length) {
+    const d = document.createElement('div');
+    d.className = 'edgearrow';
+    d.textContent = '▲';
+    document.getElementById('hud').appendChild(d);
+    edgeArrows.push(d);
+  }
+  const cx = window.innerWidth / 2, cy = window.innerHeight / 2;
+  const R = Math.min(window.innerWidth, window.innerHeight) * 0.38;
+  for (let i = 0; i < edgeArrows.length; i++) {
+    const a = edgeArrows[i];
+    if (i < dirs.length) {
+      const th = dirs[i];
+      a.style.display = 'block';
+      a.style.left = `${cx + Math.sin(th) * R}px`;
+      a.style.top = `${cy - Math.cos(th) * R}px`;
+      a.style.transform = `translate(-50%,-50%) rotate(${th}rad)`;
+    } else {
+      a.style.display = 'none';
+    }
+  }
 }
 
 let killWordFlip = false;
@@ -1413,8 +1567,10 @@ function showGuide() {
   const g = el.guide;
   g.style.display = 'flex';
   g.style.opacity = 1;
-  setTimeout(() => { g.style.opacity = 0; }, 2000);   // hold 2s...
-  setTimeout(() => { g.style.display = 'none'; }, 3100);   // ...fade 1s, gone
+  setTimeout(() => { g.style.opacity = 0; }, 3000);   // hold 3s...
+  setTimeout(() => { g.style.display = 'none'; }, 5200);   // ...fade 2s, gone
+  game.introLen = 3;   // the first enemy steps out as the guide starts to fade
+  game.noFireBefore = performance.now() + 6000;   // ...and holds fire 1s after it clears
 }
 
 function advanceFromOverlay() {
@@ -1466,7 +1622,6 @@ function frame(now) {
   // --- player (real time)
   player.fireCd -= dt;
   player.iframes -= dt;
-  aimBoost -= dt;
   input.lookIdle += dt;
 
   // movement: stick deflection (or an active sprint) sets a target velocity,
@@ -1501,32 +1656,27 @@ function frame(now) {
     resolvePlayerCollisions();
   }
 
-  // auto-aim: ease toward the nearest enemy (prefer visible ones) — but yield
-  // to the player's own look drags, and snap fast to the next target on a kill
-  if (player.alive && playing && enemies.length && input.lookIdle > 0.8) {
-    let best = null, bestD = 1e9, bestVisible = null, bestVD = 1e9;
+  // soft aim assist: never swings the camera on its own — only eases onto the
+  // enemy already closest to your crosshair, and yields to your look drags
+  if (player.alive && playing && enemies.length && input.lookIdle > 0.3) {
+    let best = null, bestAng = AIM_ASSIST_CONE, bestYawD = 0, bestPitch = 0;
     for (const e of enemies) {
       const dx = e.pos.x - player.pos.x, dz = e.pos.z - player.pos.z;
-      const d2 = dx * dx + dz * dz;
-      if (d2 < bestD) { bestD = d2; best = e; }
-      if (d2 < bestVD &&
-          hasLineOfSight(_v2.set(player.pos.x, EYE_HEIGHT, player.pos.z), _v3.set(e.pos.x, 1.15, e.pos.z))) {
-        bestVD = d2; bestVisible = e;
-      }
+      const dist = Math.max(Math.hypot(dx, dz), 0.001);
+      let dYaw = Math.atan2(-dx, -dz) - player.yaw;
+      while (dYaw > Math.PI) dYaw -= Math.PI * 2;
+      while (dYaw < -Math.PI) dYaw += Math.PI * 2;
+      const wantPitch = Math.atan2(1.15 - EYE_HEIGHT, dist);
+      const ang = Math.hypot(dYaw, wantPitch - player.pitch);
+      if (ang < bestAng) { bestAng = ang; best = e; bestYawD = dYaw; bestPitch = wantPitch; }
     }
-    const t = bestVisible || best;
-    const dx = t.pos.x - player.pos.x, dz = t.pos.z - player.pos.z;
-    const dist = Math.max(Math.hypot(dx, dz), 0.001);
-    const wantYaw = Math.atan2(-dx, -dz);
-    const wantPitch = Math.atan2(1.15 - EYE_HEIGHT, dist);
-    let dYaw = wantYaw - player.yaw;
-    while (dYaw > Math.PI) dYaw -= Math.PI * 2;
-    while (dYaw < -Math.PI) dYaw += Math.PI * 2;
-    const rate = aimBoost > 0 ? AIM_RATE_BOOST : (input.holding ? AIM_RATE_HOLD : AIM_RATE_FREE);
-    const k = 1 - Math.exp(-rate * dt);
-    player.yaw += dYaw * k;
-    player.pitch += (wantPitch - player.pitch) * k;
+    if (best) {
+      const k = 1 - Math.exp(-(input.holding ? AIM_ASSIST_HOLD : AIM_ASSIST_FREE) * dt);
+      player.yaw += bestYawD * k;
+      player.pitch += (bestPitch - player.pitch) * k;
+    }
   }
+  updateEdgeArrows(playing);
 
   // subtle lean into strafes — sells the dodge
   const velRight = player.vel.x * Math.cos(player.yaw) + player.vel.z * -Math.sin(player.yaw);
@@ -1557,7 +1707,10 @@ function frame(now) {
     // spawning
     if (game.state === 'intro') {
       game.stateT += dt;
-      if (game.stateT > 1.2) game.state = 'play';
+      if (game.stateT > game.introLen) {
+        game.state = 'play';
+        game.introLen = 1.2;   // only the guided first wave has a long intro
+      }
     }
     if (game.state === 'play' && game.spawnQueue.length > 0 && enemies.length < maxAlive()) {
       game.spawnTimer -= sdt;
