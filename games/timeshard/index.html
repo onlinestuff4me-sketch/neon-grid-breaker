@@ -43,15 +43,26 @@
   #hudAmmo .orb { display:inline-block; width: 14px; height: 14px; border-radius: 50%;
     background: radial-gradient(circle at 35% 30%, #fff, #9ad8ff 40%, #274a6a 90%);
     box-shadow: 0 0 8px rgba(160,220,255,.9); vertical-align: -1px; margin-right: 6px; }
+  #hudShards { font-size: 12px; font-weight: 800; text-align: right; letter-spacing: .18em;
+    color: #7f97b5; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  #hudShards .n { color: #dff6ff; }
   #hudScore { font-size: 44px; line-height: 1; text-align: center; font-variant-numeric: tabular-nums; }
   #focusTrack {
     width: 140px; height: 5px; margin: 8px auto 0; border-radius: 999px;
     background: rgba(127,220,255,.14); overflow: hidden;
   }
+  #focusTrack.full {
+    animation: focusPulse 1.3s ease-in-out infinite;
+  }
+  @keyframes focusPulse {
+    0%, 100% { box-shadow: 0 0 4px rgba(127,220,255,.5); }
+    50% { box-shadow: 0 0 16px rgba(127,220,255,1); }
+  }
   #focusBar { height: 100%; width: 100%; background: #7fdcff; border-radius: 999px;
     transition: width .12s linear; }
   #focusLabel { text-align: center; font-size: 9px; letter-spacing: .34em; text-indent: .34em;
-    color: #4d6f8a; margin-top: 4px; }
+    color: #4d6f8a; margin-top: 4px; transition: color .3s; }
+  #focusLabel.full { color: #7fdcff; text-shadow: 0 0 8px rgba(127,220,255,.85); }
   #hudMsg {
     position: fixed; left: 0; right: 0; top: 32%; text-align: center; pointer-events: none;
     font-size: 24px; font-weight: 900; letter-spacing: .12em; opacity: 0; transition: opacity .3s;
@@ -79,10 +90,13 @@
     background: linear-gradient(180deg, rgba(4,16,28,.55) 0%, rgba(4,16,28,.06) 45%,
       rgba(4,16,28,.06) 70%, rgba(4,16,28,.6) 100%);
   }
-  .controls-line { margin-top: 24px; font-size: 13px; letter-spacing: .18em; color: #9fb9d8; }
-  .controls-line b { color: #eef9ff; }
-  .bestline { margin-top: 12px; font-size: 13px; letter-spacing: .14em; color: #7f97b5;
+  .controls { margin-top: 26px; display: flex; flex-direction: column; gap: 8px;
+    font-size: 14px; letter-spacing: .18em; color: #9fb9d8; }
+  .controls b { color: #eef9ff; }
+  .bestline { margin-top: 20px; font-size: 13px; letter-spacing: .14em; color: #7f97b5;
     min-height: 17px; font-variant-numeric: tabular-nums; }
+  .rankline { margin-top: 6px; font-size: 10px; letter-spacing: .26em; text-indent: .26em;
+    color: #4d6f8a; min-height: 13px; }
   .screen.clear .tap { position: fixed; bottom: calc(env(safe-area-inset-bottom, 0px) + 15vh); }
 
   /* ------- pause menu ------- */
@@ -131,7 +145,10 @@
   <div id="hud">
     <div class="row">
       <div id="shields">◆◆◆</div>
-      <div id="hudAmmo"><span class="orb"></span><span id="ammoCount">14</span></div>
+      <div>
+        <div id="hudAmmo"><span class="orb"></span><span id="ammoCount">14</span></div>
+        <div id="hudShards">SHARDS <span class="n" id="shardCount">0</span></div>
+      </div>
     </div>
     <div id="hudScore" class="chrome">0</div>
     <div id="focusTrack"><div id="focusBar"></div></div>
@@ -144,19 +161,24 @@
   <div id="startScreen" class="screen clear visible">
     <div class="logo chrome">TIME<br>SHARD</div>
     <div class="tagline neon-pink">TIME · OBEYS · YOU</div>
-    <div class="controls-line"><b>HOLD</b> — SLOW TIME · <b>DRAG</b> — WEAVE · <b>TAP</b> — FIRE</div>
-    <div class="weekname neon-ice" id="weekLabel" style="margin-top:14px; font-size:15px;">2026-W29</div>
+    <div class="controls">
+      <div><b>HOLD</b> — SLOW TIME</div>
+      <div><b>DRAG</b> — WEAVE</div>
+      <div><b>TAP</b> — FIRE</div>
+    </div>
     <div class="bestline" id="startBest"></div>
+    <div class="rankline" id="startRank"></div>
     <div class="tap neon-ice">TAP TO ENTER</div>
   </div>
 
   <div id="pauseScreen" class="screen">
     <div class="pausetitle neon-ice">PAUSED</div>
     <div class="bigscore chrome" id="pauseScore">0</div>
+    <div class="bestline" id="pauseShards"></div>
     <div class="menubtns">
       <button class="menubtn" id="btnResume">RESUME</button>
       <button class="menubtn" id="btnRestart">RESTART</button>
-      <button class="menubtn" id="btnExit">EXIT</button>
+      <button class="menubtn" id="btnEndRun">END RUN</button>
     </div>
     <div class="menubtns">
       <button class="menubtn" id="btnSoundToggle">SOUND: ON</button>
@@ -168,14 +190,18 @@
   </div>
 
   <div id="overScreen" class="screen">
-    <div class="overtitle neon-pink">TIME CAUGHT YOU</div>
+    <div class="overtitle neon-pink" id="overTitle">TIME CAUGHT YOU</div>
     <div class="bigscore chrome" id="finalScore">0</div>
     <div class="newbest neon-ice" id="bestBadge"></div>
     <div class="stats" id="overStats"></div>
+    <div class="menubtns">
+      <button class="menubtn" id="btnMenu">MENU</button>
+    </div>
     <div class="tap neon-ice">TAP TO RETRY</div>
   </div>
 
   <div class="cornerbtns">
+    <button id="btnSound" title="Sound" style="display:none">♪</button>
     <button id="btnPause" title="Pause" style="display:none">⏸</button>
   </div>
 
