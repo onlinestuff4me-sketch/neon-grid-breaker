@@ -35,11 +35,13 @@ const WEAPONS = {
   sniper: { cd: 0.9, pellets: 1, spread: 0, ammo: 3, kick: 2.4, speed: 95, pierce: 3 },
 };
 
-// Soft aim assist: the camera never swings on its own — it only eases onto a
-// target that's already near your crosshair. Off-screen threats get edge arrows.
+// Soft aim assist: the camera never swings on its own — after you stop
+// aiming for a while (in slow motion only), it gently settles the crosshair
+// onto a nearby target. It never pulls your pitch off the head, so headshots
+// stay yours. Off-screen threats get edge arrows.
 const AIM_ASSIST_CONE = 0.3;      // radians off-crosshair where assist engages
-const AIM_ASSIST_HOLD = 5;        // easing rate while time is frozen
-const AIM_ASSIST_FREE = 2.5;      // ... and while time flows
+const AIM_ASSIST_RATE = 3.5;      // gentle easing rate
+const AIM_ASSIST_DELAY = 2.5;     // seconds of free aiming before it engages
 const EDGE_ARROW_MIN = 0.34;      // bearing (rad) beyond which an enemy gets an arrow
 const FOV_NORMAL = 80;
 const FOV_SLOW = 66;              // bullet-time zoom
@@ -737,6 +739,11 @@ function enemyFire(e, toPlayer) {
     EYE_HEIGHT - 0.25 + (Math.random() - 0.5) * 0.24,
     player.pos.z + (Math.random() - 0.5) * 0.24
   );
+  // ballistic compensation: aim above the torso by the gravity drop over the
+  // flight, so the round arrives at chest height instead of plowing the dirt
+  const speed = Math.min(ENEMY_BULLET_SPEED + (game.wave - 1) * 0.5, 16) * (spec.mul || 1);
+  const tFly = origin.distanceTo(target) / speed;
+  target.y += 0.5 * BULLET_GRAVITY * tFly * tFly;
   const baseDir = target.sub(origin).normalize();
   for (let p = 0; p < (spec.pellets || 1); p++) {
     const d = baseDir.clone();
@@ -1064,6 +1071,10 @@ function pickupAtScreen(px, py) {
 function onPointerDown(ev) {
   ev.preventDefault();
   sfx.init();
+  if (el.htp.style.display === 'flex') {   // how-to modal open: any tap closes it
+    el.htp.style.display = 'none';
+    return;
+  }
   if (game.state === 'menu' || game.state === 'dead' || game.state === 'gameover') {
     // brief lockout after dying so panic taps don't skip the death screen
     if (game.state === 'dead' && performance.now() - deathAt < 1000) return;
@@ -1075,6 +1086,10 @@ function onPointerDown(ev) {
       if (ev.target.closest('#sndbtn')) {   // sound toggle, not a game start
         sfx.setMuted(!sfx.isMuted());
         updateSndBtn();
+        return;
+      }
+      if (ev.target.closest('#howtolink')) {   // open the how-to modal
+        el.htp.style.display = 'flex';
         return;
       }
       const pill = ev.target.closest('.scpill');
@@ -1461,30 +1476,35 @@ function fmtWhen(t) {
 }
 
 function renderScores() {
-  const runs = loadRuns();
-  const ranked = [...runs].sort((a, b) => (b[scoreMetric] - a[scoreMetric]) || (b.at - a.at));
-  const rankOf = new Map(ranked.map((r, i) => [r.id, i + 1]));
-  const rows = runs.length
-    ? runs.map((r) =>
-        `<div class="scrow"><span class="scrank">#${rankOf.get(r.id)}</span>` +
-        `<span class="scval">${r[scoreMetric]}</span>` +
-        `<span class="scdate">${fmtWhen(r.at)}</span></div>`).join('')
-    : '<div class="scempty">NO RUNS YET</div>';
+  const display = loadRuns();
+  // a best wave recorded before the table existed still deserves the top spot
+  const maxW = display.reduce((m, r) => Math.max(m, r.w), 0);
+  if (bestWave > 1 && bestWave > maxW) display.push({ id: 'legacy', w: bestWave, k: null, at: 0 });
+  if (!display.length) {   // nothing to show until you've played
+    el.scores.style.display = 'none';
+    return;
+  }
+  el.scores.style.display = 'block';
+  // a real leaderboard: sorted by the chosen metric, so #1 IS your best
+  display.sort((a, b) => ((b[scoreMetric] ?? -1) - (a[scoreMetric] ?? -1)) || (b.at - a.at));
+  const rows = display.slice(0, 5).map((r, i) =>
+    `<div class="scrow"><span class="scrank">#${i + 1}</span>` +
+    `<span class="scval">${r[scoreMetric] ?? '—'}</span>` +
+    `<span class="scdate">${r.at ? fmtWhen(r.at) : '—'}</span></div>`).join('');
   el.scores.innerHTML =
-    `<div class="schead">RECENT RUNS · BEST WAVE ${bestWave}</div>` +
+    '<div class="schead">TOP RUNS</div>' +
     `<div class="scpills">` +
-    `<span class="scpill${scoreMetric === 'w' ? ' active' : ''}" data-m="w">WAVE</span>` +
+    `<span class="scpill${scoreMetric === 'w' ? ' active' : ''}" data-m="w">WAVES</span>` +
     `<span class="scpill${scoreMetric === 'k' ? ' active' : ''}" data-m="k">SHARDS</span>` +
     `</div>${rows}`;
 }
 
-// Mix of enemy types for wave n: rushers from wave 2, shotgunners from 3,
-// heavies + one sniper from 4, armored (headshot-only) from 5.
+// Mix of enemy types for wave n: shotgunners from wave 3, heavies + one
+// sniper from 4, armored (headshot-only) from 5.
 function composeWave(n) {
   const total = Math.min(1 + n, 12);
   const queue = [];
-  if (n >= 2) for (let i = 0; i < Math.floor(total / 3); i++) queue.push('rusher');
-  if (n >= 3) for (let i = 0; i < Math.floor(total / 4); i++) queue.push('shotgunner');
+  if (n >= 3) for (let i = 0; i < Math.floor(total / 3); i++) queue.push('shotgunner');
   if (n >= 4) for (let i = 0; i < Math.floor(total / 4); i++) queue.push('heavy');
   if (n >= 5) for (let i = 0; i < Math.floor(total / 5); i++) queue.push('armored');
   if (n >= 4) queue.push('sniper');
@@ -1516,11 +1536,13 @@ const el = {
   guide: document.getElementById('guide'),
   scores: document.getElementById('scores'),
   sndbtn: document.getElementById('sndbtn'),
+  howtolink: document.getElementById('howtolink'),
+  htp: document.getElementById('htp'),
 };
 renderScores();
 
 function updateSndBtn() {
-  el.sndbtn.textContent = sfx.isMuted() ? '✕' : '♪';
+  el.sndbtn.textContent = sfx.isMuted() ? '🔇' : '🔊';
   el.sndbtn.classList.toggle('muted', sfx.isMuted());
 }
 updateSndBtn();
@@ -1555,9 +1577,9 @@ function showMenu() {
   el.overlay.querySelector('.sub').innerHTML = MENU_HTML.sub;
   el.overlay.querySelector('.rules').innerHTML = MENU_HTML.rules;
   el.overlay.querySelector('.go').innerHTML = MENU_HTML.go;
-  el.overlay.querySelector('.rules').style.display = 'flex';
-  el.scores.style.display = 'block';
+  el.overlay.querySelector('.rules').style.display = 'none';
   el.sndbtn.style.display = 'flex';
+  el.howtolink.style.display = 'block';
   renderScores();
   updateSndBtn();
   el.menubtn.style.display = 'none';
@@ -1694,6 +1716,7 @@ function hitPlayer() {
     r.style.display = 'flex';
     el.scores.style.display = 'none';
     el.sndbtn.style.display = 'none';
+    el.howtolink.style.display = 'none';
     el.overlay.querySelector('.go').textContent = 'TAP TO RETRY WAVE';
     el.menubtn.style.display = 'inline-block';
     el.overlay.classList.remove('hidden');
@@ -1814,10 +1837,13 @@ function frame(now) {
     resolvePlayerCollisions();
   }
 
-  // soft aim assist: never swings the camera on its own — only eases onto the
-  // enemy already closest to your crosshair, and yields to your look drags
-  if (player.alive && playing && enemies.length && input.lookIdle > 0.3) {
-    let best = null, bestAng = AIM_ASSIST_CONE, bestYawD = 0, bestPitch = 0;
+  // soft aim assist: slow-motion only, and only after a stretch of free
+  // aiming — then it gently drifts the crosshair onto the nearest target.
+  // Pitch is never corrected while you're aiming anywhere on the body column
+  // (chest to top of head), so lining up headshots is never fought.
+  if (player.alive && playing && enemies.length &&
+      input.holding && input.lookIdle > AIM_ASSIST_DELAY) {
+    let best = null, bestAng = AIM_ASSIST_CONE, bestYawD = 0, bestDist = 1;
     for (const e of enemies) {
       const dx = e.pos.x - player.pos.x, dz = e.pos.z - player.pos.z;
       const dist = Math.max(Math.hypot(dx, dz), 0.001);
@@ -1826,12 +1852,16 @@ function frame(now) {
       while (dYaw < -Math.PI) dYaw += Math.PI * 2;
       const wantPitch = Math.atan2(1.15 - EYE_HEIGHT, dist);
       const ang = Math.hypot(dYaw, wantPitch - player.pitch);
-      if (ang < bestAng) { bestAng = ang; best = e; bestYawD = dYaw; bestPitch = wantPitch; }
+      if (ang < bestAng) { bestAng = ang; best = e; bestYawD = dYaw; bestDist = dist; }
     }
     if (best) {
-      const k = 1 - Math.exp(-(input.holding ? AIM_ASSIST_HOLD : AIM_ASSIST_FREE) * dt);
+      const k = 1 - Math.exp(-AIM_ASSIST_RATE * dt);
       player.yaw += bestYawD * k;
-      player.pitch += (bestPitch - player.pitch) * k;
+      const pitchChest = Math.atan2(1.15 - EYE_HEIGHT, bestDist);
+      const pitchHeadTop = Math.atan2(1.62 * best.g.scale.y + 0.2 - EYE_HEIGHT, bestDist);
+      const lo = Math.min(pitchChest, pitchHeadTop), hi = Math.max(pitchChest, pitchHeadTop);
+      if (player.pitch < lo) player.pitch += (lo - player.pitch) * k;
+      else if (player.pitch > hi) player.pitch += (hi - player.pitch) * k;
     }
   }
   updateEdgeArrows(playing);
@@ -1911,7 +1941,7 @@ function frame(now) {
       demoSpawnT -= sdt;
       if (demoSpawnT <= 0) {
         game.waveBearing = Math.random() * Math.PI * 2;
-        spawnEnemy(['gunner', 'gunner', 'rusher', 'shotgunner', 'heavy'][Math.floor(Math.random() * 5)]);
+        spawnEnemy(['gunner', 'gunner', 'shotgunner', 'heavy'][Math.floor(Math.random() * 4)]);
         demoSpawnT = 0.9;
       }
     }

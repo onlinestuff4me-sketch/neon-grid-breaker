@@ -70,8 +70,7 @@
   #guide .gtR { left:75%; }
   #guide .gfire { position:absolute; left:0; right:0; top:30%; text-align:center;
                   font-size:15px; font-weight:900; letter-spacing:.3em; color:#ff2d1a;
-                  text-shadow:0 0 10px rgba(232,234,238,.95);
-                  animation:pulse 1.2s ease-in-out infinite; }
+                  text-shadow:0 0 10px rgba(232,234,238,.95); }
 
   /* virtual move-stick (left thumb) */
   #stickbase, #sticknub { position:fixed; display:none; pointer-events:none; z-index:4;
@@ -122,19 +121,31 @@
                     padding:7px 18px; border:1.5px solid rgba(22,24,29,.3); border-radius:999px;
                     background:rgba(238,240,243,.55); }
   #scores .scpill.active { background:#16181d; color:#eef0f3; border-color:#16181d; }
-  #scores .scrow { display:flex; align-items:baseline; gap:12px; padding:3px 6px;
+  #scores .scrow { display:flex; align-items:baseline; padding:4px 10px;
                    font-weight:800; text-shadow:0 0 8px rgba(232,234,238,.95); }
-  #scores .scrank { flex:0 0 34px; text-align:right; font-size:14px; color:#ff2d1a; }
-  #scores .scval { flex:0 0 58px; text-align:right; font-size:17px; color:#16181d; }
-  #scores .scdate { font-size:11px; font-weight:600; letter-spacing:.04em; color:#8a9099; }
-  #scores .scempty { font-size:11px; font-weight:700; letter-spacing:.22em; color:#9aa0ab; }
+  #scores .scrank { flex:0 0 36px; text-align:left; font-size:14px; color:#ff2d1a; }
+  #scores .scval { flex:0 0 44px; text-align:left; font-size:17px; color:#16181d; }
+  #scores .scdate { margin-left:auto; font-size:11px; font-weight:600; letter-spacing:.04em; color:#8a9099; }
 
   /* round sound toggle, bottom-right */
   #sndbtn { position:absolute; right:18px; bottom:calc(env(safe-area-inset-bottom, 0px) + 76px);
             width:52px; height:52px; border-radius:50%; display:flex; align-items:center; justify-content:center;
             border:1.5px solid rgba(22,24,29,.35); background:rgba(238,240,243,.6);
-            font-size:22px; color:#16181d; }
-  #sndbtn.muted { color:#9aa0ab; border-color:rgba(22,24,29,.18); }
+            font-size:20px; }
+  #sndbtn.muted { opacity:.55; border-color:rgba(22,24,29,.18); }
+
+  /* small how-to link + modal */
+  #howtolink { position:absolute; left:0; right:0; bottom:calc(env(safe-area-inset-bottom, 0px) + 28px);
+               text-align:center; font-size:11px; font-weight:800; letter-spacing:.28em; color:#7a8089;
+               text-shadow:0 0 10px rgba(232,234,238,.95); text-decoration:underline;
+               text-underline-offset:4px; text-decoration-color:rgba(122,128,137,.5); }
+  #htp { position:fixed; inset:0; z-index:12; display:none; align-items:center; justify-content:center;
+         background:rgba(22,24,29,.35); }
+  #htp .htpcard { background:#eef0f3; border-radius:20px; padding:30px 36px; text-align:center;
+                  display:flex; flex-direction:column; gap:11px; box-shadow:0 12px 48px rgba(22,24,29,.35);
+                  font-size:13px; font-weight:700; letter-spacing:.12em; color:#40444c; }
+  #htp h2 { font-size:15px; font-weight:900; letter-spacing:.26em; color:#16181d; margin-bottom:6px; }
+  #htp .htpclose { margin-top:14px; font-size:10px; font-weight:800; letter-spacing:.28em; color:#9aa0ab; }
   #overlay .go { margin-top:30px; font-size:15px; font-weight:900; letter-spacing:.34em; color:#ff2d1a;
                  animation:pulse 1.2s ease-in-out infinite; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
@@ -168,7 +179,7 @@
   <div class="gdiv"></div>
   <div class="gt gtL">MOVE</div>
   <div class="gt gtR">LOOK</div>
-  <div class="gfire">TAP TO FIRE</div>
+  <div class="gfire">TAP ANYWHERE TO SHOOT</div>
 </div>
 
 <div id="overlay">
@@ -176,14 +187,21 @@
   <div class="sub">TIME MOVES ONLY WHEN YOU LET GO</div>
   <div class="go">TAP TO BEGIN</div>
   <div id="scores"></div>
-  <div class="rules">
+  <div class="rules"></div>
+  <div id="howtolink">HOW TO PLAY</div>
+  <div id="sndbtn">🔊</div>
+  <div id="menubtn">MAIN MENU</div>
+</div>
+
+<div id="htp">
+  <div class="htpcard">
+    <h2>HOW TO PLAY</h2>
     <div>HOLD — freezes time</div>
     <div>LEFT thumb — move</div>
     <div>RIGHT thumb — look</div>
     <div>TAP anywhere — shoot</div>
+    <div class="htpclose">TAP TO CLOSE</div>
   </div>
-  <div id="sndbtn">♪</div>
-  <div id="menubtn">MAIN MENU</div>
 </div>
 
 <script type="module" src="./src/main.js"></script>
