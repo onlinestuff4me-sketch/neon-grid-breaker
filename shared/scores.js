@@ -24,7 +24,9 @@ export function createScoreStore(gameId) {
     } catch { /* private mode etc. — play on without persistence */ }
   }
 
-  function recordRun(score) {
+  // `extra` = optional per-game stats stored alongside the score in history
+  // and top runs (e.g. timeshard passes { shards }).
+  function recordRun(score, extra = {}) {
     const data = load();
     const week = weekId();
     const day = todayId();
@@ -33,11 +35,12 @@ export function createScoreStore(gameId) {
 
     // Run history (most recent first) + all-time top runs. This is the local
     // stand-in for the future leaderboard API's "my runs" + "top runs".
+    const entry = { score, ...extra, week, at: Date.now() };
     data.history = data.history || [];
-    data.history.unshift({ score, week, at: Date.now() });
+    data.history.unshift(entry);
     data.history.length = Math.min(data.history.length, 20);
     data.top = data.top || [];
-    data.top.push({ score, week, at: Date.now() });
+    data.top.push(entry);
     data.top.sort((a, b) => b.score - a.score);
     data.top.length = Math.min(data.top.length, 10);
 

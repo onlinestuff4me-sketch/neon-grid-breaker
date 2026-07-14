@@ -36,7 +36,10 @@ and steer).
 | Steer | **Drag** the held finger to weave across the track. Steering reads real time — weaving through a slowed world is the power fantasy. |
 | Fire | **Tap** with a second finger (or a quick single tap). Shots are ballistic-compensated and softly aim-assisted: a tap hits what it points at. |
 | Bullet time | **Your shards live outside time**: they fly at full speed while the world crawls — firing in slow-mo is precision mode, not a dead trigger. |
-| Pause | ⏸ button: resume/restart/exit, the sound toggle, and local top-10 + recent-run boards. Sound is ON by default (and survives the iPhone mute switch). |
+| Pause | ⏸ button: resume/restart/**end run** (banks the score, shows the final screen), the sound toggle, and local top-10 + recent-run boards — every row shows score + shards (✦). |
+| Sound | ON by default, toggle on the start screen (♪) and in pause; survives the iPhone mute switch; unlocks on touch-end (iOS gesture rules). |
+| HUD | Shields · ammo · **SHARDS** kill counter · score · FOCUS bar that glows/pulses and reads **FOCUS FULL** when topped up. |
+| Menu | Minimal: three control lines, your last run + best + local placement, and the live game world drifting behind the title (attract mode, drones firing). |
 | Ammo | You start with 14 shards, max 30. Empty tank = dry click — go soul hunting. |
 | Enemies | Drones emerge from doors in the floor/walls (or dive from the sky), match your speed ahead of you, and fire. One hit shatters them (**+50**). |
 | Telegraph | A drone's magenta core swells ~0.7 s before each bolt — readable even in slow-mo. |

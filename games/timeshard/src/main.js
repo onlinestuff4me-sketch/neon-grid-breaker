@@ -635,7 +635,9 @@ function updateDrones(dtGame) {
       const warn = Math.max(0, 1 - Math.max(0, d.nextFire) / E.telegraph);
       d.core.scale.setScalar(1 + warn * 2.6);
       d.core.material.color.setHex(PALETTE.core).multiplyScalar(0.5 + warn * 0.8);
-      if (d.nextFire <= 0 && S.mode === 'playing') {
+      // menu (attract mode) drones fire too — bolts just sail past the camera;
+      // without this the telegraph core sticks at full swell forever
+      if (d.nextFire <= 0 && (S.mode === 'playing' || S.mode === 'menu')) {
         fireBolt(d);
         d.nextFire = d.fireEvery;
       }
@@ -699,6 +701,7 @@ function shatterDrone(drone, impact, shotVel) {
   S.points += TUNING.enemies.scoreKill;
   S.stats.kills += 1;
   S.shakeT = Math.max(S.shakeT, 0.14);
+  updateHUD();
 
   spawnSoul(pos, false); // the soul it leaves behind
 }
@@ -1121,6 +1124,7 @@ const hud = el('hud');
 function updateHUD() {
   el('ammoCount').textContent = S.ammo;
   el('hudAmmo').style.color = S.ammo <= 3 ? '#ff2fd6' : '#dff6ff';
+  el('shardCount').textContent = S.stats.kills;
   el('shields').textContent =
     '◆'.repeat(Math.max(0, S.shields)) + '◇'.repeat(TUNING.player.shields - Math.max(0, S.shields));
 }
@@ -1129,6 +1133,10 @@ function updateFocusBar() {
   const k = S.focus / TUNING.time.focusMax;
   el('focusBar').style.width = `${k * 100}%`;
   el('focusBar').style.background = S.focusOk ? '#7fdcff' : '#ff2fd6';
+  const full = k >= 0.999;
+  el('focusTrack').classList.toggle('full', full);
+  el('focusLabel').classList.toggle('full', full);
+  el('focusLabel').textContent = full ? 'FOCUS FULL' : 'FOCUS';
 }
 
 let msgTimer = null;
@@ -1160,14 +1168,21 @@ function fillStats(container, rows) {
 
 function showStart() {
   const s = scores.summary();
-  el('weekLabel').textContent = `${weekId()} TRACK`;
-  el('startBest').textContent = s.allTimeBest
-    ? `BEST ${s.allTimeBest} · WEEK ${s.weekBest}` + (s.streak > 1 ? ` · ${s.streak}\u{1F525}` : '')
+  const last = s.history[0];
+  el('startBest').textContent = last
+    ? `LAST ${last.score} ✦${last.shards ?? 0} · BEST ${s.allTimeBest}` +
+      (s.streak > 1 ? ` · ${s.streak}\u{1F525}` : '')
     : '';
+  // placement snapshot: where the last run sits on this device's top runs
+  // (becomes global placement once the leaderboard backend lands)
+  const rank = last ? s.top.findIndex((t) => t.at === last.at) + 1 : 0;
+  el('startRank').textContent = rank ? `#${rank} ON THIS DEVICE'S TOP RUNS` : '';
   el('startScreen').classList.add('visible');
   el('overScreen').classList.remove('visible');
   el('pauseScreen').classList.remove('visible');
   el('btnPause').style.display = 'none';
+  el('btnSound').style.display = 'block';
+  updateSoundLabel();
   hud.style.display = 'none';
   S.mode = 'menu';
 }
@@ -1181,12 +1196,14 @@ function pauseGame() {
   clearPointers();
   audio.stopMusic();
   el('pauseScore').textContent = S.score;
+  el('pauseShards').textContent = `SHARDS ✦${S.stats.kills}`;
   const s = scores.summary();
+  const row = (r) => `${r.score} ✦${r.shards ?? 0}`;
   fillStats(el('pauseTop'), s.top.length
-    ? s.top.slice(0, 5).map((r, i) => [`#${i + 1}  ${r.week}`, r.score])
+    ? s.top.slice(0, 5).map((r, i) => [`#${i + 1}  ${r.week}`, row(r)])
     : [['NO RUNS YET', '—']]);
   fillStats(el('pauseRecent'), s.history.length
-    ? s.history.slice(0, 5).map((r) => [new Date(r.at).toLocaleDateString(), r.score])
+    ? s.history.slice(0, 5).map((r) => [new Date(r.at).toLocaleDateString(), row(r)])
     : [['NO RUNS YET', '—']]);
   updateSoundLabel();
   el('pauseScreen').classList.add('visible');
@@ -1202,8 +1219,9 @@ function resumeGame() {
 }
 
 let overShownAt = 0;
-function showGameOver() {
-  const r = scores.recordRun(S.score);
+function showGameOver(title = 'TIME CAUGHT YOU') {
+  const r = scores.recordRun(S.score, { shards: S.stats.kills });
+  el('overTitle').textContent = title;
   el('finalScore').textContent = S.score;
   el('bestBadge').textContent = r.isAllTimeBest ? '★ NEW ALL-TIME BEST ★'
     : r.isWeekBest ? '★ NEW WEEK BEST ★'
@@ -1212,7 +1230,7 @@ function showGameOver() {
     ? Math.round(100 * (S.stats.kills + S.stats.deflects) / S.stats.shots) : 0;
   fillStats(el('overStats'), [
     ['DISTANCE', `${Math.floor(S.distance)}m`],
-    ['DRONES', S.stats.kills],
+    ['SHARDS', `✦${S.stats.kills}`],
     ['DEFLECTS', S.stats.deflects],
     ['SOULS', S.stats.souls],
     ['ACCURACY', `${acc}%`],
@@ -1220,6 +1238,7 @@ function showGameOver() {
     ['ALL-TIME BEST', r.allTimeBest],
     ['DAY STREAK', `${r.streak}\u{1F525}`],
   ]);
+  el('pauseScreen').classList.remove('visible');
   el('overScreen').classList.add('visible');
   el('btnPause').style.display = 'none';
   hud.style.display = 'none';
@@ -1269,6 +1288,7 @@ function startRun() {
   el('overScreen').classList.remove('visible');
   el('pauseScreen').classList.remove('visible');
   el('btnPause').style.display = 'block';
+  el('btnSound').style.display = 'none';
   hud.style.display = 'block';
   updateHUD();
   if (!audio.muted) audio.startMusic();
@@ -1349,19 +1369,37 @@ audio.musicOn = !audio.muted;
 function updateSoundLabel() {
   el('btnSoundToggle').textContent = audio.muted ? 'SOUND: OFF' : 'SOUND: ON';
   el('btnSoundToggle').classList.toggle('off', audio.muted);
+  el('btnSound').classList.toggle('off', audio.muted);
 }
 
 el('btnPause').addEventListener('click', () => { audio.unlock(); pauseGame(); });
 el('btnResume').addEventListener('click', () => { audio.unlock(); resumeGame(); });
 el('btnRestart').addEventListener('click', () => { audio.unlock(); startRun(); });
-el('btnExit').addEventListener('click', () => showStart());
-el('btnSoundToggle').addEventListener('click', () => {
+el('btnMenu').addEventListener('click', () => showStart());
+
+// END RUN: bank the run right here — record it and show the final screen.
+el('btnEndRun').addEventListener('click', () => {
+  if (S.mode !== 'paused') return;
+  S.mode = 'dead';
+  S.deadTimer = 0;
+  showGameOver('RUN ENDED');
+});
+
+function toggleSound() {
   audio.unlock();
   audio.setMuted(!audio.muted);
   audio.musicOn = !audio.muted;
   try { localStorage.setItem(SOUND_KEY, audio.muted ? 'off' : 'on'); } catch { /* private mode */ }
   updateSoundLabel();
-});
+}
+el('btnSoundToggle').addEventListener('click', toggleSound);
+el('btnSound').addEventListener('click', toggleSound);
+
+// iOS only counts touchend/click as an audio-unlock gesture — unlocking on
+// pointerdown alone left the context suspended until some button was pressed
+// (which is why sound seemed to arrive only after opening the pause menu).
+window.addEventListener('pointerup', () => audio.unlock());
+window.addEventListener('click', () => audio.unlock());
 
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
