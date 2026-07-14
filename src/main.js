@@ -1,4 +1,4 @@
-// TIMESHARD — a SUPERHOT-inspired first-person arcade shooter for portrait mobile.
+// TIMESHARD — a first-person time-manipulation arcade shooter for portrait mobile.
 //
 // Core mechanic: time only flows when your finger is off the screen.
 //   HOLD + DRAG  -> time freezes (~5%), look around and aim
@@ -1010,7 +1010,7 @@ function killWord() {
   killWordFlip = !killWordFlip;
   const span = document.createElement('span');
   span.className = 'killword';
-  span.textContent = killWordFlip ? 'SUPER' : 'HOT';
+  span.textContent = killWordFlip ? 'TIME' : 'SHARD';
   el.flash.innerHTML = '';
   el.flash.appendChild(span);
   setTimeout(() => { if (span.parentNode) span.remove(); }, 650);
@@ -1149,7 +1149,7 @@ function frame(now) {
     if (game.state === 'play' && game.spawnQueue.length === 0 && enemies.length === 0) {
       game.state = 'clear';
       game.stateT = 0;
-      showBanner(`WAVE ${game.wave} CLEAR<small>SUPER · HOT · SUPER · HOT</small>`, 2000);
+      showBanner(`WAVE ${game.wave} CLEAR<small>TIME · SHARD · TIME · SHARD</small>`, 2000);
     }
   } else if (game.state === 'clear') {
     updateBullets(sdt);
