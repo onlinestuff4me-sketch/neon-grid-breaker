@@ -8,10 +8,13 @@
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { TUNING, PALETTE } from './config.js';
-import { weeklySeed, weekId, mulberry32 } from './rng.js';
+import { weeklySeed, weekId } from '../../../shared/rng.js';
+import { createScoreStore } from '../../../shared/scores.js';
 import { LevelGen } from './levelgen.js';
 import { SynthAudio } from './audio.js';
-import { recordRun, summary } from './scores.js';
+
+const scores = createScoreStore('gridbreaker');
+const weeklyTag = () => `gridbreaker/v${TUNING.weekly.generatorVersion}`;
 
 // ---------------------------------------------------------------------------
 // Collision groups
@@ -312,7 +315,7 @@ const S = {
   time: 0,
 };
 
-let levelGen = new LevelGen(weeklySeed(TUNING.weekly.generatorVersion));
+let levelGen = new LevelGen(weeklySeed(weeklyTag()));
 const panes = [];     // live glass panes
 const crystals = [];
 const balls = [];
@@ -735,7 +738,7 @@ function fillStats(container, rows) {
 }
 
 function showStart() {
-  const s = summary();
+  const s = scores.summary();
   el('weekLabel').textContent = `${weekId()} GRID`;
   fillStats(el('startStats'), [
     ['WEEK BEST', s.weekBest],
@@ -749,7 +752,7 @@ function showStart() {
 }
 
 function showGameOver() {
-  const r = recordRun(S.score);
+  const r = scores.recordRun(S.score);
   el('finalScore').textContent = S.score;
   el('bestBadge').textContent = r.isAllTimeBest ? '★ NEW ALL-TIME BEST ★'
     : r.isWeekBest ? '★ NEW WEEK BEST ★'
@@ -792,7 +795,7 @@ function startRun() {
     speed: TUNING.speed.base, shakeT: 0, time: 0,
   });
   camera.position.set(0, TUNING.corridor.eyeHeight, 0);
-  levelGen = new LevelGen(weeklySeed(TUNING.weekly.generatorVersion));
+  levelGen = new LevelGen(weeklySeed(weeklyTag()));
   streamRooms();
   el('startScreen').classList.remove('visible');
   el('overScreen').classList.remove('visible');

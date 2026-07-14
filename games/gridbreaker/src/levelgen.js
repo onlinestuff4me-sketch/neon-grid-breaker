@@ -10,7 +10,7 @@
 // motion: { kind:'slide'|'spin', speed, range, phase }
 
 import { TUNING, ramp } from './config.js';
-import { mulberry32, hashString } from './rng.js';
+import { mulberry32, hashString } from '../../../shared/rng.js';
 
 const PANE_H = 3.4; // full wall height
 

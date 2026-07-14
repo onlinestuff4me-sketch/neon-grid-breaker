@@ -1,5 +1,7 @@
-// Seeded RNG + weekly seed derivation. Every player in the same ISO week
-// gets the same endless layout, so weekly leaderboards compare like-for-like.
+// Shared: seeded RNG + weekly seed derivation. Every player in the same ISO
+// week gets the same generated level, so weekly leaderboards compare
+// like-for-like. Used by all games in this repo — pass a game-specific tag
+// (e.g. 'gridbreaker/v1') to weeklySeed so games never share seeds.
 
 export function mulberry32(seed) {
   let a = seed >>> 0;
@@ -35,8 +37,8 @@ export function weekId(date = new Date()) {
   return `${year}-W${String(week).padStart(2, '0')}`;
 }
 
-export function weeklySeed(generatorVersion, date = new Date()) {
-  return hashString(`gridbreaker/v${generatorVersion}/${weekId(date)}`);
+export function weeklySeed(tag, date = new Date()) {
+  return hashString(`${tag}/${weekId(date)}`);
 }
 
 export function todayId(date = new Date()) {
