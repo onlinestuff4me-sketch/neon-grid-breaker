@@ -14,7 +14,15 @@
   html, body { height:100%; overflow:hidden; background:#e8eaee; touch-action:none; overscroll-behavior:none; }
   body { font-family:-apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif; }
   #game { position:fixed; inset:0; }
-  canvas { display:block; }
+  canvas { display:block; transition:filter .28s ease; }
+  body.slowmo #game canvas { filter:saturate(.35) contrast(1.07) brightness(1.02); }
+
+  /* cinematic letterbox bars that slide in during bullet time */
+  .lbar { position:fixed; left:0; right:0; height:7vh; background:#0c0d10; z-index:5;
+          transform:scaleY(0); transition:transform .3s ease; pointer-events:none; }
+  #lbtop { top:0; transform-origin:top; }
+  #lbbot { bottom:0; transform-origin:bottom; }
+  body.slowmo .lbar { transform:scaleY(1); }
 
   /* ---- HUD ---- */
   #hud { position:fixed; inset:0; pointer-events:none;
@@ -55,7 +63,7 @@
 
   /* ---- slow-mo tint & damage flash ---- */
   #tint { position:fixed; inset:0; pointer-events:none; opacity:0;
-          background:radial-gradient(ellipse at center, rgba(80,140,255,0) 42%, rgba(60,110,235,.22) 100%); }
+          background:radial-gradient(ellipse at center, rgba(80,140,255,0) 30%, rgba(46,86,200,.28) 72%, rgba(18,28,80,.55) 100%); }
   #redflash { position:fixed; inset:0; pointer-events:none; opacity:0; background:radial-gradient(ellipse at center, rgba(255,45,26,.25) 0%, rgba(255,45,26,.75) 100%); }
 
   /* ---- full screen overlays ---- */
@@ -91,19 +99,21 @@
   <div id="flash"></div>
   <div id="banner"></div>
   <div id="ammo">PISTOL · ∞</div>
-  <div id="hint">HOLD — TIME STOPS · TAP — SHOOT · FLICK — DODGE</div>
+  <div id="hint">HOLD — TIME STOPS · DRAG — DODGE · RELEASE — FIRE</div>
 </div>
 
 <div id="tint"></div>
 <div id="redflash"></div>
+<div class="lbar" id="lbtop"></div>
+<div class="lbar" id="lbbot"></div>
 
 <div id="overlay">
   <h1>TIME<br><em>SHARD</em></h1>
   <div class="sub">TIME MOVES ONLY WHEN YOU LET GO</div>
   <div class="rules">
-    <div><span class="ic">✦</span><span><b>HOLD &amp; DRAG</b> — time freezes. Look around, line up your shot, watch the bullets hang in the air.</span></div>
-    <div><span class="ic">◉</span><span><b>TAP</b> — fire. While holding with one finger, tap with a second to fire in frozen time.</span></div>
-    <div><span class="ic">➤</span><span><b>FLICK</b> — dash to dodge bullets. One hit and you're done.</span></div>
+    <div><span class="ic">✦</span><span><b>HOLD</b> — time freezes. Incoming fire hangs in the air around you.</span></div>
+    <div><span class="ic">➤</span><span><b>DRAG</b> — slide out of the way. Your aim tracks the nearest enemy — you steer your body, not the camera. One hit and you're done.</span></div>
+    <div><span class="ic">◉</span><span><b>RELEASE</b> — fire. Or tap with a second finger to shoot while time is frozen.</span></div>
   </div>
   <div class="go">TAP TO BEGIN</div>
 </div>

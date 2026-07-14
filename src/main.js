@@ -20,7 +20,8 @@ const ARENA_HALF = 21;            // arena is a square, walls at ±ARENA_HALF
 const EYE_HEIGHT = 1.6;
 const PLAYER_RADIUS = 0.32;
 
-const TIME_SLOW = 0.05;           // time scale while finger is down
+const TIME_SLOW = 0.05;           // time scale while finger is down and still
+const TIME_MOVE_MAX = 0.3;        // ... creeping up to this while you drag-dodge
 const TIME_FULL = 1.0;
 const TIME_EASE = 14;             // easing rate between the two
 
@@ -33,15 +34,11 @@ const WEAPONS = {
   shotgun: { cd: 0.55, pellets: 6, spread: 0.055, ammo: 4, kick: 1.8 },
 };
 
-const DASH_SPEED = 13;
-const DASH_DECAY = 7.5;           // exponential decay rate of dash velocity
-const DASH_COOLDOWN = 0.9;
-const DASH_IFRAMES = 0.28;        // brief invulnerability at the start of a dash
-
-const TAP_MAX_MS = 220;
-const TAP_MAX_PX = 12;
-const FLICK_MIN_SPEED = 1.05;     // px per ms, measured over the last ~90ms
-const FLICK_MIN_PX = 48;
+const MOVE_SCALE = 6.5;           // metres moved per full screen-width of drag
+const AIM_RATE_HOLD = 9;          // auto-aim easing rate while time is frozen
+const AIM_RATE_FREE = 3.5;        // ... and while time flows
+const FOV_NORMAL = 80;
+const FOV_SLOW = 66;              // bullet-time zoom
 
 const GRAVITY = 9.8;
 
@@ -224,8 +221,6 @@ const player = {
   pos: new THREE.Vector3(0, 0, 14),
   yaw: 0,                     // yaw 0 looks down -Z, toward the arena center
   pitch: 0,
-  dashVel: new THREE.Vector3(),
-  dashCd: 0,
   iframes: 0,
   fireCd: 0,
   weapon: 'pistol',
@@ -314,16 +309,29 @@ const bullets = [];   // {mesh, trail, pos, vel, prev, fromPlayer, life}
 const bulletGeo = new THREE.SphereGeometry(0.04, 8, 8);
 const bulletMatP = new THREE.MeshBasicMaterial({ color: 0x16181d });
 const bulletMatE = new THREE.MeshBasicMaterial({ color: 0xff2d1a });
+const bulletMatCore = new THREE.MeshBasicMaterial({ color: 0xffffff });
+const bulletMatHalo = new THREE.MeshBasicMaterial({
+  color: 0xff2d1a, transparent: true, opacity: 0.22, depthWrite: false,
+});
 
 function spawnBullet(pos, dir, fromPlayer) {
   const mesh = new THREE.Mesh(bulletGeo, fromPlayer ? bulletMatP : bulletMatE);
   mesh.position.copy(pos);
-  if (!fromPlayer) mesh.scale.setScalar(1.7);   // enemy shots read bigger = dodgeable
+  if (!fromPlayer) {
+    // enemy shots are the thing you dodge — make them impossible to miss:
+    // a big red orb with a white-hot core and a soft halo
+    mesh.scale.setScalar(3.2);
+    const core = new THREE.Mesh(bulletGeo, bulletMatCore);
+    core.scale.setScalar(0.45);
+    const halo = new THREE.Mesh(bulletGeo, bulletMatHalo);
+    halo.scale.setScalar(2.2);
+    mesh.add(core, halo);
+  }
   scene.add(mesh);
   // tracer line so hanging bullets are legible in frozen time
   const trailGeo = new THREE.BufferGeometry().setFromPoints([pos.clone(), pos.clone()]);
   const trail = new THREE.Line(trailGeo, new THREE.LineBasicMaterial({
-    color: fromPlayer ? 0x16181d : 0xff2d1a, transparent: true, opacity: 0.35,
+    color: fromPlayer ? 0x16181d : 0xff2d1a, transparent: true, opacity: fromPlayer ? 0.35 : 0.85,
   }));
   scene.add(trail);
   const speed = fromPlayer
@@ -553,8 +561,8 @@ function spawnEnemy(type = 'gunner') {
     walkPhase: Math.random() * Math.PI * 2,
     strafe: Math.random() < 0.5 ? 1 : -1,
     strafeT: 1 + Math.random() * 2,
-    fireCd: 0.8 + Math.random() * 1.2,
-    engageDist: 7 + Math.random() * 6,
+    fireCd: 0.5 + Math.random() * 0.9,
+    engageDist: 8 + Math.random() * 6,
     burstLeft: 0,
     burstT: 0,
     alive: true,
@@ -575,10 +583,11 @@ function killEnemy(i, impulseDir) {
 
 function enemyFire(e, toPlayer) {
   const origin = _v2.set(e.pos.x, 1.35, e.pos.z).addScaledVector(toPlayer, 0.45);
+  // shots go where you ARE — if you don't slide out of the way, they connect
   const target = _v3.set(
-    player.pos.x + (Math.random() - 0.5) * 0.7,
-    EYE_HEIGHT - 0.25 + (Math.random() - 0.5) * 0.4,
-    player.pos.z + (Math.random() - 0.5) * 0.7
+    player.pos.x + (Math.random() - 0.5) * 0.24,
+    EYE_HEIGHT - 0.25 + (Math.random() - 0.5) * 0.24,
+    player.pos.z + (Math.random() - 0.5) * 0.24
   );
   spawnBullet(origin, target.sub(origin).normalize(), false);
   sfx.enemyShot();
@@ -649,7 +658,7 @@ function updateEnemy(e, sdt) {
           e.burstLeft = 2; e.burstT = 0.22;
         } else {
           e.state = 'recover'; e.stateT = 0;
-          e.fireCd = 1.5 + Math.random() * 1.3;
+          e.fireCd = 1.1 + Math.random() * 1.0;
         }
       }
       break;
@@ -662,7 +671,7 @@ function updateEnemy(e, sdt) {
         e.burstT = 0.22;
         if (e.burstLeft <= 0) {
           e.state = 'recover'; e.stateT = 0;
-          e.fireCd = 2.2 + Math.random() * 1.3;
+          e.fireCd = 1.8 + Math.random() * 1.0;
         }
       }
       break;
@@ -745,9 +754,11 @@ function updateBullets(sdt) {
     b.life -= sdt;
     b.mesh.position.copy(b.pos);
 
-    // trail stretches behind the bullet, longer at speed
+    // trail stretches behind the bullet, longer at speed (enemy tracers extra
+    // long so incoming fire reads instantly in frozen time)
     const tp = b.trail.geometry.attributes.position.array;
-    const back = _v1.copy(b.vel).normalize().multiplyScalar(-Math.min(b.vel.length() * 0.05, 1.2));
+    const back = _v1.copy(b.vel).normalize()
+      .multiplyScalar(-Math.min(b.vel.length() * (b.fromPlayer ? 0.05 : 0.2), b.fromPlayer ? 1.2 : 2.6));
     tp[0] = b.pos.x + back.x; tp[1] = b.pos.y + back.y; tp[2] = b.pos.z + back.z;
     tp[3] = b.pos.x; tp[4] = b.pos.y; tp[5] = b.pos.z;
     b.trail.geometry.attributes.position.needsUpdate = true;
@@ -794,31 +805,30 @@ function updateBullets(sdt) {
 }
 
 // ---------------------------------------------------------------------------
-// Input — Pointer Events: one primary finger drives everything
+// Input — Pointer Events. HOLD freezes time, DRAG slides you out of the way
+// (screen-relative: up = forward, left = strafe left), RELEASE fires.
+// The camera auto-tracks the nearest enemy, so your finger steers your body.
 // ---------------------------------------------------------------------------
 const input = {
   primaryId: null,
   holding: false,
-  downTime: 0,
-  totalMove: 0,
-  history: [],          // recent {t, x, y} samples for flick detection
+  lastX: 0,
+  lastY: 0,
+  dragSpeed: 0,   // smoothed px/frame — time moves (a little) when you move
 };
-
-const LOOK_SENS = 3.0;  // radians of yaw per full screen-width drag
 
 function onPointerDown(ev) {
   ev.preventDefault();
   sfx.init();
   if (game.state === 'menu' || game.state === 'dead' || game.state === 'gameover') {
     advanceFromOverlay();
-    return;
+    return;   // this pointer never becomes primary, so its release won't fire
   }
   if (input.primaryId === null) {
     input.primaryId = ev.pointerId;
     input.holding = true;
-    input.downTime = performance.now();
-    input.totalMove = 0;
-    input.history = [{ t: performance.now(), x: ev.clientX, y: ev.clientY }];
+    input.lastX = ev.clientX;
+    input.lastY = ev.clientY;
   } else {
     playerFire();   // second finger taps fire while the first holds time frozen
   }
@@ -827,61 +837,32 @@ function onPointerDown(ev) {
 function onPointerMove(ev) {
   if (ev.pointerId !== input.primaryId) return;
   ev.preventDefault();
-  const now = performance.now();
-  const last = input.history[input.history.length - 1];
-  const dx = ev.clientX - last.x;
-  const dy = ev.clientY - last.y;
-  input.totalMove += Math.abs(dx) + Math.abs(dy);
-  input.history.push({ t: now, x: ev.clientX, y: ev.clientY });
-  if (input.history.length > 24) input.history.shift();
+  const dx = ev.clientX - input.lastX;
+  const dy = ev.clientY - input.lastY;
+  input.lastX = ev.clientX;
+  input.lastY = ev.clientY;
+  input.dragSpeed = Math.min(input.dragSpeed + Math.hypot(dx, dy) * 0.02, 1);
+  if (!player.alive || (game.state !== 'play' && game.state !== 'intro' && game.state !== 'clear')) return;
 
+  // direct manipulation: finger displacement -> world displacement (real time,
+  // while the world is frozen — this is the dodge)
   const w = window.innerWidth;
-  player.yaw -= (dx / w) * LOOK_SENS;
-  player.pitch -= (dy / w) * LOOK_SENS;
-  player.pitch = Math.min(Math.max(player.pitch, -1.35), 1.35);
+  const sinY = Math.sin(player.yaw), cosY = Math.cos(player.yaw);
+  const fwdX = -sinY, fwdZ = -cosY;
+  const rightX = cosY, rightZ = -sinY;
+  const mx = (dx / w) * MOVE_SCALE;
+  const mz = (-dy / w) * MOVE_SCALE;
+  player.pos.x += rightX * mx + fwdX * mz;
+  player.pos.z += rightZ * mx + fwdZ * mz;
+  resolvePlayerCollisions();
 }
 
 function onPointerUp(ev) {
   if (ev.pointerId !== input.primaryId) return;
   ev.preventDefault();
-  const now = performance.now();
-  const held = now - input.downTime;
-
-  if (held < TAP_MAX_MS && input.totalMove < TAP_MAX_PX) {
-    playerFire();
-  } else {
-    // flick? measure velocity over the trailing ~90ms of the gesture
-    let j = input.history.length - 1;
-    while (j > 0 && now - input.history[j - 1].t < 90) j--;
-    const a = input.history[j];
-    const b = input.history[input.history.length - 1];
-    const dt = Math.max(now - a.t, 1);
-    const fx = b.x - a.x, fy = b.y - a.y;
-    const d = Math.hypot(fx, fy);
-    if (d / dt > FLICK_MIN_SPEED && d > FLICK_MIN_PX) tryDash(fx, fy);
-  }
   input.primaryId = null;
   input.holding = false;
-}
-
-function tryDash(screenX, screenY) {
-  if (player.dashCd > 0 || !player.alive || game.state !== 'play') return;
-  player.dashCd = DASH_COOLDOWN;
-  player.iframes = DASH_IFRAMES;
-  // map screen flick to world direction relative to where you're looking:
-  // flick up = forward, flick left = strafe left, etc.
-  const len = Math.hypot(screenX, screenY);
-  const fx = screenX / len, fy = screenY / len;
-  const sinY = Math.sin(player.yaw), cosY = Math.cos(player.yaw);
-  const fwd = { x: -sinY, z: -cosY };
-  const right = { x: cosY, z: -sinY };
-  player.dashVel.set(
-    (right.x * fx + fwd.x * -fy) * DASH_SPEED,
-    0,
-    (right.z * fx + fwd.z * -fy) * DASH_SPEED
-  );
-  sfx.dash();
-  vibrate(18);
+  playerFire();   // releasing is the trigger: aim in frozen time, let go, bang
 }
 
 renderer.domElement.style.touchAction = 'none';
@@ -1081,7 +1062,6 @@ function advanceFromOverlay() {
     player.alive = true;
     player.pos.set(0, 0, 14);
     player.yaw = 0; player.pitch = 0;
-    player.dashVel.set(0, 0, 0);
     player.iframes = 1;
     setWeapon('pistol');
     startWave(game.wave);
@@ -1098,10 +1078,14 @@ function frame(now) {
   const dt = Math.min((now - lastT) / 1000, 0.05);
   lastT = now;
 
-  // --- time scale: frozen while a finger is down, full speed otherwise
+  // --- time scale: frozen while a finger is down — but time moves (a little)
+  // when YOU move, so dodging costs the world a few frames
   const playing = game.state === 'play' || game.state === 'intro';
+  input.dragSpeed *= Math.exp(-dt * 6);
   let target = TIME_FULL;
-  if (playing && input.holding) target = TIME_SLOW;
+  if (playing && input.holding) {
+    target = TIME_SLOW + (TIME_MOVE_MAX - TIME_SLOW) * Math.min(input.dragSpeed, 1);
+  }
   if (game.state === 'dead') target = 0.12;
   if (game.state === 'menu') target = 0;
   timeScale += (target - timeScale) * Math.min(dt * TIME_EASE, 1);
@@ -1109,18 +1093,44 @@ function frame(now) {
 
   // --- player (real time)
   player.fireCd -= dt;
-  player.dashCd -= dt;
   player.iframes -= dt;
-  if (player.dashVel.lengthSq() > 0.01) {
-    player.pos.addScaledVector(player.dashVel, dt);
-    player.dashVel.multiplyScalar(Math.exp(-DASH_DECAY * dt));
-    resolvePlayerCollisions();
+
+  // auto-aim: ease the camera toward the nearest enemy (prefer visible ones)
+  if (player.alive && playing && enemies.length) {
+    let best = null, bestD = 1e9, bestVisible = null, bestVD = 1e9;
+    for (const e of enemies) {
+      const dx = e.pos.x - player.pos.x, dz = e.pos.z - player.pos.z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 < bestD) { bestD = d2; best = e; }
+      if (d2 < bestVD &&
+          hasLineOfSight(_v2.set(player.pos.x, EYE_HEIGHT, player.pos.z), _v3.set(e.pos.x, 1.15, e.pos.z))) {
+        bestVD = d2; bestVisible = e;
+      }
+    }
+    const t = bestVisible || best;
+    const dx = t.pos.x - player.pos.x, dz = t.pos.z - player.pos.z;
+    const dist = Math.max(Math.hypot(dx, dz), 0.001);
+    const wantYaw = Math.atan2(-dx, -dz);
+    const wantPitch = Math.atan2(1.15 - EYE_HEIGHT, dist);
+    let dYaw = wantYaw - player.yaw;
+    while (dYaw > Math.PI) dYaw -= Math.PI * 2;
+    while (dYaw < -Math.PI) dYaw += Math.PI * 2;
+    const k = 1 - Math.exp(-(input.holding ? AIM_RATE_HOLD : AIM_RATE_FREE) * dt);
+    player.yaw += dYaw * k;
+    player.pitch += (wantPitch - player.pitch) * k;
   }
 
   camera.position.set(player.pos.x, EYE_HEIGHT, player.pos.z);
   camera.rotation.order = 'YXZ';
   camera.rotation.y = player.yaw;
   camera.rotation.x = player.pitch;
+
+  // bullet-time zoom: FOV tightens as time slows
+  const wantFov = FOV_SLOW + (FOV_NORMAL - FOV_SLOW) * Math.min(timeScale, 1);
+  if (Math.abs(camera.fov - wantFov) > 0.05) {
+    camera.fov = wantFov;
+    camera.updateProjectionMatrix();
+  }
 
   // gun kick + sway
   gunKick = Math.max(0, gunKick - dt * 8);
@@ -1166,7 +1176,8 @@ function frame(now) {
   el.score.textContent = `WAVE ${game.wave}  ·  ${game.kills}`;
   el.timefill.style.width = `${Math.round(timeScale * 100)}%`;
   el.timefill.classList.toggle('slow', timeScale < 0.5);
-  el.tint.style.opacity = playing ? (1 - timeScale / TIME_FULL) * 0.9 : 0;
+  el.tint.style.opacity = playing ? (1 - timeScale / TIME_FULL) : 0;
+  document.body.classList.toggle('slowmo', playing && timeScale < 0.55);
   el.crosshair.classList.toggle('hot', player.fireCd > 0);
 
   renderer.render(scene, camera);

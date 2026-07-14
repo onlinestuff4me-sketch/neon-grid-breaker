@@ -11,11 +11,10 @@ The whole game is played with a single finger at a time:
 
 | Gesture | Effect |
 |---|---|
-| **Hold & drag** | Time freezes (~5% speed) while you look around, line up shots, and watch bullets hang in the air |
-| **Release** | Time snaps back to full speed |
-| **Tap** | Fire at the crosshair |
-| **Flick** | Dash / dodge in the flicked direction (brief invulnerability at the start) |
-| **Second-finger tap** *(optional)* | While holding to aim, tap with another finger to fire without unfreezing time |
+| **Hold** | Time freezes (~5% speed); incoming fire hangs glowing in the air |
+| **Drag** (while holding) | Slide your body out of the bullets' paths — up = forward, left = strafe left. Your aim auto-tracks the nearest enemy, so the finger steers your body, not the camera |
+| **Release** | Fire — and time snaps back to full speed |
+| **Second-finger tap** *(optional)* | While holding, tap with another finger to fire without unfreezing time |
 
 ## Features
 
@@ -25,7 +24,7 @@ The whole game is played with a single finger at a time:
 - **Shatter physics**: enemies burst into red shards with gravity, spin, and floor bounces
 - **Enemy AI**: advance with strafing, steer around cover, keep separation, telegraphed aiming (white gun flash before firing), melee when they get close
 - **Three enemy types**: gunners, fast bare-handed rushers (from wave 2), and slow heavies that fire 3-round bursts (from wave 4)
-- **Weapon pickups**: shattered gunners and heavies sometimes drop a shotgun (marked with a red ring) — dash over it to grab 4 shells of 6-pellet spread, then you're back to the infinite pistol
+- **Weapon pickups**: shattered gunners and heavies sometimes drop a shotgun (marked with a red ring) — slide over it to grab 4 shells of 6-pellet spread, then you're back to the infinite pistol
 - **TIMESHARD rules**: one hit kills you; one hit shatters them; endless escalating waves with enemy bullets creeping faster each wave
 - **Rotating arenas**: the cover layout changes every 3 waves (scattered cover → pillar court → corridors)
 - Synthesized sound effects (WebAudio, no assets), haptic feedback, kill-word flashes, best-wave tracking (localStorage)
