@@ -218,8 +218,6 @@ const droneMat = new THREE.MeshStandardMaterial({
   // translucent crystal so the magenta telegraph core inside stays readable
   transparent: true, opacity: 0.75,
 });
-const coreGeo = new THREE.SphereGeometry(0.14, 12, 10);
-const coreMat = new THREE.MeshBasicMaterial({ color: PALETTE.core });
 const shotGeo = new THREE.SphereGeometry(TUNING.player.shotRadius, 18, 12);
 const shotMat = new THREE.MeshStandardMaterial({
   color: PALETTE.chrome, metalness: 1.0, roughness: 0.07, envMapIntensity: 2.2,
@@ -571,11 +569,16 @@ function triggerPendingEvents() {
 
 function spawnDroneFromEvent(e) {
   const E = TUNING.enemies;
-  const mesh = new THREE.Mesh(droneGeo, droneMat);
+  // per-drone material clone: the crystal dims once its soul is spent
+  const mesh = new THREE.Mesh(droneGeo, droneMat.clone());
   mesh.scale.set(1, 1.35, 1);
-  const core = new THREE.Mesh(coreGeo, coreMat.clone());
+  // the telegraph: a wisp — the same glow it fires — growing inside the crystal
+  const core = new THREE.Group();
+  core.add(sprite(glowWisp, PALETTE.wispCore, 0.34));
+  core.add(sprite(glowMagenta, PALETTE.wispHalo, 0.8, 0.55));
   mesh.add(core);
-  mesh.add(sprite(glowIce, 0xffffff, 2.2, 0.75));
+  const halo = sprite(glowIce, 0xffffff, 2.2, 0.75);
+  mesh.add(halo);
   scene.add(mesh);
 
   const hb = E.size + E.hitboxPad;
@@ -611,7 +614,7 @@ function spawnDroneFromEvent(e) {
   body.position.set(start.x, start.y, start.z);
 
   const drone = {
-    mesh, core, body, door, streak,
+    mesh, core, halo, body, door, streak,
     state: door ? 'door' : 'dive',
     t: 0,
     start: start.clone(),
@@ -621,6 +624,7 @@ function spawnDroneFromEvent(e) {
     nextFire: e.fireEvery * 0.5 + E.telegraph,
     engageLeft: e.engageTime,
     boltSpeed: e.boltSpeed,
+    hasFired: false, // beat it to the shot and its soul is yours
     alive: true,
   };
   body.ts = { drone };
@@ -723,13 +727,15 @@ function updateDrones(dtGame) {
       d.mesh.position.z += (hoverZ - d.mesh.position.z) * Math.min(1, 4 * dtGame);
       d.mesh.rotation.y += dtGame * 1.2;
 
-      // fire cycle with a readable telegraph
+      // fire cycle: the wisp charges up inside the crystal — a shot being born
       d.nextFire -= dtGame;
       const warn = Math.max(0, 1 - Math.max(0, d.nextFire) / E.telegraph);
-      d.core.scale.setScalar(1 + warn * 2.6);
-      d.core.material.color.setHex(PALETTE.core).multiplyScalar(0.5 + warn * 0.8);
+      const shimmer = 1 + Math.sin(S.gameTime * (6 + warn * 12)) * 0.1 * warn;
+      d.core.scale.setScalar((0.35 + warn * 1.9) * shimmer);
+      d.core.children[0].material.opacity = 0.3 + warn * 0.7;
+      d.core.children[1].material.opacity = 0.15 + warn * 0.6;
       // menu (attract mode) drones fire too — bolts just sail past the camera;
-      // without this the telegraph core sticks at full swell forever
+      // without this the telegraph wisp sticks at full swell forever
       if (d.nextFire <= 0 && (S.mode === 'playing' || S.mode === 'menu')) {
         fireBolt(d);
         d.nextFire = d.fireEvery;
@@ -759,6 +765,7 @@ function removeDrone(d) {
   if (!d.alive) return;
   d.alive = false;
   scene.remove(d.mesh);
+  d.mesh.material.dispose(); // per-drone clone
   if (d.streak) scene.remove(d.streak);
   if (d.door && !d.door.closed) disposeDoor(d.door);
   queueRemove(d.body);
@@ -796,7 +803,9 @@ function shatterDrone(drone, impact, shotVel) {
   S.shakeT = Math.max(S.shakeT, 0.14);
   updateHUD();
 
-  spawnSoul(pos, false); // the soul it leaves behind
+  // beat it to the trigger and you keep its soul; once it has fired, the
+  // soul is spent — the dimmed crystal told you so
+  if (!drone.hasFired) spawnSoul(pos, false);
 }
 
 // ---------------------------------------------------------------------------
@@ -835,6 +844,13 @@ function fireBolt(drone) {
     pz - v * t * B.aimLead
   );
   const vel = target.sub(from).normalize().multiplyScalar(drone.boltSpeed);
+
+  // soul spent: the crystal visibly goes cold
+  if (!drone.hasFired) {
+    drone.hasFired = true;
+    drone.mesh.material.emissiveIntensity = 0.1;
+    drone.halo.material.opacity = 0.3;
+  }
 
   const group = new THREE.Group();
   const head = sprite(glowWisp, PALETTE.wispCore, 0.55);
@@ -1260,17 +1276,35 @@ function fillStats(container, rows) {
     .join('');
 }
 
-function showStart() {
+// One metric at a time on the start board, switched by chips — no glyph soup.
+// Ranks are computed against this device's top runs for the SELECTED metric
+// (they become global placements once the leaderboard backend lands).
+let startMetric = 'score';
+function renderStartBoard() {
   const s = scores.summary();
-  // recent runs, each with its ranking on this device's top board
-  // (rankings become global once the leaderboard backend lands)
   el('startHead').textContent = s.history.length
     ? `RECENT RUNS · BEST ${s.allTimeBest}` + (s.streak > 1 ? ` · ${s.streak}\u{1F525}` : '')
     : '';
+  el('startChips').style.display = s.history.length ? 'flex' : 'none';
+  const val = (r) => startMetric === 'score' ? r.score : (r[startMetric] ?? 0);
   fillStats(el('startRecent'), s.history.slice(0, 3).map((r) => {
-    const rank = s.top.findIndex((t) => t.at === r.at) + 1;
-    return [rank ? `#${rank}` : '—', `${r.score} ✦${r.shards ?? 0} ∩${r.gates ?? 0}`];
+    const better = s.top.filter((t) => val(t) > val(r)).length;
+    const onBoard = s.top.some((t) => t.at === r.at);
+    return [onBoard ? `#${better + 1}` : '—', String(val(r))];
   }));
+}
+for (const chip of document.querySelectorAll('#startChips .chip')) {
+  chip.addEventListener('click', () => {
+    startMetric = chip.dataset.m;
+    for (const c of document.querySelectorAll('#startChips .chip')) {
+      c.classList.toggle('on', c === chip);
+    }
+    renderStartBoard();
+  });
+}
+
+function showStart() {
+  renderStartBoard();
   el('startScreen').classList.add('visible');
   el('overScreen').classList.remove('visible');
   el('pauseScreen').classList.remove('visible');
@@ -1314,7 +1348,9 @@ function resumeGame() {
 
 let overShownAt = 0;
 function showGameOver(title = 'YOU DIED') {
-  const r = scores.recordRun(S.score, { shards: S.stats.kills, gates: S.stats.gates });
+  const r = scores.recordRun(S.score, {
+    shards: S.stats.kills, gates: S.stats.gates, dist: Math.floor(S.distance),
+  });
   el('overTitle').textContent = title;
   el('finalScore').textContent = S.score;
   el('bestBadge').textContent = r.isAllTimeBest ? '★ NEW ALL-TIME BEST ★'

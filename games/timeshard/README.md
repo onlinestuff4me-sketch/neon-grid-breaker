@@ -39,10 +39,11 @@ and steer).
 | Pause | ⏸ button: resume/restart/**end run** (banks the score, shows the final screen), the sound toggle, and local top-10 + recent-run boards — every row shows score + shards (✦). |
 | Sound | ON by default, toggle on the start screen (♪) and in pause; survives the iPhone mute switch; unlocks on touch-end (iOS gesture rules). |
 | HUD | Shields · ammo · **SHARDS** + **GATES** counters · score · FOCUS bar that glows/pulses and reads **FOCUS FULL** when topped up. Boards show `score ✦shards ∩gates`. |
-| Menu | Minimal: three control lines and your recent runs with their top-board rankings, all below the horizon over the dark grid; the live game world drifts behind the title (attract mode, drones firing). |
+| Menu | Minimal: three control lines and a recent-runs board with SCORE / SHARDS / GATES toggle chips (one metric at a time, each run ranked against this device's top runs), all below the horizon; the live game world drifts behind the title (attract mode, drones firing). |
 | Ammo | You start with 14 shards, max 30. Empty tank = dry click — go soul hunting. |
 | Enemies | Drones emerge from doors in the floor/walls (or dive from the sky), match your speed ahead of you, and fire. One hit shatters them (**+50**). |
-| Telegraph | A drone's magenta core swells ~0.7 s before each bolt — readable even in slow-mo. |
+| Telegraph | A wisp — the same glow it fires — charges up inside the crystal ~0.6 s before each bolt, readable even in slow-mo. |
+| Souls rule | **Kill a drone before its first shot and you keep its soul.** Once it has fired, the soul is spent — the crystal visibly goes cold. Slow-mo is how you beat the telegraph. |
 | Bolts | Ethereal comet-wisps with a spiral tail (the true path is straight = fair). Dodge them or shoot them down (**DEFLECT +40**). |
 | Souls | Kills leave a glowing wisp (**+1 ammo, +15**) that drifts gently toward you if you pass close. Some zones carry a free ambient soul. Every shot has to count. |
 | Gateways | A round **portal** (spinning ice torus + magenta energy ring, `GATE N` floating above it) stands at every 3rd zone. Flying through **shatters it into rigid ice** with a glass-burst-into-whoosh sound and an FOV surge, and shifts you up a speed tier (+40 pts). GATES is its own tracked score. |
