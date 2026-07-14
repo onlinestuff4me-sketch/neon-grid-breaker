@@ -73,6 +73,32 @@
     padding: 24px; background: radial-gradient(ellipse at 50% 40%, rgba(10,36,56,.35), rgba(4,16,28,.85));
   }
   .screen.visible { display: flex; }
+  /* start screen stays out of the way — the moving world IS the pitch */
+  .screen.clear {
+    justify-content: flex-start; padding-top: 16vh;
+    background: linear-gradient(180deg, rgba(4,16,28,.55) 0%, rgba(4,16,28,.06) 45%,
+      rgba(4,16,28,.06) 70%, rgba(4,16,28,.6) 100%);
+  }
+  .controls-line { margin-top: 24px; font-size: 13px; letter-spacing: .18em; color: #9fb9d8; }
+  .controls-line b { color: #eef9ff; }
+  .bestline { margin-top: 12px; font-size: 13px; letter-spacing: .14em; color: #7f97b5;
+    min-height: 17px; font-variant-numeric: tabular-nums; }
+  .screen.clear .tap { position: fixed; bottom: calc(env(safe-area-inset-bottom, 0px) + 15vh); }
+
+  /* ------- pause menu ------- */
+  .menubtns { margin-top: 26px; display: flex; gap: 12px; }
+  button.menubtn {
+    padding: 12px 20px; border-radius: 10px; font-weight: 900; letter-spacing: .14em;
+    font-size: 14px; cursor: pointer; color: #dff6ff;
+    background: rgba(127,220,255,.08); border: 1px solid rgba(127,220,255,.45);
+  }
+  button.menubtn:active { background: rgba(127,220,255,.22); }
+  button.menubtn.off { opacity: .45; }
+  .pausetitle { font-size: 15px; letter-spacing: .45em; text-indent: .45em; margin-bottom: 10px; }
+  .boardhead { margin-top: 26px; font-size: 11px; letter-spacing: .3em; text-indent: .3em; color: #4d6f8a; }
+  .board { margin-top: 8px; display: grid; grid-template-columns: auto auto; gap: 4px 26px;
+    font-size: 14px; text-align: left; font-variant-numeric: tabular-nums; }
+  .board .v { text-align: right; font-weight: 800; color: #eef9ff; }
   .logo { font-size: clamp(44px, 13vw, 74px); line-height: .95; }
   .tagline { margin-top: 10px; font-size: 14px; letter-spacing: .5em; text-indent: .5em; }
   .weektag { margin-top: 26px; font-size: 13px; letter-spacing: .3em; text-indent: .3em; }
@@ -115,19 +141,30 @@
   <div id="flowTint"></div>
   <div id="flash"></div>
 
-  <div id="startScreen" class="screen visible">
+  <div id="startScreen" class="screen clear visible">
     <div class="logo chrome">TIME<br>SHARD</div>
     <div class="tagline neon-pink">TIME · OBEYS · YOU</div>
-    <div class="weektag dim">THIS WEEK'S TRACK</div>
-    <div class="weekname neon-ice" id="weekLabel">2026-W29</div>
-    <div class="howto">
-      Race the grid. Drones burst from doors and rain wisp-fire.<br>
-      <b>HOLD</b> a finger — time crawls. <b>DRAG</b> it to weave.<br>
-      <b>TAP</b> with a second finger (or a quick tap) to fire.<br>
-      Ammo is precious: fly through the <b>souls</b> your kills leave behind.
-    </div>
-    <div class="stats" id="startStats"></div>
+    <div class="controls-line"><b>HOLD</b> — SLOW TIME · <b>DRAG</b> — WEAVE · <b>TAP</b> — FIRE</div>
+    <div class="weekname neon-ice" id="weekLabel" style="margin-top:14px; font-size:15px;">2026-W29</div>
+    <div class="bestline" id="startBest"></div>
     <div class="tap neon-ice">TAP TO ENTER</div>
+  </div>
+
+  <div id="pauseScreen" class="screen">
+    <div class="pausetitle neon-ice">PAUSED</div>
+    <div class="bigscore chrome" id="pauseScore">0</div>
+    <div class="menubtns">
+      <button class="menubtn" id="btnResume">RESUME</button>
+      <button class="menubtn" id="btnRestart">RESTART</button>
+      <button class="menubtn" id="btnExit">EXIT</button>
+    </div>
+    <div class="menubtns">
+      <button class="menubtn" id="btnSoundToggle">SOUND: ON</button>
+    </div>
+    <div class="boardhead">TOP RUNS · THIS DEVICE</div>
+    <div class="board" id="pauseTop"></div>
+    <div class="boardhead">RECENT RUNS</div>
+    <div class="board" id="pauseRecent"></div>
   </div>
 
   <div id="overScreen" class="screen">
@@ -139,7 +176,7 @@
   </div>
 
   <div class="cornerbtns">
-    <button id="btnSound" title="Sound">♪</button>
+    <button id="btnPause" title="Pause" style="display:none">⏸</button>
   </div>
 
   <script type="importmap">

@@ -17,6 +17,9 @@ export class TimeshardAudio {
     if (!this.ctx) {
       const AC = window.AudioContext || window.webkitAudioContext;
       if (!AC) return;
+      // iOS ≥16.4: without this, the mute switch silences WebAudio entirely —
+      // the #1 reason the game seems to "have no sound by default" on iPhone.
+      try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch { /* older iOS */ }
       this.ctx = new AC();
       this.master = this.ctx.createGain();
       this.master.gain.value = 0.8;

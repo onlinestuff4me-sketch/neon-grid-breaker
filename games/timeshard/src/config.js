@@ -59,6 +59,8 @@ export const TUNING = {
     shotSpeed: 30,      // muzzle speed of your shard
     shotRadius: 0.14,
     aimDistance: 14,    // tap ray is projected onto a plane this far ahead
+    aimAssist: 1.1,     // taps within this distance of a drone snap onto it
+    aimAssistBolt: 0.8, // same for enemy bolts (deflection shots)
     maxLiveShots: 8,
     shotTtl: 3,         // game-seconds before a stray shard is recycled
     gravity: -9.81,     // world gravity (shots are ballistic-compensated at aim)

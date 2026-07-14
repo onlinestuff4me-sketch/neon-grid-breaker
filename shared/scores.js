@@ -31,6 +31,16 @@ export function createScoreStore(gameId) {
 
     data.allTimeBest = Math.max(data.allTimeBest || 0, score);
 
+    // Run history (most recent first) + all-time top runs. This is the local
+    // stand-in for the future leaderboard API's "my runs" + "top runs".
+    data.history = data.history || [];
+    data.history.unshift({ score, week, at: Date.now() });
+    data.history.length = Math.min(data.history.length, 20);
+    data.top = data.top || [];
+    data.top.push({ score, week, at: Date.now() });
+    data.top.sort((a, b) => b.score - a.score);
+    data.top.length = Math.min(data.top.length, 10);
+
     data.weeks = data.weeks || {};
     const w = data.weeks[week] || { best: 0, runs: 0 };
     const newWeekBest = score > w.best;
@@ -72,6 +82,8 @@ export function createScoreStore(gameId) {
       weekRuns: w.runs,
       dayBest: (data.days || {})[todayId()] || 0,
       streak: data.streak || 0,
+      history: data.history || [],
+      top: data.top || [],
     };
   }
 
