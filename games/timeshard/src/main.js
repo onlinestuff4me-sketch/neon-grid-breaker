@@ -340,7 +340,7 @@ const audio = new TimeshardAudio();
 let nextZoneZ = -8;
 
 // Debug/replay hook (also used by the Playwright verification script).
-window.__timeshard = { S, drones, bolts, souls, zones, camera };
+window.__timeshard = { S, drones, bolts, souls, shots, zones, camera };
 
 // ---------------------------------------------------------------------------
 // Zone environment building + streaming
@@ -857,7 +857,33 @@ function updateSouls(dtGame) {
 // ---------------------------------------------------------------------------
 const raycaster = new THREE.Raycaster();
 const ndc = new THREE.Vector2();
+// Aiming uses a CLEAN camera pose — no steering bank, no shake — so the same
+// tap always maps to the same spot in the world. The rolled render camera was
+// skewing shots whenever you fired mid-weave.
+const aimCam = new THREE.PerspectiveCamera(72, 1, 0.1, 260);
 let lastDryMsg = -9;
+
+// Where to aim so a projectile at `speed` meets a target moving at `vel`:
+// |P + V·t − O| = s·t. Smallest positive root, else aim at where it is now.
+function interceptPoint(origin, pos, vel, speed) {
+  const D = pos.clone().sub(origin);
+  const a = vel.lengthSq() - speed * speed;
+  const b = 2 * D.dot(vel);
+  const c = D.lengthSq();
+  let t;
+  if (Math.abs(a) < 1e-6) t = c / Math.max(0.1, -b);
+  else {
+    const disc = b * b - 4 * a * c;
+    if (disc < 0) t = Math.sqrt(c) / speed;
+    else {
+      const r1 = (-b - Math.sqrt(disc)) / (2 * a);
+      const r2 = (-b + Math.sqrt(disc)) / (2 * a);
+      t = Math.min(r1 > 0.02 ? r1 : Infinity, r2 > 0.02 ? r2 : Infinity);
+      if (!isFinite(t)) t = Math.sqrt(c) / speed;
+    }
+  }
+  return pos.clone().addScaledVector(vel, t);
+}
 
 function fireShot(clientX, clientY) {
   if (S.ammo <= 0) {
@@ -870,15 +896,50 @@ function fireShot(clientX, clientY) {
   }
   S.ammo -= 1;
 
+  aimCam.fov = camera.fov;
+  aimCam.aspect = camera.aspect;
+  aimCam.position.set(S.camX, TUNING.track.eyeHeight, S.camZ);
+  aimCam.rotation.set(0, 0, 0);
+  aimCam.updateProjectionMatrix();
+  aimCam.updateMatrixWorld();
   ndc.set((clientX / window.innerWidth) * 2 - 1, -(clientY / window.innerHeight) * 2 + 1);
-  raycaster.setFromCamera(ndc, camera);
-  const dir = raycaster.ray.direction.clone();
-  const t = TUNING.player.aimDistance / Math.max(0.2, -dir.z);
-  const target = camera.position.clone().add(dir.multiplyScalar(t));
+  raycaster.setFromCamera(ndc, aimCam);
+  const ray = raycaster.ray;
 
-  const origin = camera.position.clone().add(new THREE.Vector3(0, -0.35, -0.45));
-  const disp = target.clone().sub(origin);
-  const flight = disp.length() / TUNING.player.shotSpeed;
+  const origin = aimCam.position.clone().add(new THREE.Vector3(0, -0.35, -0.45));
+  const spd = TUNING.player.shotSpeed;
+
+  // Soft aim assist: if the tap ray passes near a drone or bolt, aim exactly
+  // at it — with a lead solve, because shards fly real-time while the world
+  // may be crawling (target's effective velocity scales with timeScale).
+  let target = null, bestD = Infinity;
+  for (const d of drones) {
+    if (!d.alive || d.state === 'door' || d.state === 'retreat') continue;
+    const p = d.mesh.position;
+    if (p.z > S.camZ - 1) continue; // must be ahead of you
+    const perp = ray.distanceToPoint(p);
+    if (perp < TUNING.player.aimAssist && perp < bestD) {
+      bestD = perp;
+      const effVel = new THREE.Vector3(0, 0, -S.speed * S.timeScale);
+      target = interceptPoint(origin, p, effVel, spd);
+    }
+  }
+  for (const b of bolts) {
+    if (b.pos.z > S.camZ - 1) continue;
+    const perp = ray.distanceToPoint(b.pos);
+    if (perp < TUNING.player.aimAssistBolt && perp < bestD) {
+      bestD = perp;
+      const effVel = b.vel.clone().multiplyScalar(S.timeScale);
+      target = interceptPoint(origin, b.pos, effVel, spd);
+    }
+  }
+  if (!target) {
+    const t = TUNING.player.aimDistance / Math.max(0.2, -ray.direction.z);
+    target = ray.origin.clone().addScaledVector(ray.direction, t);
+  }
+
+  const disp = target.sub(origin);
+  const flight = disp.length() / spd;
   const vel = disp.divideScalar(flight);
   vel.y -= 0.5 * TUNING.player.gravity * flight; // cancel gravity drop at the target
 
@@ -951,10 +1012,22 @@ function sweepShotsVsBolts() {
   }
 }
 
-function updateShots(dtGame) {
+// YOUR shards live outside time (the bullet-time power fantasy): the world
+// step only advanced them by dtGame, so top up the integration to real dt —
+// full velocity and full gravity — while everything else crawls. Collisions
+// still resolve through the physics narrowphase on the updated positions.
+function updateShots(dt, dtGame) {
+  const extra = Math.max(0, dt - dtGame);
   for (let i = shots.length - 1; i >= 0; i--) {
     const s = shots[i];
-    s.age += dtGame;
+    s.age += dt;
+    if (extra > 0) {
+      const b = s.body;
+      b.velocity.y += TUNING.player.gravity * extra;
+      b.position.x += b.velocity.x * extra;
+      b.position.y += b.velocity.y * extra;
+      b.position.z += b.velocity.z * extra;
+    }
     if (s.age > TUNING.player.shotTtl || s.body.position.z < S.camZ - 80 ||
         s.body.position.z > S.camZ + 4 || s.body.position.y < -2) {
       disposeShot(s);
@@ -1088,15 +1161,44 @@ function fillStats(container, rows) {
 function showStart() {
   const s = scores.summary();
   el('weekLabel').textContent = `${weekId()} TRACK`;
-  fillStats(el('startStats'), [
-    ['WEEK BEST', s.weekBest],
-    ['ALL-TIME BEST', s.allTimeBest],
-    ['TODAY’S BEST', s.dayBest],
-    ['DAY STREAK', s.streak ? `${s.streak}\u{1F525}` : '—'],
-  ]);
+  el('startBest').textContent = s.allTimeBest
+    ? `BEST ${s.allTimeBest} · WEEK ${s.weekBest}` + (s.streak > 1 ? ` · ${s.streak}\u{1F525}` : '')
+    : '';
   el('startScreen').classList.add('visible');
   el('overScreen').classList.remove('visible');
+  el('pauseScreen').classList.remove('visible');
+  el('btnPause').style.display = 'none';
   hud.style.display = 'none';
+  S.mode = 'menu';
+}
+
+// ---------------------------------------------------------------------------
+// Pause menu (settings + local score history/leaderboard live here)
+// ---------------------------------------------------------------------------
+function pauseGame() {
+  if (S.mode !== 'playing') return;
+  S.mode = 'paused';
+  clearPointers();
+  audio.stopMusic();
+  el('pauseScore').textContent = S.score;
+  const s = scores.summary();
+  fillStats(el('pauseTop'), s.top.length
+    ? s.top.slice(0, 5).map((r, i) => [`#${i + 1}  ${r.week}`, r.score])
+    : [['NO RUNS YET', '—']]);
+  fillStats(el('pauseRecent'), s.history.length
+    ? s.history.slice(0, 5).map((r) => [new Date(r.at).toLocaleDateString(), r.score])
+    : [['NO RUNS YET', '—']]);
+  updateSoundLabel();
+  el('pauseScreen').classList.add('visible');
+  hud.style.display = 'none';
+}
+
+function resumeGame() {
+  if (S.mode !== 'paused') return;
+  S.mode = 'playing';
+  el('pauseScreen').classList.remove('visible');
+  hud.style.display = 'block';
+  if (!audio.muted) audio.startMusic();
 }
 
 let overShownAt = 0;
@@ -1119,6 +1221,7 @@ function showGameOver() {
     ['DAY STREAK', `${r.streak}\u{1F525}`],
   ]);
   el('overScreen').classList.add('visible');
+  el('btnPause').style.display = 'none';
   hud.style.display = 'none';
   audio.stopMusic();
   audio.gameOver();
@@ -1164,9 +1267,11 @@ function startRun() {
   streamZones();
   el('startScreen').classList.remove('visible');
   el('overScreen').classList.remove('visible');
+  el('pauseScreen').classList.remove('visible');
+  el('btnPause').style.display = 'block';
   hud.style.display = 'block';
   updateHUD();
-  audio.startMusic();
+  if (!audio.muted) audio.startMusic();
 }
 
 // ---------------------------------------------------------------------------
@@ -1182,7 +1287,7 @@ function clearPointers() {
 }
 
 window.addEventListener('pointerdown', (e) => {
-  if (e.target.closest('.cornerbtns')) return;
+  if (e.target.closest('.cornerbtns') || e.target.closest('button')) return;
   audio.unlock();
 
   if (S.mode === 'menu') { startRun(); return; }
@@ -1235,22 +1340,34 @@ function primaryHoldActive() {
   return p.hold || performance.now() - p.t0 >= TUNING.tap.maxMs;
 }
 
-el('btnSound').addEventListener('click', (e) => {
+// Sound: ON by default, preference persisted. The toggle lives in the pause
+// menu (per playtest feedback — fewer floating buttons over the action).
+const SOUND_KEY = 'timeshard.sound.v1';
+try { audio.muted = localStorage.getItem(SOUND_KEY) === 'off'; } catch { /* private mode */ }
+audio.musicOn = !audio.muted;
+
+function updateSoundLabel() {
+  el('btnSoundToggle').textContent = audio.muted ? 'SOUND: OFF' : 'SOUND: ON';
+  el('btnSoundToggle').classList.toggle('off', audio.muted);
+}
+
+el('btnPause').addEventListener('click', () => { audio.unlock(); pauseGame(); });
+el('btnResume').addEventListener('click', () => { audio.unlock(); resumeGame(); });
+el('btnRestart').addEventListener('click', () => { audio.unlock(); startRun(); });
+el('btnExit').addEventListener('click', () => showStart());
+el('btnSoundToggle').addEventListener('click', () => {
   audio.unlock();
   audio.setMuted(!audio.muted);
   audio.musicOn = !audio.muted;
-  if (audio.muted) audio.stopMusic();
-  else if (S.mode === 'playing') audio.startMusic();
-  e.target.classList.toggle('off', audio.muted);
+  try { localStorage.setItem(SOUND_KEY, audio.muted ? 'off' : 'on'); } catch { /* private mode */ }
+  updateSoundLabel();
 });
 
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     lastT = null;
-    clearPointers();
-    audio.stopMusic();
-  } else if (S.mode === 'playing' && !audio.muted) {
-    audio.startMusic();
+    if (S.mode === 'playing') pauseGame(); // stepping away shouldn't cost a run
+    else { clearPointers(); audio.stopMusic(); }
   }
 });
 
@@ -1283,6 +1400,8 @@ function tick(tNow) {
   lastT = tNow;
   S.time += dt;
 
+  if (S.mode === 'paused') { renderer.render(scene, camera); return; } // frozen frame
+
   // --- the time dial (focus-limited) ---
   const T = TUNING.time;
   S.holdActive = S.mode === 'playing' && primaryHoldActive();
@@ -1313,6 +1432,11 @@ function tick(tNow) {
     S.camX += (S.steerX - S.camX) * Math.min(1, TUNING.steer.lerp * dt);
     streamZones();
     triggerPendingEvents();
+  } else if (S.mode === 'menu') {
+    // attract mode: drift down the track behind the title, drones and all
+    S.camZ -= 3 * dt;
+    streamZones();
+    triggerPendingEvents();
   }
 
   // --- world update, all on the scaled clock ---
@@ -1321,7 +1445,7 @@ function tick(tNow) {
   updateSouls(dtGame);
   world.step(Math.max(1e-6, dtGame));
   flushRemovals();
-  updateShots(dtGame);
+  updateShots(dt, dtGame);
   if (S.mode === 'playing') sweepShotsVsBolts();
   updateShards(dtGame);
   updateSparks(dt); // feedback runs on real time — always snappy

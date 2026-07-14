@@ -34,7 +34,9 @@ and steer).
 | Speed | You fly forward automatically; each zone crossed makes you faster. Distance = score backbone. |
 | Slow-mo | **Hold** a finger: time drops to 13%. Limited by the **FOCUS** meter (drains while slowed, refills at speed). |
 | Steer | **Drag** the held finger to weave across the track. Steering reads real time — weaving through a slowed world is the power fantasy. |
-| Fire | **Tap** with a second finger (or a quick single tap). Shots are ballistic-compensated: a tap hits what it points at. |
+| Fire | **Tap** with a second finger (or a quick single tap). Shots are ballistic-compensated and softly aim-assisted: a tap hits what it points at. |
+| Bullet time | **Your shards live outside time**: they fly at full speed while the world crawls — firing in slow-mo is precision mode, not a dead trigger. |
+| Pause | ⏸ button: resume/restart/exit, the sound toggle, and local top-10 + recent-run boards. Sound is ON by default (and survives the iPhone mute switch). |
 | Ammo | You start with 14 shards, max 30. Empty tank = dry click — go soul hunting. |
 | Enemies | Drones emerge from doors in the floor/walls (or dive from the sky), match your speed ahead of you, and fire. One hit shatters them (**+50**). |
 | Telegraph | A drone's magenta core swells ~0.7 s before each bolt — readable even in slow-mo. |
@@ -90,9 +92,16 @@ Engineering notes:
   shake) run on real time so the game always feels responsive.
 - **One physics world**: `world.step(dtGame)` as a single variable step.
   Player shots and debris are dynamic bodies; drones are kinematic boxes.
-- **True intercept aiming**: drones solve the closing-speed quadratic
-  `(v²−b²)t² − 2·dz·v·t + |D|² = 0` so bolts genuinely arrive where you
-  will be — then `aimLead < 1` and jitter make them honestly dodgeable.
+- **True intercept aiming, both directions**: drones solve the closing-speed
+  quadratic `(v²−b²)t² − 2·dz·v·t + |D|² = 0` so bolts genuinely arrive where
+  you will be (`aimLead < 1` + jitter keep them dodgeable) — and YOUR taps
+  raycast from a clean un-banked camera pose with soft aim assist
+  (`player.aimAssist`) that snaps to the nearest drone/bolt near the ray and
+  leads it with the same solve.
+- **Shards outside time**: the slowed world step only advances your shots by
+  `dtGame`, so each frame tops their integration up to real `dt` (full
+  velocity + full gravity). Same arc at any time scale; collisions still
+  resolve through the physics narrowphase.
 - **Ethereal bolts**: additive sprite comet (bright core, violet tail,
   magenta halo) spiraling around a straight path — the wobble is visual
   dressing, the hit path is fair.
