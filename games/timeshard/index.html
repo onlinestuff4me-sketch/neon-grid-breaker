@@ -112,10 +112,21 @@
   .controls b { color: #eef9ff; }
   .bestline { margin-top: 22px; font-size: 13px; letter-spacing: .14em; color: #7f97b5;
     min-height: 17px; font-variant-numeric: tabular-nums; }
-  .lowerblock .boardhead { margin-top: 20px; }
-  .startboard { font-size: 13px; min-height: 20px; }
+  .lowerblock .boardhead { margin-top: 18px; }
+  .chips { display: none; gap: 8px; margin-top: 10px; }
+  button.chip {
+    padding: 6px 13px 5px; border-radius: 999px; font-size: 10px; font-weight: 900;
+    letter-spacing: .2em; text-indent: .2em; cursor: pointer; color: #7f97b5;
+    background: rgba(127,220,255,.05); border: 1px solid rgba(127,220,255,.25);
+  }
+  button.chip.on {
+    color: #eaffff; border-color: rgba(127,220,255,.8);
+    background: rgba(127,220,255,.14);
+    text-shadow: 0 0 8px rgba(127,220,255,.8);
+  }
+  .startboard { font-size: 14px; min-height: 20px; margin-top: 10px; gap: 4px 34px; }
   .startboard .dim { color: #7fdcff; text-shadow: 0 0 8px rgba(127,220,255,.5); }
-  .lowerblock .tap { margin-top: 22px; }
+  .lowerblock .tap { margin-top: 20px; }
 
   /* ------- pause menu ------- */
   .menubtns { margin-top: 26px; display: flex; gap: 12px; }
@@ -187,6 +198,11 @@
         <div><b>TAP</b> — FIRE</div>
       </div>
       <div class="boardhead" id="startHead"></div>
+      <div class="chips" id="startChips">
+        <button class="chip on" data-m="score">SCORE</button>
+        <button class="chip" data-m="shards">SHARDS</button>
+        <button class="chip" data-m="gates">GATES</button>
+      </div>
       <div class="board startboard" id="startRecent"></div>
       <div class="tap neon-ice">TAP TO ENTER</div>
     </div>
