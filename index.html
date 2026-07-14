@@ -113,7 +113,7 @@
                     text-shadow:0 0 10px rgba(232,234,238,.95); }
 
   /* recent-runs score table */
-  #scores { margin-top:26px; width:min(320px, 84vw); }
+  #scores { margin-top:26px; width:min(292px, 82vw); }
   #scores .schead { font-size:11px; font-weight:800; letter-spacing:.24em; color:#7a8089;
                     text-shadow:0 0 10px rgba(232,234,238,.95); margin-bottom:12px; }
   #scores .scpills { display:flex; justify-content:center; gap:10px; margin-bottom:12px; }
@@ -121,19 +121,23 @@
                     padding:7px 18px; border:1.5px solid rgba(22,24,29,.3); border-radius:999px;
                     background:rgba(238,240,243,.55); }
   #scores .scpill.active { background:#16181d; color:#eef0f3; border-color:#16181d; }
-  #scores .scrow { display:flex; align-items:baseline; padding:4px 14px;
+  #scores .scrow { display:flex; align-items:baseline; padding:4px 2px;
                    font-weight:800; text-shadow:0 0 8px rgba(232,234,238,.95); }
-  #scores .scval { flex:0 0 50px; text-align:left; font-size:17px; color:#16181d; }
+  #scores .scval { display:flex; align-items:baseline; gap:6px; font-size:17px; color:#16181d; }
+  #scores .scval em { font-style:normal; font-size:10px; font-weight:800; letter-spacing:.16em; color:#8a9099; }
   #scores .scdate { margin-left:auto; font-size:11px; font-weight:600; letter-spacing:.04em; color:#8a9099; }
 
   /* bottom row: how-to link + flat speaker toggle */
   #menurow { position:absolute; left:0; right:0; bottom:calc(env(safe-area-inset-bottom, 0px) + 26px);
-             display:flex; align-items:center; justify-content:center; gap:30px; }
+             display:flex; align-items:center; justify-content:center; height:44px; }
   #howtolink { font-size:11px; font-weight:800; letter-spacing:.28em; color:#7a8089;
                text-shadow:0 0 10px rgba(232,234,238,.95); text-decoration:underline;
                text-underline-offset:4px; text-decoration-color:rgba(122,128,137,.5); }
-  #sndbtn { width:32px; height:32px; display:flex; align-items:center; justify-content:center; color:#7a8089; }
-  #sndbtn svg { width:24px; height:24px; }
+  #sndbtn { position:absolute; right:20px; top:50%; transform:translateY(-50%);
+            width:44px; height:44px; border-radius:50%;
+            display:flex; align-items:center; justify-content:center; color:#7a8089;
+            border:1.5px solid rgba(22,24,29,.28); background:rgba(238,240,243,.6); }
+  #sndbtn svg { width:22px; height:22px; }
   #sndbtn.muted { opacity:.55; }
 
   /* modals: how-to + enemies */

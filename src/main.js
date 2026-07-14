@@ -1717,8 +1717,9 @@ function renderScores() {
   el.scores.style.display = 'block';
   // a real leaderboard: sorted by the chosen metric, so #1 IS your best
   display.sort((a, b) => (b[scoreMetric] - a[scoreMetric]) || (b.at - a.at));
+  const unit = (v) => (scoreMetric === 'w' ? (v === 1 ? 'WAVE' : 'WAVES') : (v === 1 ? 'SHARD' : 'SHARDS'));
   const rows = display.slice(0, 5).map((r) =>
-    `<div class="scrow"><span class="scval">${r[scoreMetric]}</span>` +
+    `<div class="scrow"><span class="scval">${r[scoreMetric]}<em>${unit(r[scoreMetric])}</em></span>` +
     `<span class="scdate">${fmtWhen(r.at)}</span></div>`).join('');
   el.scores.innerHTML =
     '<div class="schead">TOP RUNS</div>' +
