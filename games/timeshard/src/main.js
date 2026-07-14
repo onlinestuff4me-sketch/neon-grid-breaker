@@ -235,6 +235,36 @@ const doorMat = new THREE.MeshStandardMaterial({
 });
 const frameMat = new THREE.MeshBasicMaterial({ color: PALETTE.door });
 const gateMat = new THREE.MeshBasicMaterial({ color: 0xff7ae4 });
+const portalMat = new THREE.MeshStandardMaterial({
+  color: PALETTE.ice, metalness: 0.4, roughness: 0.15, envMapIntensity: 1.6,
+  emissive: PALETTE.iceEdge, emissiveIntensity: 0.7,
+});
+
+// Floating "GATE N" title rendered to a canvas — lives above the portal in
+// the world instead of flashing on the HUD.
+function makeGateLabel(n) {
+  const cv = document.createElement('canvas');
+  cv.width = 512; cv.height = 128;
+  const g = cv.getContext('2d');
+  g.font = '900 italic 84px -apple-system, "Segoe UI", Roboto, sans-serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.shadowColor = 'rgba(127,220,255,0.9)';
+  g.shadowBlur = 22;
+  const grad = g.createLinearGradient(0, 22, 0, 106);
+  grad.addColorStop(0, '#ffffff');
+  grad.addColorStop(0.5, '#bfeaff');
+  grad.addColorStop(1, '#5ecfff');
+  g.fillStyle = grad;
+  g.fillText(`GATE ${n}`, 256, 66);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: tex, transparent: true, depthWrite: false,
+  }));
+  s.scale.set(3.6, 0.9, 1);
+  return s;
+}
 const ringMat = new THREE.MeshBasicMaterial({ color: 0x9ff0ff });
 const pylonMat = new THREE.MeshStandardMaterial({
   color: 0x9fd8e8, metalness: 0.4, roughness: 0.25, envMapIntensity: 1.2,
@@ -323,6 +353,7 @@ const S = {
   holdActive: false,
   gameTime: 0,
   time: 0,
+  fovKick: 0,            // gate-pass speed surge (fov punch, decays)
   shakeT: 0,
   invulnT: 0,
   deadTimer: 0,
@@ -393,23 +424,27 @@ function buildZoneMeshes(spec, startZ) {
     add(arch);
   }
 
-  // GATEWAY every Nth zone: fly through it to shift up a speed tier.
-  // Double frame (ice outside, hot magenta inside) so it reads as "special".
+  // GATEWAY every Nth zone: a round portal you fly through to shift up a
+  // speed tier. Ice torus + magenta energy ring + faint portal surface,
+  // slowly spinning, with a floating GATE N title above it.
   if (spec.index > 0 && spec.index % TUNING.gates.everyZones === 0) {
-    const gw = Math.min(spec.halfWidth + 0.4, 4.2);
-    const gh = (geo.ceiling || geo.wallH || 4.6) + 0.4;
-    const g = new THREE.Group();
-    g.add(makeRing(gw, gh, 0.18));
-    const inner = makeRingFlat(gw * 2 - 0.5, gh - 0.5, 0.1);
-    inner.children.forEach((c) => { c.material = gateMat; });
-    inner.position.y = gh / 2;
-    g.add(inner);
-    const glow = sprite(glowMagenta, PALETTE.wispHalo, 3.2, 0.35);
-    glow.position.y = gh;
-    g.add(glow);
-    g.position.z = startZ - 1.2;
-    add(g);
-    gates.push({ z: startZ - 1.2, pos: new THREE.Vector3(0, gh / 2, startZ - 1.2), passed: false });
+    const num = spec.index / TUNING.gates.everyZones;
+    const R = Math.min(spec.halfWidth - 0.2, 2.1);
+    const cy = R + 0.35;
+    const gz = startZ - 1.2;
+    const group = new THREE.Group();
+    const ring = new THREE.Group();
+    ring.add(new THREE.Mesh(new THREE.TorusGeometry(R, 0.13, 10, 48), portalMat));
+    ring.add(new THREE.Mesh(new THREE.TorusGeometry(R - 0.26, 0.05, 8, 48), gateMat));
+    ring.add(sprite(glowMagenta, PALETTE.wispHalo, R * 2.6, 0.2)); // portal surface
+    group.add(ring);
+    const label = makeGateLabel(num);
+    // enclosed zones have no headroom — tuck the title inside the ring's top
+    label.position.set(0, geo.ceiling ? R * 0.5 : R + 0.9, 0.05);
+    group.add(label);
+    group.position.set(0, cy, gz);
+    add(group);
+    gates.push({ z: gz, pos: new THREE.Vector3(0, cy, gz), R, ring, group, passed: false });
   }
 
   // open plains get off-track crystal pylons streaming past (speed feel)
@@ -493,11 +528,22 @@ function passGates() {
         S.stats.gates += 1;
         S.points += TUNING.gates.scoreBonus;
         updateSpeed();
-        audio.clear();
-        spawnSpark(g.pos, 4.5, PALETTE.wispHalo);
-        flash('rgba(255,47,214,0.16)', 500);
-        showMsg(`GATE ${S.stats.gates} — SPEED UP`, 'neon-pink');
-        S.shakeT = Math.max(S.shakeT, 0.18);
+        audio.gate(); // glass burst → rising whoosh
+
+        // the portal shatters into real rigid ice around its circumference
+        scene.remove(g.group);
+        for (let k = 0; k < 14; k++) {
+          const a = (k / 14) * Math.PI * 2;
+          const p = new THREE.Vector3(Math.cos(a) * g.R, g.pos.y + Math.sin(a) * g.R, g.z);
+          const v = new THREE.Vector3(
+            Math.cos(a) * 3.2, Math.sin(a) * 3.2 + 1, -S.speed * 0.35);
+          const sz = 0.1 + Math.random() * 0.16;
+          spawnShard(p, sz, sz * 1.4, v);
+        }
+        spawnSpark(g.pos, 5, PALETTE.wispHalo);
+        flash('rgba(255,47,214,0.15)', 450);
+        S.fovKick = 1; // the speed surge you can feel
+        S.shakeT = Math.max(S.shakeT, 0.2);
         updateHUD();
       }
     }
@@ -1216,15 +1262,15 @@ function fillStats(container, rows) {
 
 function showStart() {
   const s = scores.summary();
-  const last = s.history[0];
-  el('startBest').textContent = last
-    ? `LAST ${last.score} ✦${last.shards ?? 0} ∩${last.gates ?? 0} · BEST ${s.allTimeBest}` +
-      (s.streak > 1 ? ` · ${s.streak}\u{1F525}` : '')
+  // recent runs, each with its ranking on this device's top board
+  // (rankings become global once the leaderboard backend lands)
+  el('startHead').textContent = s.history.length
+    ? `RECENT RUNS · BEST ${s.allTimeBest}` + (s.streak > 1 ? ` · ${s.streak}\u{1F525}` : '')
     : '';
-  // placement snapshot: where the last run sits on this device's top runs
-  // (becomes global placement once the leaderboard backend lands)
-  const rank = last ? s.top.findIndex((t) => t.at === last.at) + 1 : 0;
-  el('startRank').textContent = rank ? `#${rank} ON THIS DEVICE'S TOP RUNS` : '';
+  fillStats(el('startRecent'), s.history.slice(0, 3).map((r) => {
+    const rank = s.top.findIndex((t) => t.at === r.at) + 1;
+    return [rank ? `#${rank}` : '—', `${r.score} ✦${r.shards ?? 0} ∩${r.gates ?? 0}`];
+  }));
   el('startScreen').classList.add('visible');
   el('overScreen').classList.remove('visible');
   el('pauseScreen').classList.remove('visible');
@@ -1328,7 +1374,7 @@ function startRun() {
     score: 0, distance: 0, points: 0, camZ: 0, camX: 0, steerX: 0,
     trackHalf: ZONES.open.halfWidth, zoneIdx: 0, speed: TUNING.speed.base,
     timeScale: 1, focus: TUNING.time.focusMax, focusOk: true, holdActive: false,
-    gameTime: 0, shakeT: 0, invulnT: 0, deadTimer: 0,
+    gameTime: 0, fovKick: 0, shakeT: 0, invulnT: 0, deadTimer: 0,
     stats: { shots: 0, kills: 0, deflects: 0, souls: 0, gates: 0 },
   });
   trackGen = new TrackGen(weeklySeed(weeklyTag()));
@@ -1544,6 +1590,16 @@ function tick(tNow) {
   if (S.mode === 'dead' && S.deadTimer > 0) {
     S.deadTimer -= dt;
     if (S.deadTimer <= 0) showGameOver();
+  }
+
+  // gate portals idle-spin; the label sprite stays upright (it's a sibling)
+  for (const g of gates) if (!g.passed) g.ring.rotation.z += dt * 0.5;
+
+  // gate-pass speed surge: fov punches out, then eases home
+  if (S.fovKick > 0) {
+    S.fovKick = Math.max(0, S.fovKick - dt * 1.6);
+    camera.fov = 72 + S.fovKick * 12;
+    camera.updateProjectionMatrix();
   }
 
   // --- camera: strafe bank + shake ---

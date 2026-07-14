@@ -112,9 +112,10 @@
   .controls b { color: #eef9ff; }
   .bestline { margin-top: 22px; font-size: 13px; letter-spacing: .14em; color: #7f97b5;
     min-height: 17px; font-variant-numeric: tabular-nums; }
-  .rankline { margin-top: 6px; font-size: 10px; letter-spacing: .26em; text-indent: .26em;
-    color: #4d6f8a; min-height: 13px; }
-  .lowerblock .tap { margin-top: 26px; }
+  .lowerblock .boardhead { margin-top: 20px; }
+  .startboard { font-size: 13px; min-height: 20px; }
+  .startboard .dim { color: #7fdcff; text-shadow: 0 0 8px rgba(127,220,255,.5); }
+  .lowerblock .tap { margin-top: 22px; }
 
   /* ------- pause menu ------- */
   .menubtns { margin-top: 26px; display: flex; gap: 12px; }
@@ -182,11 +183,11 @@
     <div class="lowerblock">
       <div class="controls">
         <div><b>HOLD</b> — SLOW TIME</div>
-        <div><b>DRAG</b> — WEAVE</div>
+        <div><b>DRAG</b> — MOVE</div>
         <div><b>TAP</b> — FIRE</div>
       </div>
-      <div class="bestline" id="startBest"></div>
-      <div class="rankline" id="startRank"></div>
+      <div class="boardhead" id="startHead"></div>
+      <div class="board startboard" id="startRecent"></div>
       <div class="tap neon-ice">TAP TO ENTER</div>
     </div>
   </div>
