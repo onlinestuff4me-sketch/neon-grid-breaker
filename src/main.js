@@ -341,7 +341,7 @@ function spawnBullet(pos, dir, fromPlayer) {
     mesh, trail,
     pos: pos.clone(), prev: pos.clone(),
     vel: dir.clone().multiplyScalar(speed),
-    fromPlayer, life: 6,
+    fromPlayer, life: 6, rippleAcc: 0,
   });
 }
 
@@ -351,6 +351,47 @@ function killBullet(i, sparkAt) {
   b.trail.geometry.dispose();
   if (sparkAt) spawnSparks(sparkAt, b.fromPlayer ? 0x16181d : 0xff2d1a);
   bullets.splice(i, 1);
+}
+
+// ---------------------------------------------------------------------------
+// Ripples — bullets push expanding rings through the air like a wake through
+// water. Spawned by distance travelled, so the wake hangs in frozen time.
+// ---------------------------------------------------------------------------
+const rippleGeo = new THREE.RingGeometry(0.82, 1, 24);
+const ripples = [];   // {mesh, life, maxLife, grow}
+
+function spawnRipple(pos, vel, big) {
+  const mat = new THREE.MeshBasicMaterial({
+    color: big ? 0xd88a80 : 0x8aa8c4, transparent: true, opacity: 0.5,
+    side: THREE.DoubleSide, depthWrite: false,
+  });
+  const mesh = new THREE.Mesh(rippleGeo, mat);
+  mesh.position.copy(pos);
+  mesh.lookAt(_v1.copy(pos).add(vel));
+  mesh.scale.setScalar(0.05);
+  scene.add(mesh);
+  ripples.push({ mesh, life: 0.8, maxLife: 0.8, grow: big ? 1.0 : 0.55 });
+  if (ripples.length > 90) {   // hard cap; oldest rings pop first
+    const r = ripples.shift();
+    scene.remove(r.mesh);
+    r.mesh.material.dispose();
+  }
+}
+
+function updateRipples(sdt) {
+  for (let i = ripples.length - 1; i >= 0; i--) {
+    const r = ripples[i];
+    r.life -= sdt;
+    if (r.life <= 0) {
+      scene.remove(r.mesh);
+      r.mesh.material.dispose();
+      ripples.splice(i, 1);
+      continue;
+    }
+    const t = 1 - r.life / r.maxLife;   // rings expand as they fade
+    r.mesh.scale.setScalar(0.05 + t * r.grow);
+    r.mesh.material.opacity = 0.5 * (r.life / r.maxLife);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -452,6 +493,10 @@ function spawnPickup(pos) {
   g.position.set(pos.x, 0, pos.z);
   scene.add(g);
   pickups.push({ g, spin, ring, t: Math.random() * 6, life: PICKUP_LIFE });
+  if (!spawnPickup.hinted) {   // one-time tutorial nudge
+    spawnPickup.hinted = true;
+    showBanner('SHOTGUN DROP<small>DRAG UP TO RUN OVER IT</small>', 1600);
+  }
 }
 
 function removePickup(i) {
@@ -470,7 +515,15 @@ function updatePickups(dt, sdt) {
     p.ring.material.opacity = p.life < 3 ? 0.5 * (0.4 + 0.6 * Math.abs(Math.sin(p.t * 6))) : 0.5;
     if (player.alive) {
       const dx = p.g.position.x - player.pos.x, dz = p.g.position.z - player.pos.z;
-      if (dx * dx + dz * dz < 1.4 * 1.4) {
+      const d2 = dx * dx + dz * dz;
+      if (d2 < 3.2 * 3.2 && d2 > 0.01) {
+        // magnet: run near a drop and it slides to your hand (real time)
+        const d = Math.sqrt(d2);
+        const pull = Math.min(5 * dt, d);
+        p.g.position.x -= (dx / d) * pull;
+        p.g.position.z -= (dz / d) * pull;
+      }
+      if (d2 < 1.8 * 1.8) {
         setWeapon('shotgun');
         sfx.pickup();
         vibrate(20);
@@ -537,17 +590,34 @@ const ENEMY_TYPES = {
   heavy: { speed: 1.6, scale: [1.14, 1.05, 1.14], drop: 0.6 },
 };
 
+function pointInObstacle(x, z, pad) {
+  for (const o of obstacles) {
+    if (x > o.min.x - pad && x < o.max.x + pad && z > o.min.z - pad && z < o.max.z + pad) return true;
+  }
+  return false;
+}
+
 function spawnEnemy(type = 'gunner') {
   const parts = buildEnemyMesh(type);
   const spec = ENEMY_TYPES[type];
   parts.g.scale.set(...spec.scale);
-  // spawn on the arena rim, away from the player, outside cover
-  let x, z;
-  for (let tries = 0; tries < 20; tries++) {
-    const a = Math.random() * Math.PI * 2;
+  // the wave attacks from one flank: spawn in an arc around the wave bearing
+  // so the fight stays in front of you instead of whipping side to side
+  let x = 0, z = 0, placed = false;
+  for (let tries = 0; tries < 24 && !placed; tries++) {
+    const a = game.waveBearing + (Math.random() - 0.5) * 1.1;   // ±32°
+    const d = 12 + Math.random() * 7;
+    x = player.pos.x + Math.sin(a) * d;
+    z = player.pos.z + Math.cos(a) * d;
+    const lim = ARENA_HALF - 2;
+    if (Math.abs(x) > lim || Math.abs(z) > lim) continue;
+    if (pointInObstacle(x, z, 0.8)) continue;
+    placed = true;
+  }
+  if (!placed) {   // fallback: arena rim, away from the player
+    const a = game.waveBearing + (Math.random() - 0.5) * 1.5;
     const r = ARENA_HALF - 2.5;
-    x = Math.cos(a) * r; z = Math.sin(a) * r;
-    if (_v1.set(x - player.pos.x, 0, z - player.pos.z).lengthSq() > 100) break;
+    x = Math.sin(a) * r; z = Math.cos(a) * r;
   }
   parts.g.position.set(x, 0, z);
   scene.add(parts.g);
@@ -561,8 +631,8 @@ function spawnEnemy(type = 'gunner') {
     walkPhase: Math.random() * Math.PI * 2,
     strafe: Math.random() < 0.5 ? 1 : -1,
     strafeT: 1 + Math.random() * 2,
-    fireCd: 0.5 + Math.random() * 0.9,
-    engageDist: 8 + Math.random() * 6,
+    fireCd: 0.3 + Math.random() * 0.5,
+    engageDist: 13 + Math.random() * 7,   // open fire from range, not point-blank
     burstLeft: 0,
     burstT: 0,
     alive: true,
@@ -763,6 +833,14 @@ function updateBullets(sdt) {
     tp[3] = b.pos.x; tp[4] = b.pos.y; tp[5] = b.pos.z;
     b.trail.geometry.attributes.position.needsUpdate = true;
 
+    // wake: drop an expanding ring every fixed distance travelled
+    b.rippleAcc += b.pos.distanceTo(b.prev);
+    const spacing = b.fromPlayer ? 1.1 : 0.5;
+    if (b.rippleAcc >= spacing) {
+      b.rippleAcc %= spacing;
+      spawnRipple(b.pos, b.vel, !b.fromPlayer);
+    }
+
     if (b.life <= 0 || b.pos.y <= 0.02 ||
         Math.abs(b.pos.x) > ARENA_HALF || Math.abs(b.pos.z) > ARENA_HALF) {
       killBullet(i, b.pos.y <= 0.05 ? b.pos : null);
@@ -940,6 +1018,7 @@ const game = {
   spawnQueue: [],
   spawnTimer: 0,
   stateT: 0,
+  waveBearing: 0,
 };
 
 let bestWave = 1;
@@ -1010,6 +1089,10 @@ function startWave(n) {
   game.stateT = 0;
   game.spawnQueue = composeWave(n);
   game.spawnTimer = 0;
+  // attack bearing: toward the open arena from wherever the player stands,
+  // or a random direction if they're near the middle
+  const dx = -player.pos.x, dz = -player.pos.z;
+  game.waveBearing = Math.hypot(dx, dz) > 3 ? Math.atan2(dx, dz) : Math.random() * Math.PI * 2;
   if (n > bestWave) {
     bestWave = n;
     try { localStorage.setItem('timeshard_best', String(n)); } catch { /* private mode */ }
@@ -1049,6 +1132,11 @@ function clearField() {
   for (let i = enemies.length - 1; i >= 0; i--) { scene.remove(enemies[i].g); enemies.splice(i, 1); }
   for (let i = bullets.length - 1; i >= 0; i--) killBullet(i, null);
   for (let i = debris.length - 1; i >= 0; i--) { scene.remove(debris[i].mesh); debris.splice(i, 1); }
+  for (let i = ripples.length - 1; i >= 0; i--) {
+    scene.remove(ripples[i].mesh);
+    ripples[i].mesh.material.dispose();
+    ripples.splice(i, 1);
+  }
   for (let i = pickups.length - 1; i >= 0; i--) removePickup(i);
 }
 
@@ -1170,6 +1258,7 @@ function frame(now) {
     updateBullets(sdt);
   }
   updateDebris(sdt);
+  updateRipples(sdt);
   updatePickups(dt, sdt);
 
   // --- HUD
@@ -1189,7 +1278,7 @@ document.addEventListener('visibilitychange', () => { lastT = performance.now();
 
 // Debug hook for automated tests.
 window.__ts = {
-  game, player, enemies, bullets, pickups, camera, fire: playerFire, setWeapon, spawnEnemy, spawnPickup,
+  game, player, enemies, bullets, pickups, ripples, camera, fire: playerFire, setWeapon, spawnEnemy, spawnPickup,
   shot: (px, py, pz, dx, dy, dz, fromPlayer) =>
     spawnBullet(new THREE.Vector3(px, py, pz), new THREE.Vector3(dx, dy, dz).normalize(), fromPlayer),
 };

@@ -20,11 +20,11 @@ The whole game is played with a single finger at a time:
 
 - **First-person 3D** (Three.js, vendored — no CDN, works offline) tuned for a tall portrait viewport
 - **Time dilation**: enemies, bullets, and debris all run on a scaled world clock, while your camera and dash run in real time — aim and dodge at full speed while the world crawls
-- **Projectile physics**: bullets have real travel time and gravity drop; enemy shots are slow and visible so you can dodge them; swept segment-vs-capsule collision so nothing tunnels through
+- **Projectile physics**: bullets have real travel time and gravity drop; enemy shots are slow glowing orbs that push a water-like ripple wake through the air; swept segment-vs-capsule collision so nothing tunnels through
 - **Shatter physics**: enemies burst into red shards with gravity, spin, and floor bounces
-- **Enemy AI**: advance with strafing, steer around cover, keep separation, telegraphed aiming (white gun flash before firing), melee when they get close
+- **Enemy AI**: each wave attacks from one flank so the fight stays in front of you; they open fire from range, strafe, steer around cover, keep separation, telegraph shots (white gun flash), and melee up close
 - **Three enemy types**: gunners, fast bare-handed rushers (from wave 2), and slow heavies that fire 3-round bursts (from wave 4)
-- **Weapon pickups**: shattered gunners and heavies sometimes drop a shotgun (marked with a red ring) — slide over it to grab 4 shells of 6-pellet spread, then you're back to the infinite pistol
+- **Weapon pickups**: shattered gunners and heavies sometimes drop a shotgun (marked with a red ring) — drag up to run over it (drops magnetize to you when close) for 4 shells of 6-pellet spread, then you're back to the infinite pistol; your aim auto-recovers onto the remaining enemies
 - **TIMESHARD rules**: one hit kills you; one hit shatters them; endless escalating waves with enemy bullets creeping faster each wave
 - **Rotating arenas**: the cover layout changes every 3 waves (scattered cover → pillar court → corridors)
 - Synthesized sound effects (WebAudio, no assets), haptic feedback, kill-word flashes, best-wave tracking (localStorage)
