@@ -36,6 +36,9 @@
 
   #hint { position:absolute; left:0; right:0; bottom:calc(env(safe-area-inset-bottom, 0px) + 16px);
           text-align:center; font-size:11px; font-weight:700; letter-spacing:.24em; color:#7a8089; }
+  #ammo { position:absolute; left:0; right:0; bottom:calc(env(safe-area-inset-bottom, 0px) + 40px);
+          text-align:center; font-size:13px; font-weight:900; letter-spacing:.26em; color:#16181d; }
+  #ammo.shotgun { color:#ff2d1a; }
 
   /* ---- kill words ---- */
   #flash { position:absolute; left:0; right:0; top:22%; text-align:center; pointer-events:none; }
@@ -87,6 +90,7 @@
   </div>
   <div id="flash"></div>
   <div id="banner"></div>
+  <div id="ammo">PISTOL · ∞</div>
   <div id="hint">HOLD — TIME STOPS · TAP — SHOOT · FLICK — DODGE</div>
 </div>
 

@@ -24,8 +24,11 @@ The whole game is played with a single finger at a time:
 - **Projectile physics**: bullets have real travel time and gravity drop; enemy shots are slow and visible so you can dodge them; swept segment-vs-capsule collision so nothing tunnels through
 - **Shatter physics**: enemies burst into red shards with gravity, spin, and floor bounces
 - **Enemy AI**: advance with strafing, steer around cover, keep separation, telegraphed aiming (white gun flash before firing), melee when they get close
-- **Superhot rules**: one hit kills you; one hit shatters them; endless escalating waves
-- Synthesized sound effects (WebAudio, no assets), haptic feedback, kill-word flashes
+- **Three enemy types**: gunners, fast bare-handed rushers (from wave 2), and slow heavies that fire 3-round bursts (from wave 4)
+- **Weapon pickups**: shattered gunners and heavies sometimes drop a shotgun (marked with a red ring) — dash over it to grab 4 shells of 6-pellet spread, then you're back to the infinite pistol
+- **Superhot rules**: one hit kills you; one hit shatters them; endless escalating waves with enemy bullets creeping faster each wave
+- **Rotating arenas**: the cover layout changes every 3 waves (scattered cover → pillar court → corridors)
+- Synthesized sound effects (WebAudio, no assets), haptic feedback, kill-word flashes, best-wave tracking (localStorage)
 
 ## Run it
 
