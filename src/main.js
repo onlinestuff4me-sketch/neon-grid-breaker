@@ -343,7 +343,7 @@ function spawnBullet(pos, dir, fromPlayer) {
     mesh, trail,
     pos: pos.clone(), prev: pos.clone(),
     vel: dir.clone().multiplyScalar(speed),
-    fromPlayer, life: 6, rippleAcc: 0,
+    fromPlayer, life: 6, rippleAcc: 0, whizzed: false,
   });
 }
 
@@ -837,6 +837,15 @@ function updateBullets(sdt) {
     tp[3] = b.pos.x; tp[4] = b.pos.y; tp[5] = b.pos.z;
     b.trail.geometry.attributes.position.needsUpdate = true;
 
+    // whizz: an enemy round passing near your head gets a doppler-ish whoosh
+    if (!b.fromPlayer && !b.whizzed && player.alive) {
+      const wx = b.pos.x - player.pos.x, wy = b.pos.y - EYE_HEIGHT, wz = b.pos.z - player.pos.z;
+      if (wx * wx + wy * wy + wz * wz < 2.4 * 2.4) {
+        b.whizzed = true;
+        sfx.whizz();
+      }
+    }
+
     // wake: drop an expanding ring every fixed distance travelled
     b.rippleAcc += b.pos.distanceTo(b.prev);
     const spacing = b.fromPlayer ? 1.1 : 0.5;
@@ -1019,17 +1028,132 @@ function vibrate(ms) {
 }
 
 // ---------------------------------------------------------------------------
-// Audio — tiny synthesized SFX via WebAudio (no assets)
+// Audio — synthesized, no assets. A dark synthwave loop is rendered offline
+// at startup and played on a chain whose playback rate, lowpass filter, and
+// echo send all track the time scale: enter bullet time and the whole
+// soundtrack tape-slows into a deep, muffled, echoing version of itself.
+// World SFX (enemy shots, bullet whizzes) sink with it.
 // ---------------------------------------------------------------------------
 const sfx = (() => {
-  let ctx = null;
+  let ctx = null, master = null, sfxBus = null;
+  let echoIn = null, echoWet = null;
+  let musicSrc = null, musicGain = null, musicFilter = null;
+  let musicRate = 1, lastTs = 1, building = false;
+
   function init() {
-    if (!ctx) {
-      try { ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch { /* no audio */ }
+    if (ctx) {
+      if (ctx.state === 'suspended') ctx.resume();
+      return;
     }
-    if (ctx && ctx.state === 'suspended') ctx.resume();
+    try { ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch { return; }
+    master = ctx.createGain();
+    master.gain.value = 0.9;
+    master.connect(ctx.destination);
+    sfxBus = ctx.createGain();
+    sfxBus.connect(master);
+    // feedback echo bus — dry at full speed, cavernous in bullet time
+    echoIn = ctx.createGain();
+    const delay = ctx.createDelay(1);
+    delay.delayTime.value = 0.29;
+    const damp = ctx.createBiquadFilter();
+    damp.type = 'lowpass'; damp.frequency.value = 1500;
+    const fb = ctx.createGain();
+    fb.gain.value = 0.45;
+    echoIn.connect(delay); delay.connect(damp); damp.connect(fb); fb.connect(delay);
+    echoWet = ctx.createGain();
+    echoWet.gain.value = 0.06;
+    damp.connect(echoWet); echoWet.connect(master);
+    // music chain: buffer -> lowpass -> gain -> master (+ echo send)
+    musicFilter = ctx.createBiquadFilter();
+    musicFilter.type = 'lowpass'; musicFilter.frequency.value = 18000;
+    musicGain = ctx.createGain();
+    musicGain.gain.value = 0;
+    musicFilter.connect(musicGain); musicGain.connect(master);
+    const msend = ctx.createGain();
+    msend.gain.value = 0.4;
+    musicGain.connect(msend); msend.connect(echoIn);
+    buildMusic();
   }
-  function noise(dur, freq, q, gainV, rate = 1) {
+
+  // --- the soundtrack: 8 bars of Am-F-C-G synthwave rendered offline
+  async function buildMusic() {
+    if (building) return;
+    building = true;
+    const sr = ctx.sampleRate, BEAT = 0.6, DUR = 32 * BEAT;   // 100bpm, 8 bars
+    let off;
+    try { off = new OfflineAudioContext(2, Math.ceil(sr * DUR), sr); } catch { return; }
+
+    const hatBuf = off.createBuffer(1, Math.floor(sr * 0.05), sr);
+    { const d = hatBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length); }
+
+    function note(freq, t, len, { type = 'sawtooth', gain = 0.08, att = 0.01, lp = 0, pan = 0, detune = 0, f1 = 0 } = {}) {
+      const o = off.createOscillator();
+      o.type = type; o.frequency.setValueAtTime(freq, t); o.detune.value = detune;
+      if (f1) o.frequency.exponentialRampToValueAtTime(Math.max(f1, 1), t + len);
+      const g = off.createGain();
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(gain, t + att);
+      g.gain.exponentialRampToValueAtTime(0.0008, t + len);
+      let tail = g;
+      if (lp) { const f = off.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = lp; g.connect(f); tail = f; }
+      const p = off.createStereoPanner(); p.pan.value = pan;
+      o.connect(g); tail.connect(p); p.connect(off.destination);
+      o.start(t); o.stop(t + len + 0.05);
+    }
+    function hat(t, gain) {
+      const s = off.createBufferSource(); s.buffer = hatBuf;
+      const f = off.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 6000;
+      const g = off.createGain(); g.gain.value = gain;
+      s.connect(f); f.connect(g); g.connect(off.destination);
+      s.start(t);
+    }
+
+    // Am, F, C, G — two bars each
+    const CHORDS = [
+      { root: 55.0, pad: [110.0, 130.81, 164.81], arp: [110.0, 164.81, 220.0, 261.63] },
+      { root: 43.65, pad: [87.31, 110.0, 130.81], arp: [87.31, 130.81, 174.61, 220.0] },
+      { root: 65.41, pad: [130.81, 164.81, 196.0], arp: [130.81, 196.0, 261.63, 329.63] },
+      { root: 49.0, pad: [98.0, 123.47, 146.83], arp: [98.0, 146.83, 196.0, 246.94] },
+    ];
+    CHORDS.forEach((c, ci) => {
+      const t0 = ci * 8 * BEAT;
+      for (const f of c.pad) {       // slow detuned pad
+        note(f, t0, 8 * BEAT, { gain: 0.028, att: 1.2, lp: 750, detune: 5, pan: -0.25 });
+        note(f, t0, 8 * BEAT, { gain: 0.028, att: 1.2, lp: 750, detune: -5, pan: 0.25 });
+      }
+      for (let k = 0; k < 16; k++) {  // driving eighth-note bass
+        note(c.root, t0 + k * BEAT * 0.5, 0.26, { gain: k % 2 ? 0.055 : 0.1, lp: 320 });
+      }
+      for (let b = 0; b < 8; b++) {   // kick pulse + offbeat hats
+        note(120, t0 + b * BEAT, 0.13, { type: 'sine', gain: 0.42, f1: 44 });
+        hat(t0 + b * BEAT + BEAT / 2, 0.045);
+      }
+      for (let k = 0; k < 32; k++) {  // 16th-note arpeggio
+        note(c.arp[k % 4], t0 + k * BEAT * 0.25, 0.12, { type: 'triangle', gain: 0.04, pan: k % 2 ? 0.35 : -0.35 });
+      }
+    });
+
+    try {
+      const buf = await off.startRendering();
+      musicSrc = ctx.createBufferSource();
+      musicSrc.buffer = buf;
+      musicSrc.loop = true;
+      musicSrc.connect(musicFilter);
+      musicSrc.start();
+      musicGain.gain.setTargetAtTime(0.15, ctx.currentTime, 1.2);   // fade in
+    } catch { /* keep SFX even if music fails */ }
+  }
+
+  // --- one-shot helpers, routed through the sfx bus + echo send
+  function route(g, send) {
+    g.connect(sfxBus);
+    if (send > 0) {
+      const s = ctx.createGain();
+      s.gain.value = send;
+      g.connect(s); s.connect(echoIn);
+    }
+  }
+  function noise(dur, freq, q, gainV, rate = 1, send = 0.2) {
     if (!ctx) return;
     const n = Math.floor(ctx.sampleRate * dur);
     const buf = ctx.createBuffer(1, n, ctx.sampleRate);
@@ -1042,32 +1166,66 @@ const sfx = (() => {
     filt.type = 'bandpass'; filt.frequency.value = freq; filt.Q.value = q;
     const g = ctx.createGain();
     g.gain.value = gainV;
-    src.connect(filt).connect(g).connect(ctx.destination);
+    src.connect(filt).connect(g);
+    route(g, send);
     src.start();
   }
-  function tone(f0, f1, dur, gainV, type = 'square') {
+  function tone(f0, f1, dur, gainV, type = 'square', rate = 1, send = 0.15) {
     if (!ctx) return;
     const o = ctx.createOscillator();
     o.type = type;
-    o.frequency.setValueAtTime(f0, ctx.currentTime);
-    o.frequency.exponentialRampToValueAtTime(Math.max(f1, 1), ctx.currentTime + dur);
+    o.frequency.setValueAtTime(f0 * rate, ctx.currentTime);
+    o.frequency.exponentialRampToValueAtTime(Math.max(f1 * rate, 1), ctx.currentTime + dur / rate);
     const g = ctx.createGain();
     g.gain.setValueAtTime(gainV, ctx.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + dur);
-    o.connect(g).connect(ctx.destination);
-    o.start(); o.stop(ctx.currentTime + dur);
+    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + dur / rate);
+    o.connect(g);
+    route(g, send);
+    o.start(); o.stop(ctx.currentTime + dur / rate);
   }
+
+  // world sounds sink in pitch & speed as time slows; your own gun less so
+  const worldRate = () => 0.4 + 0.6 * timeScale;
+  const selfRate = () => 0.75 + 0.25 * timeScale;
+
   return {
     init,
+    // called every frame: tape-slow the music, close the filter, open the echo
+    update(ts, dt) {
+      if (!ctx) return;
+      const k = Math.min(dt * 8, 1);
+      musicRate += ((0.42 + 0.58 * ts) - musicRate) * k;
+      if (musicSrc) musicSrc.playbackRate.value = musicRate;
+      if (musicFilter) musicFilter.frequency.value = 480 + 17000 * Math.pow(ts, 1.4);
+      if (echoWet) echoWet.gain.value = 0.06 + (1 - ts) * 0.42;
+      if (ts < 0.5 && lastTs >= 0.5) {          // plunge: deep sub-drop
+        tone(170, 28, 0.8, 0.5, 'sine', 1, 0.55);
+        noise(0.7, 260, 0.7, 0.22, 0.55, 0.55);
+      } else if (ts >= 0.5 && lastTs < 0.5) {   // surface: bright snap
+        noise(0.12, 2400, 0.9, 0.18, 1.5, 0.08);
+        tone(600, 1300, 0.09, 0.1, 'triangle');
+      }
+      lastTs = ts;
+    },
+    debug() {
+      return ctx ? { state: ctx.state, musicRate: +musicRate.toFixed(2), music: !!musicSrc,
+        filter: musicFilter ? Math.round(musicFilter.frequency.value) : 0,
+        echo: echoWet ? +echoWet.gain.value.toFixed(2) : 0 } : null;
+    },
     shot(weapon) {
-      if (weapon === 'shotgun') { noise(0.28, 550, 0.5, 0.75); tone(160, 40, 0.18, 0.3); }
-      else { noise(0.14, 1600, 0.7, 0.5); tone(320, 70, 0.1, 0.25); }
+      const r = selfRate();
+      if (weapon === 'shotgun') { noise(0.28, 550, 0.5, 0.75, r, 0.3); tone(160, 40, 0.18, 0.3, 'square', r); }
+      else { noise(0.14, 1600, 0.7, 0.5, r, 0.25); tone(320, 70, 0.1, 0.25, 'square', r); }
+    },
+    whizz() {   // an enemy round passing your head — long and cavernous when slowed
+      const r = worldRate();
+      noise(0.9, 520, 1.4, 0.38, r, 0.6);
+      tone(420, 110, 0.7, 0.12, 'sine', r, 0.5);
     },
     pickup() { tone(520, 1040, 0.16, 0.25, 'triangle'); tone(780, 1560, 0.2, 0.18, 'triangle'); },
-    enemyShot() { const r = 0.6 + timeScale * 0.4; noise(0.18, 700, 0.8, 0.4, r); tone(180, 50, 0.14, 0.2); },
-    shatter() { noise(0.5, 2600, 0.4, 0.5); noise(0.35, 4200, 0.6, 0.3); },
-    dash() { noise(0.22, 900, 1.5, 0.35, 0.8); },
-    die() { tone(220, 40, 0.7, 0.4, 'sawtooth'); noise(0.5, 400, 0.8, 0.4); },
+    enemyShot() { const r = worldRate(); noise(0.18, 700, 0.8, 0.4, r, 0.45); tone(180, 50, 0.14, 0.2, 'square', r, 0.4); },
+    shatter() { const r = worldRate(); noise(0.5, 2600, 0.4, 0.5, r, 0.35); noise(0.35, 4200, 0.6, 0.3, r, 0.35); },
+    die() { tone(220, 40, 0.7, 0.4, 'sawtooth', 1, 0.5); noise(0.5, 400, 0.8, 0.4, 1, 0.5); },
     wave() { tone(440, 880, 0.18, 0.2, 'triangle'); },
   };
 })();
@@ -1385,6 +1543,7 @@ function frame(now) {
   el.timefill.classList.toggle('slow', timeScale < 0.5);
   el.tint.style.opacity = playing ? (1 - timeScale / TIME_FULL) : 0;
   document.body.classList.toggle('slowmo', playing && timeScale < 0.55);
+  sfx.update(playing || game.state === 'clear' ? timeScale : 1, dt);
   el.crosshair.classList.toggle('hot', player.fireCd > 0);
 
   renderer.render(scene, camera);
@@ -1398,6 +1557,7 @@ document.addEventListener('visibilitychange', () => { lastT = performance.now();
 window.__ts = {
   game, player, enemies, bullets, pickups, ripples, camera, input,
   sprint: () => sprintTo,
+  audio: () => sfx.debug(),
   fire: playerFire, setWeapon, spawnEnemy, spawnPickup,
   shot: (px, py, pz, dx, dy, dz, fromPlayer) =>
     spawnBullet(new THREE.Vector3(px, py, pz), new THREE.Vector3(dx, dy, dz).normalize(), fromPlayer),

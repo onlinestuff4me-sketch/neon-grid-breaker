@@ -15,7 +15,9 @@
   body { font-family:-apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif; }
   #game { position:fixed; inset:0; }
   canvas { display:block; transition:filter .28s ease; }
-  body.slowmo #game canvas { filter:saturate(.35) contrast(1.07) brightness(1.02); }
+  /* bullet time reads as its own world: drained color pushed warm-red with a
+     hint of negative — like the air itself changed */
+  body.slowmo #game canvas { filter:saturate(.5) contrast(1.12) sepia(.35) hue-rotate(-28deg) invert(.06); }
 
   /* cinematic letterbox bars that slide in during bullet time */
   .lbar { position:fixed; left:0; right:0; height:7vh; background:#0c0d10; z-index:5;
@@ -70,7 +72,7 @@
 
   /* ---- slow-mo tint & damage flash ---- */
   #tint { position:fixed; inset:0; pointer-events:none; opacity:0;
-          background:radial-gradient(ellipse at center, rgba(80,140,255,0) 30%, rgba(46,86,200,.28) 72%, rgba(18,28,80,.55) 100%); }
+          background:radial-gradient(ellipse at center, rgba(255,70,45,0) 32%, rgba(185,42,26,.24) 70%, rgba(70,10,8,.55) 100%); }
   #redflash { position:fixed; inset:0; pointer-events:none; opacity:0; background:radial-gradient(ellipse at center, rgba(255,45,26,.25) 0%, rgba(255,45,26,.75) 100%); }
 
   /* ---- full screen overlays ---- */
