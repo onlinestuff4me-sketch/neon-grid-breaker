@@ -107,14 +107,34 @@
   #overlay h1 em { font-style:normal; color:#ff2d1a; -webkit-text-stroke:2.5px #16181d; }
   #overlay .sub { margin-top:14px; font-size:11px; font-weight:800; letter-spacing:.3em; color:#40444c;
                   text-shadow:0 0 10px rgba(232,234,238,.95); }
-  #overlay .rules { margin:16px 0 4px; display:flex; flex-direction:column; gap:9px; font-size:13px; font-weight:700;
+  /* instructions pinned to the bottom of the menu */
+  #overlay .rules { position:absolute; left:0; right:0; bottom:calc(env(safe-area-inset-bottom, 0px) + 20px);
+                    display:flex; flex-direction:column; gap:7px; font-size:12px; font-weight:700;
                     letter-spacing:.12em; color:#8a9099; text-align:center;
                     text-shadow:0 0 10px rgba(232,234,238,.95); }
-  #best { margin-top:14px; font-size:11px; font-weight:800; letter-spacing:.26em; color:#7a8089;
-          text-shadow:0 0 10px rgba(232,234,238,.95); }
-  #howto { margin-top:26px; font-size:11px; font-weight:800; letter-spacing:.3em; color:#40444c;
-           padding:10px 22px; border:1.5px solid rgba(22,24,29,.35); border-radius:999px;
-           background:rgba(238,240,243,.55); }
+
+  /* recent-runs score table */
+  #scores { margin-top:26px; width:min(320px, 84vw); }
+  #scores .schead { font-size:11px; font-weight:800; letter-spacing:.24em; color:#7a8089;
+                    text-shadow:0 0 10px rgba(232,234,238,.95); margin-bottom:12px; }
+  #scores .scpills { display:flex; justify-content:center; gap:10px; margin-bottom:12px; }
+  #scores .scpill { font-size:10px; font-weight:900; letter-spacing:.22em; color:#5c626b;
+                    padding:7px 18px; border:1.5px solid rgba(22,24,29,.3); border-radius:999px;
+                    background:rgba(238,240,243,.55); }
+  #scores .scpill.active { background:#16181d; color:#eef0f3; border-color:#16181d; }
+  #scores .scrow { display:flex; align-items:baseline; gap:12px; padding:3px 6px;
+                   font-weight:800; text-shadow:0 0 8px rgba(232,234,238,.95); }
+  #scores .scrank { flex:0 0 34px; text-align:right; font-size:14px; color:#ff2d1a; }
+  #scores .scval { flex:0 0 58px; text-align:right; font-size:17px; color:#16181d; }
+  #scores .scdate { font-size:11px; font-weight:600; letter-spacing:.04em; color:#8a9099; }
+  #scores .scempty { font-size:11px; font-weight:700; letter-spacing:.22em; color:#9aa0ab; }
+
+  /* round sound toggle, bottom-right */
+  #sndbtn { position:absolute; right:18px; bottom:calc(env(safe-area-inset-bottom, 0px) + 76px);
+            width:52px; height:52px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+            border:1.5px solid rgba(22,24,29,.35); background:rgba(238,240,243,.6);
+            font-size:22px; color:#16181d; }
+  #sndbtn.muted { color:#9aa0ab; border-color:rgba(22,24,29,.18); }
   #overlay .go { margin-top:30px; font-size:15px; font-weight:900; letter-spacing:.34em; color:#ff2d1a;
                  animation:pulse 1.2s ease-in-out infinite; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
@@ -155,14 +175,14 @@
   <h1>TIME<br><em>SHARD</em></h1>
   <div class="sub">TIME MOVES ONLY WHEN YOU LET GO</div>
   <div class="go">TAP TO BEGIN</div>
-  <div id="best"></div>
-  <div id="howto">HOW TO PLAY ▾</div>
-  <div class="rules" style="display:none">
+  <div id="scores"></div>
+  <div class="rules">
     <div>HOLD — freezes time</div>
     <div>LEFT thumb — move</div>
     <div>RIGHT thumb — look</div>
     <div>TAP anywhere — shoot</div>
   </div>
+  <div id="sndbtn">♪</div>
   <div id="menubtn">MAIN MENU</div>
 </div>
 

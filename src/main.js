@@ -1072,14 +1072,18 @@ function onPointerDown(ev) {
       return;
     }
     if (game.state === 'menu' && ev.target && ev.target.closest) {
-      if (ev.target.closest('#howto')) {   // expander, not a game start
-        const r = el.overlay.querySelector('.rules');
-        const open = r.style.display !== 'none';
-        r.style.display = open ? 'none' : 'flex';
-        el.howto.textContent = open ? 'HOW TO PLAY ▾' : 'HOW TO PLAY ▴';
+      if (ev.target.closest('#sndbtn')) {   // sound toggle, not a game start
+        sfx.setMuted(!sfx.isMuted());
+        updateSndBtn();
         return;
       }
-      if (ev.target.closest('.rules')) return;   // reading, not starting
+      const pill = ev.target.closest('.scpill');
+      if (pill) {   // re-sort the score table
+        scoreMetric = pill.dataset.m;
+        renderScores();
+        return;
+      }
+      if (ev.target.closest('#scores') || ev.target.closest('.rules')) return;   // reading
     }
     advanceFromOverlay();
     return;   // this pointer is never registered, so its release is inert
@@ -1175,6 +1179,8 @@ const sfx = (() => {
   let echoIn = null, echoWet = null;
   let musicSrc = null, musicGain = null, musicFilter = null;
   let musicRate = 1, lastTs = 1, building = false;
+  let muted = false;
+  try { muted = localStorage.getItem('timeshard_muted') === '1'; } catch { /* private mode */ }
 
   function init() {
     if (ctx) {
@@ -1185,7 +1191,7 @@ const sfx = (() => {
     }
     try { ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch { return; }
     master = ctx.createGain();
-    master.gain.value = 0.9;
+    master.gain.value = muted ? 0 : 0.9;
     const comp = ctx.createDynamicsCompressor();   // keep the louder mix clean
     comp.threshold.value = -14;
     comp.ratio.value = 6;
@@ -1334,8 +1340,19 @@ const sfx = (() => {
   return {
     init,
     // called every frame: tape-slow the music, close the filter, open the echo
+    setMuted(m) {
+      muted = m;
+      try { localStorage.setItem('timeshard_muted', m ? '1' : '0'); } catch { /* private mode */ }
+      if (master) master.gain.value = m ? 0 : 0.9;
+    },
+    isMuted() { return muted; },
     update(ts, dt) {
       if (!ctx) return;
+      // the title screen keeps the music but silences the demo fight's SFX
+      if (sfxBus) {
+        const want = game.state === 'menu' ? 0 : 1;
+        sfxBus.gain.value += (want - sfxBus.gain.value) * Math.min(dt * 8, 1);
+      }
       // slower easing = a long, audible turntable-style pitch glide
       const k = Math.min(dt * 4.5, 1);
       musicRate += ((0.3 + 0.7 * ts) - musicRate) * k;
@@ -1354,7 +1371,9 @@ const sfx = (() => {
     debug() {
       return ctx ? { state: ctx.state, musicRate: +musicRate.toFixed(2), music: !!musicSrc,
         filter: musicFilter ? Math.round(musicFilter.frequency.value) : 0,
-        echo: echoWet ? +echoWet.gain.value.toFixed(2) : 0 } : null;
+        echo: echoWet ? +echoWet.gain.value.toFixed(2) : 0,
+        sbus: sfxBus ? +sfxBus.gain.value.toFixed(2) : 0,
+        master: master ? +master.gain.value.toFixed(2) : 0 } : null;
     },
     shot(weapon) {
       const r = selfRate();
@@ -1413,6 +1432,52 @@ const game = {
 let bestWave = 1;
 try { bestWave = Math.max(1, +localStorage.getItem('timeshard_best') || 1); } catch { /* private mode */ }
 
+// --- recent-runs table (last 5 runs; a run = menu start until death)
+let runStartAt = 0;
+let scoreMetric = 'w';   // 'w' = wave, 'k' = shards (kills)
+
+function loadRuns() {
+  try { return JSON.parse(localStorage.getItem('timeshard_runs') || '[]'); } catch { return []; }
+}
+
+function recordRun() {
+  const runs = loadRuns();
+  const e = runs.find((r) => r.id === runStartAt);
+  if (e) {   // retries extend the same run instead of adding a new row
+    e.w = Math.max(e.w, game.wave);
+    e.k = Math.max(e.k, game.kills);
+    e.at = Date.now();
+  } else {
+    runs.unshift({ id: runStartAt, w: game.wave, k: game.kills, at: Date.now() });
+  }
+  runs.sort((a, b) => b.at - a.at);
+  try { localStorage.setItem('timeshard_runs', JSON.stringify(runs.slice(0, 5))); } catch { /* private mode */ }
+}
+
+function fmtWhen(t) {
+  const d = new Date(t);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getMonth() + 1)}.${p(d.getDate())}.${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+function renderScores() {
+  const runs = loadRuns();
+  const ranked = [...runs].sort((a, b) => (b[scoreMetric] - a[scoreMetric]) || (b.at - a.at));
+  const rankOf = new Map(ranked.map((r, i) => [r.id, i + 1]));
+  const rows = runs.length
+    ? runs.map((r) =>
+        `<div class="scrow"><span class="scrank">#${rankOf.get(r.id)}</span>` +
+        `<span class="scval">${r[scoreMetric]}</span>` +
+        `<span class="scdate">${fmtWhen(r.at)}</span></div>`).join('')
+    : '<div class="scempty">NO RUNS YET</div>';
+  el.scores.innerHTML =
+    `<div class="schead">RECENT RUNS · BEST WAVE ${bestWave}</div>` +
+    `<div class="scpills">` +
+    `<span class="scpill${scoreMetric === 'w' ? ' active' : ''}" data-m="w">WAVE</span>` +
+    `<span class="scpill${scoreMetric === 'k' ? ' active' : ''}" data-m="k">SHARDS</span>` +
+    `</div>${rows}`;
+}
+
 // Mix of enemy types for wave n: rushers from wave 2, shotgunners from 3,
 // heavies + one sniper from 4, armored (headshot-only) from 5.
 function composeWave(n) {
@@ -1449,10 +1514,16 @@ const el = {
   stickNub: document.getElementById('sticknub'),
   warn: document.getElementById('warn'),
   guide: document.getElementById('guide'),
-  howto: document.getElementById('howto'),
-  best: document.getElementById('best'),
+  scores: document.getElementById('scores'),
+  sndbtn: document.getElementById('sndbtn'),
 };
-el.best.textContent = bestWave > 1 ? `BEST WAVE ${bestWave}` : '';
+renderScores();
+
+function updateSndBtn() {
+  el.sndbtn.textContent = sfx.isMuted() ? '✕' : '♪';
+  el.sndbtn.classList.toggle('muted', sfx.isMuted());
+}
+updateSndBtn();
 
 // the title screen's original copy, so MAIN MENU can restore it after a death
 const MENU_HTML = {
@@ -1478,15 +1549,17 @@ function showMenu() {
   game.wave = 1;
   game.kills = 0;
   game.noFireBefore = 0;
+  el.guide.style.opacity = 0;
+  el.guide.style.display = 'none';
   el.overlay.querySelector('h1').innerHTML = MENU_HTML.h1;
   el.overlay.querySelector('.sub').innerHTML = MENU_HTML.sub;
   el.overlay.querySelector('.rules').innerHTML = MENU_HTML.rules;
   el.overlay.querySelector('.go').innerHTML = MENU_HTML.go;
-  el.overlay.querySelector('.rules').style.display = 'none';
-  el.howto.style.display = 'block';
-  el.howto.textContent = 'HOW TO PLAY ▾';
-  el.best.style.display = 'block';
-  el.best.textContent = bestWave > 1 ? `BEST WAVE ${bestWave}` : '';
+  el.overlay.querySelector('.rules').style.display = 'flex';
+  el.scores.style.display = 'block';
+  el.sndbtn.style.display = 'flex';
+  renderScores();
+  updateSndBtn();
   el.menubtn.style.display = 'none';
   el.redflash.style.opacity = 0;
   el.overlay.classList.remove('hidden');
@@ -1606,6 +1679,9 @@ function hitPlayer() {
   game.state = 'dead';
   game.stateT = 0;
   deathAt = performance.now();
+  recordRun();
+  el.guide.style.opacity = 0;
+  el.guide.style.display = 'none';
   el.redflash.style.opacity = 1;
   sfx.die();
   vibrate([60, 40, 120]);
@@ -1616,8 +1692,8 @@ function hitPlayer() {
     const r = el.overlay.querySelector('.rules');
     r.innerHTML = `<div class="stats">WAVE ${game.wave} · ${game.kills} SHATTERED · BEST WAVE ${bestWave}</div>`;
     r.style.display = 'flex';
-    el.howto.style.display = 'none';
-    el.best.style.display = 'none';
+    el.scores.style.display = 'none';
+    el.sndbtn.style.display = 'none';
     el.overlay.querySelector('.go').textContent = 'TAP TO RETRY WAVE';
     el.menubtn.style.display = 'inline-block';
     el.overlay.classList.remove('hidden');
@@ -1657,6 +1733,7 @@ function advanceFromOverlay() {
     player.yaw = 0; player.pitch = 0; player.roll = 0;
     player.iframes = 1;
     game.kills = 0;
+    runStartAt = Date.now();
     setWeapon('pistol');
     startWave(1);
     showGuide();
