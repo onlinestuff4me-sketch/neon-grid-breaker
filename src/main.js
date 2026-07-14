@@ -901,7 +901,8 @@ const MOVE_SPEED = 5.5;         // m/s at full stick (real time)
 const SPRINT_SPEED = 9;         // m/s while auto-sprinting to a pickup
 const MOVE_EASE = 10;           // velocity smoothing rate — the "weight"
 const LOOK_SENS = 2.6;          // radians per screen-width of look drag
-const TAP_MS = 230, TAP_PX = 14;
+const TAP_MS = 280, TAP_PX = 18;  // thresholds on NET displacement — real
+                                  // thumbs jitter, so never sum path length
 const PICKUP_TAP_PX = 64;       // screen-px hit radius for tapping a drop
 
 const input = {
@@ -936,12 +937,14 @@ function onPointerDown(ev) {
   ev.preventDefault();
   sfx.init();
   if (game.state === 'menu' || game.state === 'dead' || game.state === 'gameover') {
+    // brief lockout after dying so panic taps don't skip the death screen
+    if (game.state === 'dead' && performance.now() - deathAt < 1000) return;
     advanceFromOverlay();
     return;   // this pointer is never registered, so its release is inert
   }
   input.pointers.set(ev.pointerId, {
     sx: ev.clientX, sy: ev.clientY, x: ev.clientX, y: ev.clientY,
-    ox: ev.clientX, oy: ev.clientY, role: null, downT: performance.now(), moved: 0,
+    ox: ev.clientX, oy: ev.clientY, role: null, downT: performance.now(),
   });
   input.holding = true;
 }
@@ -952,8 +955,7 @@ function onPointerMove(ev) {
   ev.preventDefault();
   const dx = ev.clientX - p.x, dy = ev.clientY - p.y;
   p.x = ev.clientX; p.y = ev.clientY;
-  p.moved += Math.abs(dx) + Math.abs(dy);
-  if (!p.role && p.moved > TAP_PX) {
+  if (!p.role && Math.hypot(p.x - p.sx, p.y - p.sy) > TAP_PX) {
     p.role = p.sx < window.innerWidth * 0.45 ? 'move' : 'look';
     p.ox = p.x; p.oy = p.y;         // the stick anchors where the drag begins
     if (p.role === 'move') sprintTo = null;   // manual move cancels a sprint
@@ -982,7 +984,8 @@ function releasePointer(ev, isTapEligible) {
   const p = input.pointers.get(ev.pointerId);
   if (!p) return;
   ev.preventDefault();
-  if (isTapEligible && !p.role && performance.now() - p.downT < TAP_MS) {
+  if (isTapEligible && !p.role && performance.now() - p.downT < TAP_MS &&
+      Math.hypot(p.x - p.sx, p.y - p.sy) <= TAP_PX) {
     const hit = pickupAtScreen(p.x, p.y);
     if (hit) {
       sprintTo = hit;               // one tap: run there and take the gun
@@ -1173,16 +1176,20 @@ function startWave(n) {
 
 function maxAlive() { return Math.min(2 + Math.floor(game.wave / 2), 5); }
 
+let deathAt = 0;
+
 function hitPlayer() {
   if (!player.alive || player.iframes > 0) return;
   player.alive = false;
   sprintTo = null;
   game.state = 'dead';
   game.stateT = 0;
+  deathAt = performance.now();
   el.redflash.style.opacity = 1;
   sfx.die();
   vibrate([60, 40, 120]);
   setTimeout(() => {
+    if (game.state !== 'dead') return;   // already retried — don't resurrect the overlay
     el.overlay.querySelector('h1').innerHTML = 'YOU<br><em>DIED</em>';
     el.overlay.querySelector('.sub').textContent = 'ONE HIT IS ALL IT TAKES';
     el.overlay.querySelector('.rules').innerHTML =
