@@ -6,7 +6,7 @@ aesthetic, real rigid-body destruction, weekly procedurally-generated levels,
 and high-score chasing. Each game is a prototype on a path to becoming an
 iOS app.
 
-**Play:** https://onlinestuff4me-sketch.github.io/physics-arcade-game/
+**Play:** https://onlinestuff4me-sketch.github.io/neon-grid-breaker/
 
 | Game | Status | One-liner |
 |---|---|---|
