@@ -39,15 +39,18 @@
   #hud .row { display: flex; justify-content: space-between; align-items: flex-start; }
   #shields { font-size: 22px; letter-spacing: .12em; color: #7fdcff;
     text-shadow: 0 0 10px rgba(127,220,255,.8); }
-  #hudMoment { font-size: 15px; font-weight: 800; text-align: right; letter-spacing: .18em; }
+  #hudAmmo { font-size: 22px; font-weight: 800; text-align: right; }
+  #hudAmmo .orb { display:inline-block; width: 14px; height: 14px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #fff, #9ad8ff 40%, #274a6a 90%);
+    box-shadow: 0 0 8px rgba(160,220,255,.9); vertical-align: -1px; margin-right: 6px; }
   #hudScore { font-size: 44px; line-height: 1; text-align: center; font-variant-numeric: tabular-nums; }
-  #flowTrack {
+  #focusTrack {
     width: 140px; height: 5px; margin: 8px auto 0; border-radius: 999px;
     background: rgba(127,220,255,.14); overflow: hidden;
   }
-  #flowBar { height: 100%; width: 100%; background: #7fdcff; border-radius: 999px;
+  #focusBar { height: 100%; width: 100%; background: #7fdcff; border-radius: 999px;
     transition: width .12s linear; }
-  #flowLabel { text-align: center; font-size: 9px; letter-spacing: .34em; text-indent: .34em;
+  #focusLabel { text-align: center; font-size: 9px; letter-spacing: .34em; text-indent: .34em;
     color: #4d6f8a; margin-top: 4px; }
   #hudMsg {
     position: fixed; left: 0; right: 0; top: 32%; text-align: center; pointer-events: none;
@@ -61,22 +64,6 @@
   #flowTint {
     position: fixed; inset: 0; pointer-events: none; opacity: 0; z-index: 4;
     background: radial-gradient(ellipse 105% 105% at 50% 50%, rgba(0,0,0,0) 55%, rgba(255,47,214,.5) 100%);
-  }
-  #freezeTint {
-    position: fixed; inset: 0; pointer-events: none; opacity: 0; z-index: 4;
-    background: radial-gradient(ellipse 105% 105% at 50% 50%, rgba(0,0,0,0) 60%, rgba(180,235,255,.45) 100%);
-  }
-
-  /* ------- aim reticle ------- */
-  #reticle {
-    position: fixed; left: 0; top: 0; width: 46px; height: 46px; display: none;
-    border: 2px solid rgba(223,246,255,.9); border-radius: 50%;
-    box-shadow: 0 0 14px rgba(127,220,255,.8), inset 0 0 8px rgba(127,220,255,.5);
-    pointer-events: none; z-index: 7;
-  }
-  #reticle::after {
-    content: ''; position: absolute; left: 50%; top: 50%; width: 4px; height: 4px;
-    transform: translate(-50%, -50%); border-radius: 50%; background: #fff;
   }
 
   /* ------- screens ------- */
@@ -118,28 +105,26 @@
   <div id="hud">
     <div class="row">
       <div id="shields">◆◆◆</div>
-      <div id="hudMoment" class="neon-ice">MOMENT <span id="momentNum">1</span></div>
+      <div id="hudAmmo"><span class="orb"></span><span id="ammoCount">14</span></div>
     </div>
     <div id="hudScore" class="chrome">0</div>
-    <div id="flowTrack"><div id="flowBar"></div></div>
-    <div id="flowLabel">TIME BONUS</div>
+    <div id="focusTrack"><div id="focusBar"></div></div>
+    <div id="focusLabel">FOCUS</div>
   </div>
   <div id="hudMsg"></div>
   <div id="flowTint"></div>
-  <div id="freezeTint"></div>
   <div id="flash"></div>
-  <div id="reticle"></div>
 
   <div id="startScreen" class="screen visible">
     <div class="logo chrome">TIME<br>SHARD</div>
     <div class="tagline neon-pink">TIME · OBEYS · YOU</div>
-    <div class="weektag dim">THIS WEEK'S MOMENTS</div>
+    <div class="weektag dim">THIS WEEK'S TRACK</div>
     <div class="weekname neon-ice" id="weekLabel">2026-W29</div>
     <div class="howto">
-      The world is frozen. <b>Time moves only while you touch.</b><br>
-      <b>Press &amp; drag</b> to aim — danger creeps closer.<br>
-      <b>Release</b> to fire a shard. Shatter every crystal drone.<br>
-      Shoot bolts out of the air. Clear each moment <b>fast</b> for bonus.
+      Race the grid. Drones burst from doors and rain wisp-fire.<br>
+      <b>HOLD</b> a finger — time crawls. <b>DRAG</b> it to weave.<br>
+      <b>TAP</b> with a second finger (or a quick tap) to fire.<br>
+      Ammo is precious: fly through the <b>souls</b> your kills leave behind.
     </div>
     <div class="stats" id="startStats"></div>
     <div class="tap neon-ice">TAP TO ENTER</div>
