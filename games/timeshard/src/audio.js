@@ -117,6 +117,59 @@ export class TimeshardAudio {
     }
   }
 
+  // A door grinding open: low hiss + servo thunk.
+  door() {
+    if (!this.ctx || this.muted) return;
+    const t = this.ctx.currentTime;
+    const n = this._noise(0.35);
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.Q.value = 1.4;
+    bp.frequency.setValueAtTime(300, t);
+    bp.frequency.exponentialRampToValueAtTime(900, t + 0.3);
+    const g = this.ctx.createGain();
+    this._env(g, t, 0.16, 0.02, 0.3);
+    n.connect(bp); bp.connect(g); g.connect(this.master);
+    n.start(t); n.stop(t + 0.38);
+
+    const o = this.ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(90, t + 0.28);
+    o.frequency.exponentialRampToValueAtTime(55, t + 0.4);
+    const og = this.ctx.createGain();
+    this._env(og, t + 0.28, 0.2, 0.005, 0.14);
+    o.connect(og); og.connect(this.master);
+    o.start(t + 0.28); o.stop(t + 0.46);
+  }
+
+  // Absorbing a soul: warm rising shimmer.
+  pickup() {
+    if (!this.ctx || this.muted) return;
+    const t = this.ctx.currentTime;
+    [523, 784, 1046].forEach((f, i) => {
+      const o = this.ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(f * 0.94, t + i * 0.04);
+      o.frequency.exponentialRampToValueAtTime(f, t + i * 0.04 + 0.12);
+      const g = this.ctx.createGain();
+      this._env(g, t + i * 0.04, 0.18, 0.01, 0.45);
+      o.connect(g); g.connect(this.master); g.connect(this.delay);
+      o.start(t + i * 0.04); o.stop(t + i * 0.04 + 0.6);
+    });
+  }
+
+  // Trigger pulled on an empty tank: dull click.
+  dryFire() {
+    if (!this.ctx || this.muted) return;
+    const t = this.ctx.currentTime;
+    const o = this.ctx.createOscillator();
+    o.type = 'square';
+    o.frequency.value = 220;
+    const g = this.ctx.createGain();
+    this._env(g, t, 0.08, 0.002, 0.05);
+    o.connect(g); g.connect(this.master);
+    o.start(t); o.stop(t + 0.08);
+  }
+
   // Shooting a bolt out of the air: bright metallic ping.
   deflect() {
     if (!this.ctx || this.muted) return;
