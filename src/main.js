@@ -25,6 +25,10 @@ const TIME_MOVE_MAX = 0.3;        // ... creeping up to this while you drag-dodg
 const TIME_FULL = 1.0;
 const TIME_EASE = 14;             // easing rate between the two
 
+const BT_MAX = 6;                 // seconds of bullet time in the tank
+const BT_RECHARGE = 0.8;          // refill per second while released
+const BT_LOCK_PCT = 0.3;          // once drained, recharge to 30% before reuse
+
 const PLAYER_BULLET_SPEED = 46;
 const ENEMY_BULLET_SPEED = 11;    // base; creeps up slightly with each wave
 const BULLET_GRAVITY = 4;         // gentle drop, visible on long shots
@@ -1125,7 +1129,10 @@ function releasePointer(ev, isTapEligible) {
   input.holding = input.pointers.size > 0;
 }
 
-function onPointerUp(ev) { releasePointer(ev, true); }
+function onPointerUp(ev) {
+  sfx.init();   // some browsers only allow audio resume on the gesture's END
+  releasePointer(ev, true);
+}
 function onPointerCancel(ev) { releasePointer(ev, false); }
 
 renderer.domElement.style.touchAction = 'none';
@@ -1154,7 +1161,9 @@ const sfx = (() => {
 
   function init() {
     if (ctx) {
-      if (ctx.state === 'suspended') ctx.resume();
+      // 'suspended' after backgrounding, 'interrupted' on iOS — either way,
+      // any user gesture should bring the sound back
+      if (ctx.state !== 'running') ctx.resume().catch(() => {});
       return;
     }
     try { ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch { return; }
@@ -1366,6 +1375,8 @@ const sfx = (() => {
     shatter() { const r = worldRate(); noise(0.5, 2600, 0.4, 0.5, r, 0.35); noise(0.35, 4200, 0.6, 0.3, r, 0.35); },
     die() { tone(220, 40, 0.7, 0.4, 'sawtooth', 1, 0.5); noise(0.5, 400, 0.8, 0.4, 1, 0.5); },
     wave() { tone(440, 880, 0.18, 0.2, 'triangle'); },
+    btEmpty() { tone(320, 50, 0.5, 0.35, 'sawtooth', 1, 0.3); },   // tank ran dry
+    btReady() { tone(520, 980, 0.1, 0.22, 'triangle'); },          // ...and back
   };
 })();
 
@@ -1407,6 +1418,8 @@ function composeWave(n) {
 }
 
 let timeScale = 1;
+let btEnergy = BT_MAX;   // the bullet-time tank
+let btLocked = false;    // drained dry — must recharge to BT_LOCK_PCT
 
 const el = {
   overlay: document.getElementById('overlay'),
@@ -1423,6 +1436,7 @@ const el = {
   stickNub: document.getElementById('sticknub'),
   warn: document.getElementById('warn'),
   guide: document.getElementById('guide'),
+  btring: document.getElementById('btring'),
 };
 
 function updateAmmoHud() {
@@ -1472,7 +1486,9 @@ function updateEdgeArrows(playing) {
   for (let i = 0; i < edgeArrows.length; i++) {
     const a = edgeArrows[i];
     if (i < dirs.length) {
-      const th = dirs[i];
+      // positive dYaw = enemy to the LEFT (yaw increases counter-clockwise),
+      // so mirror: left-enemy arrow sits on the left edge pointing left
+      const th = -dirs[i];
       a.style.display = 'block';
       a.style.left = `${cx + Math.sin(th) * R}px`;
       a.style.top = `${cy - Math.cos(th) * R}px`;
@@ -1591,6 +1607,8 @@ function advanceFromOverlay() {
     input.holding = false;
     stickUI(false);
     sprintTo = null;
+    btEnergy = BT_MAX;
+    btLocked = false;
     setWeapon('pistol');
     startWave(game.wave);
   }
@@ -1607,10 +1625,26 @@ function frame(now) {
   lastT = now;
 
   // --- time scale: frozen while a finger is down — but time moves (a little)
-  // when YOU move, so dodging costs the world a few frames
+  // when YOU move, and the bullet-time tank drains while frozen
   const playing = game.state === 'play' || game.state === 'intro';
+  const wantSlow = playing && input.holding;
+  if (wantSlow && !btLocked) {
+    btEnergy -= dt;
+    if (btEnergy <= 0) {
+      btEnergy = 0;
+      btLocked = true;
+      sfx.btEmpty();
+      vibrate([40, 30, 40]);
+    }
+  } else {
+    btEnergy = Math.min(btEnergy + dt * BT_RECHARGE, BT_MAX);
+    if (btLocked && btEnergy >= BT_MAX * BT_LOCK_PCT) {
+      btLocked = false;
+      sfx.btReady();
+    }
+  }
   let target = TIME_FULL;
-  if (playing && input.holding) {
+  if (wantSlow && !btLocked) {
     const speedNorm = Math.min(player.vel.length() / MOVE_SPEED, 1);
     target = TIME_SLOW + (TIME_MOVE_MAX - TIME_SLOW) * speedNorm;
   }
@@ -1741,8 +1775,20 @@ function frame(now) {
 
   // --- HUD
   el.score.textContent = `WAVE ${game.wave}  ·  ${game.kills}`;
-  el.timefill.style.width = `${Math.round(timeScale * 100)}%`;
-  el.timefill.classList.toggle('slow', timeScale < 0.5);
+  const btPct = btEnergy / BT_MAX;
+  el.timefill.style.width = `${Math.round(btPct * 100)}%`;
+  el.timefill.classList.toggle('slow', btLocked || btPct < BT_LOCK_PCT);
+  // crosshair energy ring — front and center while you're spending it
+  const ringVisible = playing && (input.holding || btPct < 0.999);
+  el.btring.style.display = ringVisible ? 'block' : 'none';
+  if (ringVisible) {
+    const deg = Math.round(btPct * 360);
+    const col = btLocked ? 'rgba(255,45,26,.95)'
+      : timeScale < 0.55 ? 'rgba(255,255,255,.95)' : 'rgba(22,24,29,.75)';
+    el.btring.style.background =
+      `conic-gradient(${col} 0deg ${deg}deg, rgba(128,132,140,.25) ${deg}deg 360deg)`;
+    el.btring.classList.toggle('low', btLocked || btPct < BT_LOCK_PCT);
+  }
   el.tint.style.opacity = playing ? (1 - timeScale / TIME_FULL) : 0;
   document.body.classList.toggle('slowmo', playing && timeScale < 0.55);
   sfx.update(playing || game.state === 'clear' ? timeScale : 1, dt);
@@ -1752,14 +1798,19 @@ function frame(now) {
 }
 requestAnimationFrame(frame);
 
-// Pause the world clock while backgrounded so nothing "catches up" on return.
-document.addEventListener('visibilitychange', () => { lastT = performance.now(); });
+// Pause the world clock while backgrounded so nothing "catches up" on return,
+// and revive the audio context when the tab comes back.
+document.addEventListener('visibilitychange', () => {
+  lastT = performance.now();
+  if (!document.hidden) sfx.init();
+});
 
 // Debug hook for automated tests.
 window.__ts = {
   game, player, enemies, bullets, pickups, ripples, camera, input,
   sprint: () => sprintTo,
   audio: () => sfx.debug(),
+  bt: () => ({ energy: +btEnergy.toFixed(2), locked: btLocked }),
   fire: playerFire, setWeapon, spawnEnemy, spawnPickup,
   shot: (px, py, pz, dx, dy, dz, fromPlayer) =>
     spawnBullet(new THREE.Vector3(px, py, pz), new THREE.Vector3(dx, dy, dz).normalize(), fromPlayer),

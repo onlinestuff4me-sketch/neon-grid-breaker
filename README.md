@@ -11,7 +11,7 @@ Everything runs off holds, drags, and taps — one thumb works, two thumbs sing:
 
 | Gesture | Effect |
 |---|---|
-| **Hold** (any finger) | Bullet time: ~5% speed standing still, creeping up to ~30% while you move — dodging costs the world a few frames |
+| **Hold** (any finger) | Bullet time: ~5% speed standing still, creeping up to ~30% while you move. The tank holds ~6 seconds (energy ring around the crosshair + top bar); run it dry and you're stuck at full speed until it recharges to 30% |
 | **Left-half drag** | Floating virtual stick: smooth, velocity-eased movement to weave between hanging bullets |
 | **Right-half drag** | Look/aim — the camera is yours; a soft assist only settles your crosshair onto targets you're already pointing at, and red edge arrows point toward off-screen threats |
 | **Tap** | Fire at the crosshair — tap repeatedly to work through a whole squad in one freeze |

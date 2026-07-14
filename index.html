@@ -44,6 +44,13 @@
   #crosshair::after  { top:50%; left:0; height:2px; width:100%; transform:translateY(-50%); }
   #crosshair.hot::before, #crosshair.hot::after { background:#ff2d1a; }
 
+  /* bullet-time energy ring around the crosshair */
+  #btring { position:absolute; left:50%; top:50%; width:76px; height:76px; display:none;
+            transform:translate(-50%,-50%); border-radius:50%; pointer-events:none;
+            -webkit-mask:radial-gradient(closest-side, transparent 69%, #000 71%);
+            mask:radial-gradient(closest-side, transparent 69%, #000 71%); }
+  #btring.low { animation:pulse .6s ease-in-out infinite; }
+
   #topbar { position:absolute; top:calc(env(safe-area-inset-top, 0px) + 10px); left:14px; right:14px;
             display:flex; justify-content:space-between; align-items:flex-start;
             font-weight:800; letter-spacing:.12em; color:#16181d; font-size:14px; }
@@ -66,19 +73,20 @@
               animation:kw .9s ease-out forwards; }
   .warnword.w2 { animation-delay:.18s; opacity:0; }
 
-  /* first-wave onboarding guide: move / look zones + fire hint */
+  /* first-wave onboarding: three words, two ghost thumbs, one divider */
   #guide { position:fixed; inset:0; display:none; z-index:6; pointer-events:none;
-           opacity:0; transition:opacity 2s ease; background:rgba(232,234,238,.45); }
-  #guide .gz { position:absolute; top:0; bottom:0; display:flex; flex-direction:column;
-               align-items:center; justify-content:center; gap:10px; }
-  #guide .gzL { left:0; width:70%; background:rgba(22,24,29,.16);
-                border-right:3px dashed rgba(22,24,29,.55); }
-  #guide .gzR { right:0; width:30%; background:rgba(255,45,26,.16); }
-  #guide .gt { font-size:26px; font-weight:900; letter-spacing:.22em; color:#16181d; }
-  #guide .gs { font-size:12px; font-weight:800; letter-spacing:.24em; color:#40444c; }
-  #guide .gring { width:64px; height:64px; border-radius:50%; border:3px solid rgba(22,24,29,.5);
-                  display:flex; align-items:center; justify-content:center; font-size:24px; color:rgba(22,24,29,.6); }
-  #guide .gfire { position:absolute; left:0; right:0; bottom:22%; text-align:center;
+           opacity:0; transition:opacity 2s ease; }
+  #guide .gdiv { position:absolute; top:12%; bottom:12%; left:70%; width:0;
+                 border-left:2px dashed rgba(22,24,29,.3); }
+  #guide .gz { position:absolute; bottom:24%; display:flex; flex-direction:column;
+               align-items:center; gap:12px; }
+  #guide .gzL { left:35%; transform:translateX(-50%); }
+  #guide .gzR { left:85%; transform:translateX(-50%); }
+  #guide .gring { width:84px; height:84px; border-radius:50%;
+                  border:3px dashed rgba(22,24,29,.45); background:rgba(22,24,29,.06);
+                  animation:pulse 1.6s ease-in-out infinite; }
+  #guide .gt { font-size:20px; font-weight:900; letter-spacing:.26em; color:#16181d; }
+  #guide .gfire { position:absolute; left:0; right:0; top:30%; text-align:center;
                   font-size:15px; font-weight:900; letter-spacing:.3em; color:#ff2d1a;
                   animation:pulse 1.2s ease-in-out infinite; }
 
@@ -130,6 +138,7 @@
 
 <div id="hud">
   <div id="crosshair"></div>
+  <div id="btring"></div>
   <div id="topbar">
     <div id="score">WAVE 1&nbsp;&nbsp;·&nbsp;&nbsp;0</div>
     <div id="timewrap">
@@ -152,9 +161,10 @@
 <div id="sticknub"></div>
 
 <div id="guide">
-  <div class="gz gzL"><div class="gring">✥</div><div class="gt">MOVE</div><div class="gs">DRAG HERE TO DODGE</div></div>
-  <div class="gz gzR"><div class="gring">👁</div><div class="gt">LOOK</div><div class="gs">DRAG TO AIM</div></div>
-  <div class="gfire">TAP ANYWHERE TO FIRE</div>
+  <div class="gdiv"></div>
+  <div class="gz gzL"><div class="gring"></div><div class="gt">MOVE</div></div>
+  <div class="gz gzR"><div class="gring"></div><div class="gt">LOOK</div></div>
+  <div class="gfire">TAP TO FIRE</div>
 </div>
 
 <div id="overlay">
