@@ -234,6 +234,7 @@ const doorMat = new THREE.MeshStandardMaterial({
   emissive: PALETTE.door, emissiveIntensity: 0.5,
 });
 const frameMat = new THREE.MeshBasicMaterial({ color: PALETTE.door });
+const gateMat = new THREE.MeshBasicMaterial({ color: 0xff7ae4 });
 const ringMat = new THREE.MeshBasicMaterial({ color: 0x9ff0ff });
 const pylonMat = new THREE.MeshStandardMaterial({
   color: 0x9fd8e8, metalness: 0.4, roughness: 0.25, envMapIntensity: 1.2,
@@ -325,11 +326,12 @@ const S = {
   shakeT: 0,
   invulnT: 0,
   deadTimer: 0,
-  stats: { shots: 0, kills: 0, deflects: 0, souls: 0 },
+  stats: { shots: 0, kills: 0, deflects: 0, souls: 0, gates: 0 },
 };
 
 let trackGen = new TrackGen(weeklySeed(weeklyTag()));
 const zones = [];        // {spec, startZ, endZ, meshes[]}
+const gates = [];        // speed-tier gateways: {z, pos, passed}
 const pendingEvents = []; // spawn events waiting for their trigger distance
 const drones = [];
 const bolts = [];        // ethereal wisps: manual kinematics + sweeps
@@ -340,7 +342,7 @@ const audio = new TimeshardAudio();
 let nextZoneZ = -8;
 
 // Debug/replay hook (also used by the Playwright verification script).
-window.__timeshard = { S, drones, bolts, souls, shots, zones, camera };
+window.__timeshard = { S, drones, bolts, souls, shots, zones, gates, camera };
 
 // ---------------------------------------------------------------------------
 // Zone environment building + streaming
@@ -384,11 +386,30 @@ function buildZoneMeshes(spec, startZ) {
     }
   }
 
-  // entry arch where an enclosed zone begins — the gate into the tunnel
+  // entry arch where an enclosed zone begins — the frame into the tunnel
   if (spec.type !== 'open') {
     const arch = makeRing(spec.halfWidth + 0.2, (geo.ceiling || geo.wallH) + 0.2, 0.13);
     arch.position.z = startZ - 0.5;
     add(arch);
+  }
+
+  // GATEWAY every Nth zone: fly through it to shift up a speed tier.
+  // Double frame (ice outside, hot magenta inside) so it reads as "special".
+  if (spec.index > 0 && spec.index % TUNING.gates.everyZones === 0) {
+    const gw = Math.min(spec.halfWidth + 0.4, 4.2);
+    const gh = (geo.ceiling || geo.wallH || 4.6) + 0.4;
+    const g = new THREE.Group();
+    g.add(makeRing(gw, gh, 0.18));
+    const inner = makeRingFlat(gw * 2 - 0.5, gh - 0.5, 0.1);
+    inner.children.forEach((c) => { c.material = gateMat; });
+    inner.position.y = gh / 2;
+    g.add(inner);
+    const glow = sprite(glowMagenta, PALETTE.wispHalo, 3.2, 0.35);
+    glow.position.y = gh;
+    g.add(glow);
+    g.position.z = startZ - 1.2;
+    add(g);
+    gates.push({ z: startZ - 1.2, pos: new THREE.Vector3(0, gh / 2, startZ - 1.2), passed: false });
   }
 
   // open plains get off-track crystal pylons streaming past (speed feel)
@@ -452,9 +473,35 @@ function streamZones() {
   const cur = zones.find((z) => S.camZ <= z.startZ && S.camZ > z.endZ);
   if (cur) {
     S.zoneIdx = cur.spec.index;
-    S.speed = Math.min(TUNING.speed.max, TUNING.speed.base + S.zoneIdx * TUNING.speed.perZone);
+    updateSpeed();
     const targetHalf = cur.spec.halfWidth;
     S.trackHalf += (targetHalf - S.trackHalf) * Math.min(1, 2.5 * (1 / 60));
+  }
+}
+
+function updateSpeed() {
+  S.speed = Math.min(TUNING.speed.max,
+    TUNING.speed.base + S.zoneIdx * TUNING.speed.perZone + S.stats.gates * TUNING.speed.perGate);
+}
+
+function passGates() {
+  for (let i = gates.length - 1; i >= 0; i--) {
+    const g = gates[i];
+    if (!g.passed && S.camZ < g.z) {
+      g.passed = true;
+      if (S.mode === 'playing') {
+        S.stats.gates += 1;
+        S.points += TUNING.gates.scoreBonus;
+        updateSpeed();
+        audio.clear();
+        spawnSpark(g.pos, 4.5, PALETTE.wispHalo);
+        flash('rgba(255,47,214,0.16)', 500);
+        showMsg(`GATE ${S.stats.gates} — SPEED UP`, 'neon-pink');
+        S.shakeT = Math.max(S.shakeT, 0.18);
+        updateHUD();
+      }
+    }
+    if (g.z > S.camZ + TUNING.track.cleanupBehind) gates.splice(i, 1);
   }
 }
 
@@ -1125,6 +1172,7 @@ function updateHUD() {
   el('ammoCount').textContent = S.ammo;
   el('hudAmmo').style.color = S.ammo <= 3 ? '#ff2fd6' : '#dff6ff';
   el('shardCount').textContent = S.stats.kills;
+  el('gateCount').textContent = S.stats.gates;
   el('shields').textContent =
     '◆'.repeat(Math.max(0, S.shields)) + '◇'.repeat(TUNING.player.shields - Math.max(0, S.shields));
 }
@@ -1170,7 +1218,7 @@ function showStart() {
   const s = scores.summary();
   const last = s.history[0];
   el('startBest').textContent = last
-    ? `LAST ${last.score} ✦${last.shards ?? 0} · BEST ${s.allTimeBest}` +
+    ? `LAST ${last.score} ✦${last.shards ?? 0} ∩${last.gates ?? 0} · BEST ${s.allTimeBest}` +
       (s.streak > 1 ? ` · ${s.streak}\u{1F525}` : '')
     : '';
   // placement snapshot: where the last run sits on this device's top runs
@@ -1196,9 +1244,9 @@ function pauseGame() {
   clearPointers();
   audio.stopMusic();
   el('pauseScore').textContent = S.score;
-  el('pauseShards').textContent = `SHARDS ✦${S.stats.kills}`;
+  el('pauseShards').textContent = `SHARDS ✦${S.stats.kills} · GATES ∩${S.stats.gates}`;
   const s = scores.summary();
-  const row = (r) => `${r.score} ✦${r.shards ?? 0}`;
+  const row = (r) => `${r.score} ✦${r.shards ?? 0} ∩${r.gates ?? 0}`;
   fillStats(el('pauseTop'), s.top.length
     ? s.top.slice(0, 5).map((r, i) => [`#${i + 1}  ${r.week}`, row(r)])
     : [['NO RUNS YET', '—']]);
@@ -1219,8 +1267,8 @@ function resumeGame() {
 }
 
 let overShownAt = 0;
-function showGameOver(title = 'TIME CAUGHT YOU') {
-  const r = scores.recordRun(S.score, { shards: S.stats.kills });
+function showGameOver(title = 'YOU DIED') {
+  const r = scores.recordRun(S.score, { shards: S.stats.kills, gates: S.stats.gates });
   el('overTitle').textContent = title;
   el('finalScore').textContent = S.score;
   el('bestBadge').textContent = r.isAllTimeBest ? '★ NEW ALL-TIME BEST ★'
@@ -1231,6 +1279,7 @@ function showGameOver(title = 'TIME CAUGHT YOU') {
   fillStats(el('overStats'), [
     ['DISTANCE', `${Math.floor(S.distance)}m`],
     ['SHARDS', `✦${S.stats.kills}`],
+    ['GATES', `∩${S.stats.gates}`],
     ['DEFLECTS', S.stats.deflects],
     ['SOULS', S.stats.souls],
     ['ACCURACY', `${acc}%`],
@@ -1267,6 +1316,7 @@ function clearWorldObjects() {
     }
   }
   zones.length = 0;
+  gates.length = 0; // gate meshes belong to their zones (already removed)
   pendingEvents.length = 0;
   flushRemovals();
 }
@@ -1279,7 +1329,7 @@ function startRun() {
     trackHalf: ZONES.open.halfWidth, zoneIdx: 0, speed: TUNING.speed.base,
     timeScale: 1, focus: TUNING.time.focusMax, focusOk: true, holdActive: false,
     gameTime: 0, shakeT: 0, invulnT: 0, deadTimer: 0,
-    stats: { shots: 0, kills: 0, deflects: 0, souls: 0 },
+    stats: { shots: 0, kills: 0, deflects: 0, souls: 0, gates: 0 },
   });
   trackGen = new TrackGen(weeklySeed(weeklyTag()));
   nextZoneZ = -8;
@@ -1470,11 +1520,13 @@ function tick(tNow) {
     S.camX += (S.steerX - S.camX) * Math.min(1, TUNING.steer.lerp * dt);
     streamZones();
     triggerPendingEvents();
+    passGates();
   } else if (S.mode === 'menu') {
     // attract mode: drift down the track behind the title, drones and all
     S.camZ -= 3 * dt;
     streamZones();
     triggerPendingEvents();
+    passGates(); // marks them silently (no fanfare outside a run)
   }
 
   // --- world update, all on the scaled clock ---
