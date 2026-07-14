@@ -36,7 +36,8 @@ const WEAPONS = {
 
 const AIM_RATE_HOLD = 9;          // auto-aim easing rate while time is frozen
 const AIM_RATE_FREE = 3.5;        // ... and while time flows
-const AIM_RATE_BOOST = 16;        // snap-to-next-target rate just after a kill
+const AIM_RATE_BOOST = 7.5;       // swing-to-next-target rate just after a kill
+                                  // (a smooth swing, not a jerk)
 const FOV_NORMAL = 80;
 const FOV_SLOW = 66;              // bullet-time zoom
 
@@ -486,7 +487,7 @@ function spawnPickup(pos) {
   spin.position.y = 0.85;
   spin.rotation.z = 0.25;
   const ring = new THREE.Mesh(
-    new THREE.RingGeometry(0.5, 0.62, 24),
+    new THREE.RingGeometry(0.72, 0.88, 24),
     new THREE.MeshBasicMaterial({ color: 0xff2d1a, transparent: true, opacity: 0.5, side: THREE.DoubleSide })
   );
   ring.rotation.x = -Math.PI / 2;
@@ -634,8 +635,8 @@ function spawnEnemy(type = 'gunner') {
     walkPhase: Math.random() * Math.PI * 2,
     strafe: Math.random() < 0.5 ? 1 : -1,
     strafeT: 1 + Math.random() * 2,
-    fireCd: 0.3 + Math.random() * 0.5,
-    engageDist: 13 + Math.random() * 7,   // open fire from range, not point-blank
+    fireCd: 0.15 + Math.random() * 0.35,
+    engageDist: 15 + Math.random() * 6,   // open fire from range, not point-blank
     burstLeft: 0,
     burstT: 0,
     alive: true,
@@ -649,7 +650,20 @@ function killEnemy(i, impulseDir) {
   scene.remove(e.g);
   enemies.splice(i, 1);
   game.kills++;
-  aimBoost = 0.7;   // camera whips to the next target — keep the taps coming
+  aimBoost = 1.0;   // camera swings to the next target — keep the taps coming
+  // big swing coming? warn with style
+  if (enemies.length) {
+    let nd = 1e9, nx = 0, nz = 0;
+    for (const o of enemies) {
+      const dx = o.pos.x - player.pos.x, dz = o.pos.z - player.pos.z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 < nd) { nd = d2; nx = dx; nz = dz; }
+    }
+    let dYaw = Math.atan2(-nx, -nz) - player.yaw;
+    while (dYaw > Math.PI) dYaw -= Math.PI * 2;
+    while (dYaw < -Math.PI) dYaw += Math.PI * 2;
+    if (Math.abs(dYaw) > 0.7) warnFlash();
+  }
   killWord();
   sfx.shatter();
   vibrate(30);
@@ -732,7 +746,7 @@ function updateEnemy(e, sdt) {
           e.burstLeft = 2; e.burstT = 0.22;
         } else {
           e.state = 'recover'; e.stateT = 0;
-          e.fireCd = 1.1 + Math.random() * 1.0;
+          e.fireCd = 0.9 + Math.random() * 0.8;
         }
       }
       break;
@@ -912,7 +926,8 @@ const MOVE_EASE = 10;           // velocity smoothing rate — the "weight"
 const LOOK_SENS = 2.6;          // radians per screen-width of look drag
 const TAP_MS = 280, TAP_PX = 18;  // thresholds on NET displacement — real
                                   // thumbs jitter, so never sum path length
-const PICKUP_TAP_PX = 64;       // screen-px hit radius for tapping a drop
+const PICKUP_TAP_PX = 120;      // generous screen-px hit radius for tapping a
+                                // drop — near-misses should grab, not fire
 
 const input = {
   pointers: new Map(),          // id -> {sx,sy,x,y,ox,oy,role,downT,moved}
@@ -965,7 +980,7 @@ function onPointerMove(ev) {
   const dx = ev.clientX - p.x, dy = ev.clientY - p.y;
   p.x = ev.clientX; p.y = ev.clientY;
   if (!p.role && Math.hypot(p.x - p.sx, p.y - p.sy) > TAP_PX) {
-    p.role = p.sx < window.innerWidth * 0.45 ? 'move' : 'look';
+    p.role = p.sx < window.innerWidth * 0.7 ? 'move' : 'look';
     p.ox = p.x; p.oy = p.y;         // the stick anchors where the drag begins
     if (p.role === 'move') sprintTo = null;   // manual move cancels a sprint
   }
@@ -1048,7 +1063,11 @@ const sfx = (() => {
     try { ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch { return; }
     master = ctx.createGain();
     master.gain.value = 0.9;
-    master.connect(ctx.destination);
+    const comp = ctx.createDynamicsCompressor();   // keep the louder mix clean
+    comp.threshold.value = -14;
+    comp.ratio.value = 6;
+    master.connect(comp);
+    comp.connect(ctx.destination);
     sfxBus = ctx.createGain();
     sfxBus.connect(master);
     // feedback echo bus — dry at full speed, cavernous in bullet time
@@ -1140,7 +1159,7 @@ const sfx = (() => {
       musicSrc.loop = true;
       musicSrc.connect(musicFilter);
       musicSrc.start();
-      musicGain.gain.setTargetAtTime(0.15, ctx.currentTime, 1.2);   // fade in
+      musicGain.gain.setTargetAtTime(0.26, ctx.currentTime, 1.2);   // fade in
     } catch { /* keep SFX even if music fails */ }
   }
 
@@ -1193,11 +1212,12 @@ const sfx = (() => {
     // called every frame: tape-slow the music, close the filter, open the echo
     update(ts, dt) {
       if (!ctx) return;
-      const k = Math.min(dt * 8, 1);
-      musicRate += ((0.42 + 0.58 * ts) - musicRate) * k;
+      // slower easing = a long, audible turntable-style pitch glide
+      const k = Math.min(dt * 4.5, 1);
+      musicRate += ((0.3 + 0.7 * ts) - musicRate) * k;
       if (musicSrc) musicSrc.playbackRate.value = musicRate;
-      if (musicFilter) musicFilter.frequency.value = 480 + 17000 * Math.pow(ts, 1.4);
-      if (echoWet) echoWet.gain.value = 0.06 + (1 - ts) * 0.42;
+      if (musicFilter) musicFilter.frequency.value = 380 + 17100 * Math.pow(ts, 1.4);
+      if (echoWet) echoWet.gain.value = 0.06 + (1 - ts) * 0.48;
       if (ts < 0.5 && lastTs >= 0.5) {          // plunge: deep sub-drop
         tone(170, 28, 0.8, 0.5, 'sine', 1, 0.55);
         noise(0.7, 260, 0.7, 0.22, 0.55, 0.55);
@@ -1219,11 +1239,18 @@ const sfx = (() => {
     },
     whizz() {   // an enemy round passing your head — long and cavernous when slowed
       const r = worldRate();
-      noise(0.9, 520, 1.4, 0.38, r, 0.6);
-      tone(420, 110, 0.7, 0.12, 'sine', r, 0.5);
+      const loud = 1 + (1 - timeScale) * 0.8;   // slowed bullets DOMINATE the mix
+      noise(1.0, 480, 1.3, 0.55 * loud, r, 0.7);
+      noise(0.7, 950, 1.8, 0.3 * loud, r, 0.6);
+      tone(420, 90, 0.8, 0.22 * loud, 'sine', r, 0.6);
     },
     pickup() { tone(520, 1040, 0.16, 0.25, 'triangle'); tone(780, 1560, 0.2, 0.18, 'triangle'); },
-    enemyShot() { const r = worldRate(); noise(0.18, 700, 0.8, 0.4, r, 0.45); tone(180, 50, 0.14, 0.2, 'square', r, 0.4); },
+    enemyShot() {
+      const r = worldRate();
+      const loud = 1 + (1 - timeScale) * 0.7;
+      noise(0.2, 700, 0.8, 0.55 * loud, r, 0.5);
+      tone(190, 45, 0.16, 0.3 * loud, 'square', r, 0.45);
+    },
     shatter() { const r = worldRate(); noise(0.5, 2600, 0.4, 0.5, r, 0.35); noise(0.35, 4200, 0.6, 0.3, r, 0.35); },
     die() { tone(220, 40, 0.7, 0.4, 'sawtooth', 1, 0.5); noise(0.5, 400, 0.8, 0.4, 1, 0.5); },
     wave() { tone(440, 880, 0.18, 0.2, 'triangle'); },
@@ -1277,6 +1304,8 @@ const el = {
   ammo: document.getElementById('ammo'),
   stickBase: document.getElementById('stickbase'),
   stickNub: document.getElementById('sticknub'),
+  warn: document.getElementById('warn'),
+  guide: document.getElementById('guide'),
 };
 
 function updateAmmoHud() {
@@ -1287,6 +1316,17 @@ function updateAmmoHud() {
     el.ammo.textContent = 'SHOTGUN · ' + '▮'.repeat(Math.max(player.ammo, 0));
     el.ammo.classList.add('shotgun');
   }
+}
+
+let lastWarnAt = -10;
+function warnFlash() {
+  const now = performance.now() / 1000;
+  if (now - lastWarnAt < 4) return;   // don't nag
+  lastWarnAt = now;
+  el.warn.innerHTML =
+    '<span class="warnword">LOOK.</span><span class="warnword w2">OUT.</span>';
+  clearTimeout(warnFlash._t);
+  warnFlash._t = setTimeout(() => { el.warn.innerHTML = ''; }, 1500);
 }
 
 let killWordFlip = false;
@@ -1369,11 +1409,20 @@ function clearField() {
   for (let i = pickups.length - 1; i >= 0; i--) removePickup(i);
 }
 
+function showGuide() {
+  const g = el.guide;
+  g.style.display = 'flex';
+  g.style.opacity = 1;
+  setTimeout(() => { g.style.opacity = 0; }, 2000);   // hold 2s...
+  setTimeout(() => { g.style.display = 'none'; }, 3100);   // ...fade 1s, gone
+}
+
 function advanceFromOverlay() {
   el.overlay.classList.add('hidden');
   el.redflash.style.opacity = 0;
   if (game.state === 'menu') {
     startWave(1);
+    showGuide();
   } else {   // retry current wave
     clearField();
     player.alive = true;
@@ -1514,7 +1563,7 @@ function frame(now) {
       game.spawnTimer -= sdt;
       if (game.spawnTimer <= 0) {
         spawnEnemy(game.spawnQueue.shift());
-        game.spawnTimer = 1.2 + Math.random();
+        game.spawnTimer = 0.8 + Math.random() * 0.6;
       }
     }
     for (const e of enemies) updateEnemy(e, sdt);

@@ -50,6 +50,29 @@
           text-align:center; font-size:13px; font-weight:900; letter-spacing:.26em; color:#16181d; }
   #ammo.shotgun { color:#ff2d1a; }
 
+  /* "LOOK. OUT." retarget warning */
+  #warn { position:absolute; left:0; right:0; top:34%; text-align:center; pointer-events:none; }
+  .warnword { display:inline-block; margin:0 .12em; font-size:min(11vw,52px); font-weight:900;
+              letter-spacing:.06em; color:#16181d; -webkit-text-stroke:1.5px #ff2d1a;
+              animation:kw .9s ease-out forwards; }
+  .warnword.w2 { animation-delay:.18s; opacity:0; }
+
+  /* first-wave onboarding guide: move / look zones + fire hint */
+  #guide { position:fixed; inset:0; display:none; z-index:6; pointer-events:none;
+           opacity:0; transition:opacity 1s ease; }
+  #guide .gz { position:absolute; top:0; bottom:0; display:flex; flex-direction:column;
+               align-items:center; justify-content:center; gap:8px; }
+  #guide .gzL { left:0; width:70%; background:rgba(22,24,29,.07);
+                border-right:2px dashed rgba(22,24,29,.35); }
+  #guide .gzR { right:0; width:30%; background:rgba(255,45,26,.07); }
+  #guide .gt { font-size:22px; font-weight:900; letter-spacing:.22em; color:#16181d; }
+  #guide .gs { font-size:11px; font-weight:700; letter-spacing:.28em; color:#6b7078; }
+  #guide .gring { width:64px; height:64px; border-radius:50%; border:3px solid rgba(22,24,29,.5);
+                  display:flex; align-items:center; justify-content:center; font-size:24px; color:rgba(22,24,29,.6); }
+  #guide .gfire { position:absolute; left:0; right:0; bottom:22%; text-align:center;
+                  font-size:15px; font-weight:900; letter-spacing:.3em; color:#ff2d1a;
+                  animation:pulse 1.2s ease-in-out infinite; }
+
   /* virtual move-stick (left thumb) */
   #stickbase, #sticknub { position:fixed; display:none; pointer-events:none; z-index:4;
                           border-radius:50%; transform:translate(-50%,-50%); }
@@ -106,6 +129,7 @@
     </div>
   </div>
   <div id="flash"></div>
+  <div id="warn"></div>
   <div id="banner"></div>
   <div id="ammo">PISTOL · ∞</div>
   <div id="hint">HOLD — TIME STOPS · L DRAG — MOVE · R DRAG — AIM · TAP — FIRE</div>
@@ -117,6 +141,12 @@
 <div class="lbar" id="lbbot"></div>
 <div id="stickbase"></div>
 <div id="sticknub"></div>
+
+<div id="guide">
+  <div class="gz gzL"><div class="gring">✥</div><div class="gt">MOVE</div><div class="gs">DRAG HERE TO DODGE</div></div>
+  <div class="gz gzR"><div class="gring">👁</div><div class="gt">LOOK</div><div class="gs">DRAG TO AIM</div></div>
+  <div class="gfire">TAP ANYWHERE TO FIRE</div>
+</div>
 
 <div id="overlay">
   <h1>TIME<br><em>SHARD</em></h1>
