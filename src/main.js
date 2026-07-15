@@ -232,6 +232,137 @@ function hasLineOfSight(a, b) {
 }
 
 // ---------------------------------------------------------------------------
+// Faceted polygon wordmark — custom angular letterforms where every stroke is
+// a red facet lit from the upper-left, like low-poly cut glass. Used for the
+// menu title (with a periodic shimmer sweep) and the kill-flash words.
+// ---------------------------------------------------------------------------
+const SHIMMER_FIRST_DELAY = 1;   // seconds after the menu appears
+const SHIMMER_INTERVAL = 5;      // seconds of rest after a sweep finishes
+const SHIMMER_DUR = 1.2;         // seconds for the light band to cross
+
+const LFONT = {
+  widths: { S: 80, H: 80, A: 80, R: 80, D: 80, T: 80, I: 36, M: 96, E: 72 },
+  gap: 16,
+  letters: {
+    S: [
+      [[10,0],[80,0],[80,24],[0,24],[0,10]],
+      [[0,10],[24,10],[24,62],[0,62]],
+      [[0,38],[80,38],[80,62],[0,62]],
+      [[56,38],[80,38],[80,90],[56,90]],
+      [[0,76],[80,76],[80,90],[70,100],[0,100]],
+    ],
+    H: [
+      [[0,10],[10,0],[24,0],[24,100],[0,100]],
+      [[56,0],[80,0],[80,90],[70,100],[56,100]],
+      [[0,38],[80,38],[80,62],[0,62]],
+    ],
+    A: [
+      [[28,0],[52,0],[24,100],[0,100]],
+      [[28,0],[52,0],[80,100],[56,100]],
+      [[16,62],[64,62],[68,84],[12,84]],
+    ],
+    R: [
+      [[0,0],[24,0],[24,100],[10,100],[0,90]],
+      [[0,0],[58,0],[80,18],[80,24],[0,24]],
+      [[56,10],[80,18],[80,44],[56,52]],
+      [[0,38],[70,38],[62,60],[0,60]],
+      [[38,52],[62,52],[80,92],[80,100],[58,100]],
+    ],
+    D: [
+      [[0,10],[10,0],[24,0],[24,100],[10,100],[0,90]],
+      [[0,0],[54,0],[68,24],[0,24]],
+      [[0,76],[68,76],[54,100],[0,100]],
+      [[52,8],[80,30],[80,70],[52,92]],
+    ],
+    T: [
+      [[0,10],[10,0],[70,0],[80,10],[80,24],[0,24]],
+      [[28,24],[52,24],[52,92],[44,100],[28,100]],
+    ],
+    I: [
+      [[4,8],[12,0],[32,0],[32,94],[26,100],[4,100]],
+    ],
+    M: [
+      [[0,10],[10,0],[24,0],[24,100],[0,100]],
+      [[72,0],[86,0],[96,10],[96,100],[72,100]],
+      [[14,0],[32,0],[56,60],[44,82]],
+      [[64,0],[82,0],[52,82],[40,60]],
+    ],
+    E: [
+      [[0,10],[10,0],[24,0],[24,100],[10,100],[0,90]],
+      [[0,0],[62,0],[72,10],[72,24],[0,24]],
+      [[0,38],[58,38],[58,60],[0,60]],
+      [[0,76],[72,76],[72,90],[62,100],[0,100]],
+    ],
+  },
+};
+
+// highlight -> deep shadow, lit from the upper-left
+const TONES = ['#ff8f6e', '#ff5a3c', '#ff2d1a', '#e01505', '#b81205', '#8f0d02'];
+
+function mixColor(hexA, hexB, k) {
+  const c = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+  const a = c(hexA), b = c(hexB);
+  return 'rgb(' + a.map((v, i) => Math.round(v + (b[i] - v) * k)).join(',') + ')';
+}
+
+function buildWordSVG(word, height) {
+  const polys = [];
+  let dx = 0;
+  for (const ch of word) {
+    for (const poly of LFONT.letters[ch]) {
+      polys.push(poly.map((p) => [p[0] + dx, p[1]]));
+    }
+    dx += LFONT.widths[ch] + LFONT.gap;
+  }
+  const W = dx - LFONT.gap;
+  let inner = '';
+  let n = 0;
+  for (const poly of polys) {
+    let cx = 0, cy = 0;
+    for (const p of poly) { cx += p[0]; cy += p[1]; }
+    cx /= poly.length; cy /= poly.length;
+    const lit = (cx / W) * 0.6 + (cy / 100) * 0.4;
+    const jit = Math.abs((Math.sin(++n * 127.1) * 43758.5453) % 1);
+    const tone = Math.max(0, Math.min(TONES.length - 1, Math.floor(lit * 4.2 + jit * 2.2 - 0.6)));
+    inner += `<polygon points="${poly.map((p) => p[0] + ',' + p[1]).join(' ')}" ` +
+      `data-cx="${cx.toFixed(1)}" data-cy="${cy.toFixed(1)}" data-tone="${tone}" fill="${TONES[tone]}"/>`;
+  }
+  const w = Math.round(W * height / 100);
+  return {
+    svg: `<svg width="${w}" height="${height}" viewBox="0 0 ${W} 100" overflow="visible">${inner}</svg>`,
+    W,
+  };
+}
+
+// menu-title shimmer state
+let titleFacets = [];
+let titleW = 464;
+let shimmerAt = Infinity;
+
+function collectTitleFacets() {
+  const h1 = document.querySelector('#overlay h1');
+  titleFacets = [...h1.querySelectorAll('svg polygon')].map((p) => ({
+    el: p, cx: +p.dataset.cx, cy: +p.dataset.cy, tone: +p.dataset.tone,
+  }));
+}
+
+function updateShimmer(nowSec) {
+  if (nowSec < shimmerAt || !titleFacets.length) return;
+  const p = (nowSec - shimmerAt) / SHIMMER_DUR;
+  if (p >= 1) {   // sweep done: settle and schedule the next one
+    for (const f of titleFacets) f.el.setAttribute('fill', TONES[f.tone]);
+    shimmerAt = nowSec + SHIMMER_INTERVAL;
+    return;
+  }
+  const bandX = -180 + p * (titleW + 360);
+  for (const f of titleFacets) {
+    const d = Math.abs(f.cx - bandX + (f.cy - 50) * 0.45);
+    const boost = Math.exp(-((d / 85) ** 2));
+    f.el.setAttribute('fill', boost > 0.02 ? mixColor(TONES[f.tone], '#ffe3d6', boost * 0.75) : TONES[f.tone]);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Player
 // ---------------------------------------------------------------------------
 const player = {
@@ -1776,6 +1907,17 @@ const el = {
 };
 renderScores();
 
+// swap the h1's plain SHARD for the faceted polygon wordmark BEFORE the menu
+// snapshot below, so MAIN MENU restores the styled title too
+{
+  const tw = Math.min(Math.round(window.innerWidth * 0.84), 330);
+  const built = buildWordSVG('SHARD', Math.round(tw * 100 / 464));
+  titleW = built.W;
+  el.overlay.querySelector('h1').innerHTML = 'TIME' + built.svg;
+  collectTitleFacets();
+  shimmerAt = performance.now() / 1000 + SHIMMER_FIRST_DELAY;
+}
+
 // flat, single-color speaker glyphs
 const SND_ON_SVG =
   '<svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/>' +
@@ -1827,6 +1969,8 @@ function showMenu() {
   el.menubtn.style.display = 'none';
   el.redflash.style.opacity = 0;
   el.overlay.classList.remove('hidden');
+  collectTitleFacets();   // the restore above created fresh title nodes
+  shimmerAt = performance.now() / 1000 + SHIMMER_FIRST_DELAY;
 }
 
 function updateAmmoHud() {
@@ -1892,12 +2036,11 @@ function updateEdgeArrows(playing) {
 let killWordFlip = false;
 function killWord() {
   killWordFlip = !killWordFlip;
-  const span = document.createElement('span');
-  span.className = 'killword';
-  span.textContent = killWordFlip ? 'TIME' : 'SHARD';
-  el.flash.innerHTML = '';
-  el.flash.appendChild(span);
-  setTimeout(() => { if (span.parentNode) span.remove(); }, 650);
+  const word = killWordFlip ? 'TIME' : 'SHARD';
+  const { svg } = buildWordSVG(word, 58);   // faceted letterforms, no shimmer
+  el.flash.innerHTML = '<span class="kwskew"><span class="kwflash">' + svg + '</span></span>';
+  clearTimeout(killWord._t);
+  killWord._t = setTimeout(() => { el.flash.innerHTML = ''; }, 650);
 }
 
 function showBanner(html, dur = 1600) {
@@ -2230,6 +2373,7 @@ function frame(now) {
   el.tint.style.opacity = playing ? (1 - timeScale / TIME_FULL) : 0;
   document.body.classList.toggle('slowmo', playing && timeScale < 0.55);
   document.body.classList.toggle('inmenu', game.state === 'menu');
+  if (game.state === 'menu') updateShimmer(now / 1000);
   sfx.update(playing || game.state === 'clear' ? timeScale : 1, dt);
   el.crosshair.classList.toggle('hot', player.fireCd > 0);
 

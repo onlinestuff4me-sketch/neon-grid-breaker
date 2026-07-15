@@ -79,10 +79,11 @@
                background:rgba(22,24,29,.05); }
   #sticknub { width:44px; height:44px; background:rgba(22,24,29,.35); }
 
-  /* ---- kill words ---- */
+  /* ---- kill words: faceted polygon wordmark, flashed per kill ---- */
   #flash { position:absolute; left:0; right:0; top:22%; text-align:center; pointer-events:none; }
-  .killword { display:inline-block; font-size:min(19vw, 96px); font-weight:900; letter-spacing:.06em; color:#ff2d1a;
-              -webkit-text-stroke:2px #16181d; animation:kw .6s ease-out forwards; }
+  .kwskew { display:inline-block; transform:skewX(-6deg); }
+  .kwflash { display:inline-block; animation:kw .6s ease-out forwards;
+             filter:drop-shadow(0 0 8px rgba(232,234,238,.95)) drop-shadow(0 0 18px rgba(232,234,238,.7)); }
   @keyframes kw { 0%{opacity:0; transform:scale(1.6)} 12%{opacity:1; transform:scale(1)} 70%{opacity:1} 100%{opacity:0; transform:scale(.92)} }
 
   /* ---- banners (wave intro / clear) ---- */
@@ -104,6 +105,7 @@
   #overlay h1 { font-size:min(22vw,104px); font-weight:900; line-height:.82; letter-spacing:.01em; color:#16181d;
                 transform:skewX(-6deg); text-shadow:0 0 24px rgba(232,234,238,.95), 0 0 60px rgba(232,234,238,.9); }
   #overlay h1 em { font-style:normal; color:#ff2d1a; -webkit-text-stroke:2.5px #16181d; }
+  #overlay h1 svg { display:block; margin:10px auto 0; overflow:visible; }
   #overlay .sub { margin-top:14px; font-size:11px; font-weight:800; letter-spacing:.3em; color:#40444c;
                   text-shadow:0 0 10px rgba(232,234,238,.95); }
   /* instructions pinned to the bottom of the menu */
