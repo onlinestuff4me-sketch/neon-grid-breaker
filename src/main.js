@@ -925,8 +925,14 @@ function buildEnemyMesh(type) {
       scope.position.set(0, -0.62, 0.08);
       egun.add(scope);
     } else if (type === 'shotgunner') {
-      addBarrel(0.3, 0.05, -0.035);
-      addBarrel(0.3, 0.05, 0.035);
+      // mirrors the player's shotgun viewmodel: long thin side-by-side
+      // barrels, a chunky receiver and a stock behind the grip
+      addBarrel(0.42, 0.045, -0.028);
+      addBarrel(0.42, 0.045, 0.028);
+      const stock = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.14, 0.075), MAT_BLACK);
+      stock.position.set(0, -0.42, 0.05);
+      stock.rotation.x = -0.3;
+      egun.add(stock);
     } else if (type === 'heavy') {
       addBarrel(0.32, 0.07);
     } else if (type === 'rocketeer') {   // a fat launch tube
@@ -1101,7 +1107,17 @@ function updateEnemy(e, sdt) {
   const toPlayer = _v1.set(player.pos.x - e.pos.x, 0, player.pos.z - e.pos.z);
   const dist = toPlayer.length();
   toPlayer.normalize();
-  e.g.rotation.y = Math.atan2(toPlayer.x, toPlayer.z);
+  const wantYaw = Math.atan2(toPlayer.x, toPlayer.z);
+  if (ENEMY_TYPES[e.type].shielded) {
+    // The shield is only beatable if you can outpace his pivot: he slews at a
+    // fixed rate (in world time, so bullet time helps you circle him).
+    let dYaw = wantYaw - e.g.rotation.y;
+    dYaw = ((dYaw + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
+    const maxTurn = 1.1 * sdt;
+    e.g.rotation.y += Math.max(-maxTurn, Math.min(maxTurn, dYaw));
+  } else {
+    e.g.rotation.y = wantYaw;
+  }
   e.stateT += sdt;
   e.fireCd -= sdt;
 
@@ -1145,6 +1161,7 @@ function updateEnemy(e, sdt) {
       e.pos.z = Math.min(Math.max(e.pos.z, -lim), lim);
 
       if (e.type !== 'rusher' && dist < e.engageDist && e.fireCd <= 0 &&
+          (!ENEMY_TYPES[e.type].shielded || Math.cos(e.g.rotation.y - wantYaw) > 0.8) &&
           performance.now() >= game.noFireBefore &&
           hasLineOfSight(_v2.set(e.pos.x, 1.35, e.pos.z), _v3.set(player.pos.x, EYE_HEIGHT - 0.3, player.pos.z))) {
         e.state = 'aim'; e.stateT = 0;
@@ -1552,7 +1569,24 @@ const sfx = (() => {
   let muted = false;
   try { muted = localStorage.getItem('timeshard_muted') === '1'; } catch { /* private mode */ }
 
+  // Mobile browsers only allow speechSynthesis after it has spoken inside a
+  // user gesture — prime it with a silent utterance on the first tap, and
+  // keep a live reference so Chrome doesn't GC the utterance mid-speech.
+  let ttsPrimed = false, lastUtter = null;
+  function primeTTS() {
+    if (ttsPrimed || !('speechSynthesis' in window)) return;
+    ttsPrimed = true;
+    try {
+      speechSynthesis.getVoices();   // kicks off async voice loading
+      const u = new SpeechSynthesisUtterance(' ');
+      u.volume = 0;
+      lastUtter = u;
+      speechSynthesis.speak(u);
+    } catch { /* no TTS on this browser */ }
+  }
+
   function init() {
+    primeTTS();   // must run inside the gesture, even once audio is set up
     if (ctx) {
       // 'suspended' after backgrounding, 'interrupted' on iOS — either way,
       // any user gesture should bring the sound back
@@ -1712,14 +1746,22 @@ const sfx = (() => {
     // called every frame: tape-slow the music, close the filter, open the echo
     // the announcer: a low, slow synthesized voice speaking the kill words
     say(word) {
-      if (muted) return;
+      if (muted || !('speechSynthesis' in window)) return;
       try {
-        speechSynthesis.cancel();   // rapid kills: newest word wins
         const u = new SpeechSynthesisUtterance(word.toLowerCase() + '.');
         u.rate = 0.75;
         u.pitch = 0.3;
         u.volume = 1;
-        speechSynthesis.speak(u);
+        lastUtter = u;   // hold the reference — GC'd utterances go silent
+        if (speechSynthesis.speaking || speechSynthesis.pending) {
+          speechSynthesis.cancel();   // rapid kills: newest word wins
+          // Chrome drops a speak() issued in the same tick as cancel()
+          setTimeout(() => {
+            if (lastUtter === u) { try { speechSynthesis.speak(u); } catch { /* no TTS */ } }
+          }, 60);
+        } else {
+          speechSynthesis.speak(u);
+        }
       } catch { /* no TTS on this browser — the visual flash still lands */ }
     },
     setMuted(m) {
@@ -2068,7 +2110,7 @@ function showBanner(html, dur = 1600) {
   showBanner._t = setTimeout(() => el.banner.classList.remove('show'), dur);
 }
 
-function startWave(n) {
+function startWave(n, quiet = false) {   // quiet: the clear card already announced it
   game.wave = n;
   game.state = 'intro';
   game.stateT = 0;
@@ -2089,7 +2131,7 @@ function startWave(n) {
     resolvePlayerCollisions();   // in case a new block landed on the player
     for (let i = pickups.length - 1; i >= 0; i--) removePickup(i);
   }
-  showBanner(`WAVE ${n}<small>${arenaChanged && n > 1 ? 'NEW ARENA' : 'THEY ARE COMING'}</small>`, 1500);
+  if (!quiet) showBanner(`WAVE ${n}<small>${arenaChanged && n > 1 ? 'NEW ARENA' : 'THEY ARE COMING'}</small>`, 1500);
   sfx.wave();
 }
 
@@ -2349,12 +2391,15 @@ function frame(now) {
         performance.now() >= killFlashUntil) {   // let the final kill's word land first
       game.state = 'clear';
       game.stateT = 0;
-      showBanner(`WAVE ${game.wave} CLEAR<small>TIME · SHARD · TIME · SHARD</small>`, 2000);
+      // one readable card for the whole break — the next wave starts quietly
+      const next = game.wave + 1;
+      const nextArena = Math.floor((next - 1) / 3) % LAYOUTS.length !== currentLayout;
+      showBanner(`WAVE ${game.wave} CLEARED<small>NEXT: WAVE ${next}${nextArena ? ' · NEW ARENA' : ''}</small>`, 3300);
     }
   } else if (game.state === 'clear') {
     updateBullets(sdt);
     game.stateT += dt;
-    if (game.stateT > 2.2) startWave(game.wave + 1);
+    if (game.stateT > 3.5) startWave(game.wave + 1, true);
   } else if (game.state === 'dead') {
     for (const e of enemies) updateEnemy(e, sdt);
     updateBullets(sdt);
