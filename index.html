@@ -82,7 +82,7 @@
   /* ---- kill words: faceted polygon wordmark, flashed per kill ---- */
   #flash { position:absolute; left:0; right:0; top:22%; text-align:center; pointer-events:none; }
   .kwskew { display:inline-block; transform:skewX(-6deg); }
-  .kwflash { display:inline-block; animation:kw .6s ease-out forwards;
+  .kwflash { display:inline-block; animation:kw 1.1s ease-out forwards;
              filter:drop-shadow(0 0 8px rgba(232,234,238,.95)) drop-shadow(0 0 18px rgba(232,234,238,.7)); }
   @keyframes kw { 0%{opacity:0; transform:scale(1.6)} 12%{opacity:1; transform:scale(1)} 70%{opacity:1} 100%{opacity:0; transform:scale(.92)} }
 
@@ -118,14 +118,16 @@
   #scores { margin-top:26px; width:min(292px, 82vw); }
   #scores .schead { font-size:11px; font-weight:800; letter-spacing:.24em; color:#7a8089;
                     text-shadow:0 0 10px rgba(232,234,238,.95); margin-bottom:12px; }
-  #scores .scpills { display:flex; justify-content:center; gap:10px; margin-bottom:12px; }
+  #scores .scpills { display:flex; justify-content:flex-start; gap:10px; margin-bottom:12px; padding-left:2px; }
   #scores .scpill { font-size:10px; font-weight:900; letter-spacing:.22em; color:#5c626b;
                     padding:7px 18px; border:1.5px solid rgba(22,24,29,.3); border-radius:999px;
                     background:rgba(238,240,243,.55); }
   #scores .scpill.active { background:#16181d; color:#eef0f3; border-color:#16181d; }
   #scores .scrow { display:flex; align-items:baseline; padding:4px 2px;
                    font-weight:800; text-shadow:0 0 8px rgba(232,234,238,.95); }
-  #scores .scval { display:flex; align-items:baseline; gap:6px; font-size:17px; color:#16181d; }
+  /* value column sits centered under the first (WAVES) pill */
+  #scores .scval { flex:0 0 92px; display:flex; align-items:baseline; justify-content:center; gap:6px;
+                   font-size:17px; color:#16181d; }
   #scores .scval em { font-style:normal; font-size:10px; font-weight:800; letter-spacing:.16em; color:#8a9099; }
   #scores .scdate { margin-left:auto; font-size:11px; font-weight:600; letter-spacing:.04em; color:#8a9099; }
 

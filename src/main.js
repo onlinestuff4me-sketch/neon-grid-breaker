@@ -1710,10 +1710,23 @@ const sfx = (() => {
   return {
     init,
     // called every frame: tape-slow the music, close the filter, open the echo
+    // the announcer: a low, slow synthesized voice speaking the kill words
+    say(word) {
+      if (muted) return;
+      try {
+        speechSynthesis.cancel();   // rapid kills: newest word wins
+        const u = new SpeechSynthesisUtterance(word.toLowerCase() + '.');
+        u.rate = 0.75;
+        u.pitch = 0.3;
+        u.volume = 1;
+        speechSynthesis.speak(u);
+      } catch { /* no TTS on this browser — the visual flash still lands */ }
+    },
     setMuted(m) {
       muted = m;
       try { localStorage.setItem('timeshard_muted', m ? '1' : '0'); } catch { /* private mode */ }
       if (master) master.gain.value = m ? 0 : 0.9;
+      if (m) { try { speechSynthesis.cancel(); } catch { /* no TTS */ } }
     },
     isMuted() { return muted; },
     update(ts, dt) {
@@ -2034,13 +2047,18 @@ function updateEdgeArrows(playing) {
 }
 
 let killWordFlip = false;
+const KILLFLASH_MS = 1100;       // long enough for the announcer to say it
+let killFlashUntil = 0;          // wave-clear waits for the last flash to finish
+
 function killWord() {
   killWordFlip = !killWordFlip;
   const word = killWordFlip ? 'TIME' : 'SHARD';
   const { svg } = buildWordSVG(word, 58);   // faceted letterforms, no shimmer
   el.flash.innerHTML = '<span class="kwskew"><span class="kwflash">' + svg + '</span></span>';
+  killFlashUntil = performance.now() + KILLFLASH_MS;
   clearTimeout(killWord._t);
-  killWord._t = setTimeout(() => { el.flash.innerHTML = ''; }, 650);
+  killWord._t = setTimeout(() => { el.flash.innerHTML = ''; }, KILLFLASH_MS + 50);
+  if (game.state !== 'menu') sfx.say(word);   // the demo fight stays silent
 }
 
 function showBanner(html, dur = 1600) {
@@ -2327,7 +2345,8 @@ function frame(now) {
     for (const e of enemies) updateEnemy(e, sdt);
     updateBullets(sdt);
 
-    if (game.state === 'play' && game.spawnQueue.length === 0 && enemies.length === 0) {
+    if (game.state === 'play' && game.spawnQueue.length === 0 && enemies.length === 0 &&
+        performance.now() >= killFlashUntil) {   // let the final kill's word land first
       game.state = 'clear';
       game.stateT = 0;
       showBanner(`WAVE ${game.wave} CLEAR<small>TIME · SHARD · TIME · SHARD</small>`, 2000);
