@@ -1569,9 +1569,56 @@ const sfx = (() => {
   let muted = false;
   try { muted = localStorage.getItem('timeshard_muted') === '1'; } catch { /* private mode */ }
 
+  // --- sampled sounds (recorded SFX in assets/sfx, mp3 for universal decode)
+  // Fetched immediately so bytes are in flight during the menu; decoded once
+  // the AudioContext exists. Every play falls back to the old synth recipe if
+  // a sample hasn't loaded, so audio never goes missing.
+  const SAMPLE_SRC = {
+    gunshot: ['assets/sfx/gunshot.mp3', 0.9],      // 7.62x54R rifle crack
+    shotgun: ['assets/sfx/shotgun.mp3', 2.8],      // quiet master -> boosted
+    pickup: ['assets/sfx/pickup.mp3', 0.9],
+    explosion: ['assets/sfx/explosion.mp3', 1.1],
+    shatter1: ['assets/sfx/shatter1.mp3', 0.8],
+    shatter2: ['assets/sfx/shatter2.mp3', 0.8],
+    shatter3: ['assets/sfx/shatter3.mp3', 0.8],
+    nextwave: ['assets/sfx/nextwave.mp3', 1.6],
+    time: ['assets/sfx/time.mp3', 2.6],
+    shard: ['assets/sfx/shard.mp3', 2.6],
+  };
+  const sampleFetch = {};
+  const samples = {};
+  for (const [name, [url]] of Object.entries(SAMPLE_SRC)) {
+    sampleFetch[name] = fetch(url)
+      .then((r) => (r.ok ? r.arrayBuffer() : null))
+      .catch(() => null);
+  }
+  let shatterIdx = 0;      // the three glass breaks cycle so kills never repeat
+  let surfaceBuf = null;   // the time plunge, reversed — played when time resumes
+
+  function playSample(name, { rate = 1, send = 0.2, gainMul = 1, fadeAfter = 0 } = {}) {
+    const s = samples[name];
+    if (!ctx || !s) return false;
+    const src = ctx.createBufferSource();
+    src.buffer = s.buf;
+    src.playbackRate.value = rate;
+    const g = ctx.createGain();
+    g.gain.value = s.gain * gainMul;
+    src.connect(g);
+    route(g, send);
+    src.start(ctx.currentTime);
+    if (fadeAfter > 0) {   // long tails get eased out so overlaps don't pile up
+      const t = ctx.currentTime + fadeAfter / rate;
+      g.gain.setValueAtTime(s.gain * gainMul, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 1.0);
+      src.stop(t + 1.05);
+    }
+    return true;
+  }
+
   // Mobile browsers only allow speechSynthesis after it has spoken inside a
   // user gesture — prime it with a silent utterance on the first tap, and
   // keep a live reference so Chrome doesn't GC the utterance mid-speech.
+  // (TTS is now only the fallback announcer if time/shard samples fail.)
   let ttsPrimed = false, lastUtter = null;
   function primeTTS() {
     if (ttsPrimed || !('speechSynthesis' in window)) return;
@@ -1625,6 +1672,47 @@ const sfx = (() => {
     msend.gain.value = 0.4;
     musicGain.connect(msend); msend.connect(echoIn);
     buildMusic();
+    // decode the sampled SFX now that a context exists
+    for (const [name, [, gainV]] of Object.entries(SAMPLE_SRC)) {
+      sampleFetch[name]
+        .then((ab) => (ab ? ctx.decodeAudioData(ab) : null))
+        .then((buf) => { if (buf) samples[name] = { buf, gain: gainV }; })
+        .catch(() => { /* keep the synth fallback */ });
+    }
+    buildSurface();
+  }
+
+  // Render the slow-mo plunge offline, then flip it: the same sound played
+  // backwards becomes the "time resuming" cue.
+  async function buildSurface() {
+    try {
+      const off = new OfflineAudioContext(1, Math.ceil(ctx.sampleRate * 1.1), ctx.sampleRate);
+      const o = off.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(170, 0);
+      o.frequency.exponentialRampToValueAtTime(28, 0.8);
+      const og = off.createGain();
+      og.gain.setValueAtTime(0.5, 0);
+      og.gain.exponentialRampToValueAtTime(0.0001, 0.8);
+      o.connect(og); og.connect(off.destination);
+      o.start(0); o.stop(0.85);
+      const n = Math.floor(off.sampleRate * 0.7);
+      const nb = off.createBuffer(1, n, off.sampleRate);
+      const nd = nb.getChannelData(0);
+      for (let i = 0; i < n; i++) nd[i] = (Math.random() * 2 - 1) * (1 - i / n);
+      const ns = off.createBufferSource();
+      ns.buffer = nb;
+      ns.playbackRate.value = 0.55;
+      const nf = off.createBiquadFilter();
+      nf.type = 'bandpass'; nf.frequency.value = 260; nf.Q.value = 0.7;
+      const ng = off.createGain();
+      ng.gain.value = 0.22;
+      ns.connect(nf).connect(ng); ng.connect(off.destination);
+      ns.start(0);
+      const buf = await off.startRendering();
+      buf.getChannelData(0).reverse();
+      surfaceBuf = buf;
+    } catch { /* fall back to the old snap */ }
   }
 
   // --- the soundtrack: 8 bars of Am-F-C-G synthwave rendered offline
@@ -1746,7 +1834,11 @@ const sfx = (() => {
     // called every frame: tape-slow the music, close the filter, open the echo
     // the announcer: a low, slow synthesized voice speaking the kill words
     say(word) {
-      if (muted || !('speechSynthesis' in window)) return;
+      if (muted) return;
+      // recorded announcer first — identical on every device, unslowed like
+      // the kill words should be; TTS only if the sample failed to load
+      if (playSample(word === 'TIME' ? 'time' : 'shard', { send: 0.25 })) return;
+      if (!('speechSynthesis' in window)) return;
       try {
         const u = new SpeechSynthesisUtterance(word.toLowerCase() + '.');
         u.rate = 0.75;
@@ -1787,14 +1879,25 @@ const sfx = (() => {
       if (ts < 0.5 && lastTs >= 0.5) {          // plunge: deep sub-drop
         tone(170, 28, 0.8, 0.5, 'sine', 1, 0.55);
         noise(0.7, 260, 0.7, 0.22, 0.55, 0.55);
-      } else if (ts >= 0.5 && lastTs < 0.5) {   // surface: bright snap
-        noise(0.12, 2400, 0.9, 0.18, 1.5, 0.08);
-        tone(600, 1300, 0.09, 0.1, 'triangle');
+      } else if (ts >= 0.5 && lastTs < 0.5) {   // surface: the plunge, reversed
+        if (surfaceBuf) {
+          const src = ctx.createBufferSource();
+          src.buffer = surfaceBuf;
+          const g = ctx.createGain();
+          g.gain.value = 0.9;
+          src.connect(g);
+          route(g, 0.25);
+          src.start();
+        } else {
+          noise(0.12, 2400, 0.9, 0.18, 1.5, 0.08);
+          tone(600, 1300, 0.09, 0.1, 'triangle');
+        }
       }
       lastTs = ts;
     },
     debug() {
       return ctx ? { state: ctx.state, musicRate: +musicRate.toFixed(2), music: !!musicSrc,
+        samples: Object.keys(samples).length, surface: !!surfaceBuf,
         filter: musicFilter ? Math.round(musicFilter.frequency.value) : 0,
         echo: echoWet ? +echoWet.gain.value.toFixed(2) : 0,
         sbus: sfxBus ? +sfxBus.gain.value.toFixed(2) : 0,
@@ -1802,13 +1905,18 @@ const sfx = (() => {
     },
     shot(weapon) {
       const r = selfRate();
-      if (weapon === 'shotgun') { noise(0.28, 550, 0.5, 0.75, r, 0.3); tone(160, 40, 0.18, 0.3, 'square', r); }
-      else if (weapon === 'sniper') {   // a whip-crack with a long tail
+      if (weapon === 'shotgun') {
+        if (playSample('shotgun', { rate: r, send: 0.3, fadeAfter: 1.2 })) return;
+        noise(0.28, 550, 0.5, 0.75, r, 0.3); tone(160, 40, 0.18, 0.3, 'square', r);
+      } else if (weapon === 'sniper') {   // same rifle crack, pitched down a touch
+        if (playSample('gunshot', { rate: r * 0.85, send: 0.4 })) return;
         noise(0.09, 3200, 0.6, 0.7, r, 0.2);
         noise(0.45, 900, 0.5, 0.55, r, 0.5);
         tone(520, 45, 0.3, 0.35, 'sawtooth', r, 0.4);
+      } else {
+        if (playSample('gunshot', { rate: r, send: 0.25 })) return;
+        noise(0.14, 1600, 0.7, 0.5, r, 0.25); tone(320, 70, 0.1, 0.25, 'square', r);
       }
-      else { noise(0.14, 1600, 0.7, 0.5, r, 0.25); tone(320, 70, 0.1, 0.25, 'square', r); }
     },
     clank() {   // armor shrugging off a body shot
       noise(0.06, 3200, 2.2, 0.45, 1, 0.25);
@@ -1821,7 +1929,8 @@ const sfx = (() => {
       noise(0.7, 950, 1.8, 0.3 * loud, r, 0.6);
       tone(420, 90, 0.8, 0.22 * loud, 'sine', r, 0.6);
     },
-    pickup() {   // the pump-action "shk-SHK": grab, slide back, slam forward
+    pickup() {   // the pump-action rack when you grab a gun
+      if (playSample('pickup', { send: 0.12 })) return;
       noise(0.035, 1900, 1.4, 0.5, 1, 0.08, 0);
       noise(0.1, 750, 0.9, 0.5, 1, 0.12, 0.09);
       noise(0.05, 2500, 1.6, 0.65, 1, 0.15, 0.21);
@@ -1833,13 +1942,22 @@ const sfx = (() => {
       noise(0.2, 700, 0.8, 0.55 * loud, r, 0.5);
       tone(190, 45, 0.16, 0.3 * loud, 'square', r, 0.45);
     },
-    shatter() { const r = worldRate(); noise(0.5, 2600, 0.4, 0.5, r, 0.35); noise(0.35, 4200, 0.6, 0.3, r, 0.35); },
+    shatter() {   // heavy glass breaks, cycling 1-2-3 so kills never repeat
+      const r = worldRate();
+      shatterIdx = (shatterIdx % 3) + 1;
+      if (playSample('shatter' + shatterIdx, { rate: r, send: 0.3, fadeAfter: 1.8 })) return;
+      noise(0.5, 2600, 0.4, 0.5, r, 0.35); noise(0.35, 4200, 0.6, 0.3, r, 0.35);
+    },
     die() { tone(220, 40, 0.7, 0.4, 'sawtooth', 1, 0.5); noise(0.5, 400, 0.8, 0.4, 1, 0.5); },
-    wave() { tone(440, 880, 0.18, 0.2, 'triangle'); },
+    wave() {   // deep "next wave" hit, pitched down for weight
+      if (playSample('nextwave', { rate: 0.8, send: 0.25 })) return;
+      tone(440, 880, 0.18, 0.2, 'triangle');
+    },
     lob() { const r = worldRate(); noise(0.16, 420, 1.1, 0.28, r, 0.3); },
     rocket() { const r = worldRate(); noise(0.5, 600, 0.7, 0.5, r, 0.5); tone(240, 90, 0.4, 0.2, 'sawtooth', r, 0.4); },
     boom() {
       const r = worldRate();
+      if (playSample('explosion', { rate: r, send: 0.4, fadeAfter: 2.2 })) return;
       noise(0.6, 180, 0.5, 0.85, r, 0.55);
       noise(0.3, 900, 0.6, 0.4, r, 0.4);
       tone(110, 26, 0.55, 0.5, 'sine', r, 0.5);
@@ -2089,7 +2207,7 @@ function updateEdgeArrows(playing) {
 }
 
 let killWordFlip = false;
-const KILLFLASH_MS = 1100;       // long enough for the announcer to say it
+const KILLFLASH_MS = 1300;       // long enough for the recorded word to land
 let killFlashUntil = 0;          // wave-clear waits for the last flash to finish
 
 function killWord() {
