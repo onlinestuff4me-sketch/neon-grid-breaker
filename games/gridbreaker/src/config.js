@@ -28,6 +28,9 @@ export const TUNING = {
   // --- Gateways: pass through to shift up a speed tier ----------------------------
   gates: {
     everyZones: 3,      // a gate stands at the start of every Nth zone
+    clearAhead: 18,     // remaining enemies fly off when a gate is this close
+    graceAfter: 1.0,    // game-seconds after a gate before new enemies appear
+    accelTime: 1.4,     // seconds over which the new speed tier eases in
   },
 
   // --- Steering (drag the held finger to weave) ----------------------------------

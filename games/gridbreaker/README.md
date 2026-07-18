@@ -39,15 +39,15 @@ and steer).
 | Bullet time | **Your shards live outside time**: they fly at full speed while the world crawls — firing in slow-mo is precision mode, not a dead trigger. |
 | Pause | ⏸ button: resume/restart/**end run** (banks the score, shows the final screen), the sound toggle, and local top-10 + recent-run boards — every row shows score + shards (✦). |
 | Sound | ON by default, toggle on the start screen (♪) and in pause; survives the iPhone mute switch; unlocks on touch-end (iOS gesture rules). |
-| HUD | Shields · ammo · **SHARDS** + **GATES** counters · score · FOCUS bar that glows/pulses and reads **FOCUS FULL** when topped up. Boards show `score ✦shards ∩gates`. |
-| Menu | Minimal: three control lines and a recent-runs board with SCORE / SHARDS / GATES toggle chips (one metric at a time, each run ranked against this device's top runs), all below the horizon; the live game world drifts behind the title (attract mode, drones firing). |
+| HUD | Shields · ammo · **ENEMIES** + **GATES** counters · score · FOCUS bar that glows/pulses and reads **FOCUS FULL** when topped up. Boards show `score ✦shards ∩gates`. |
+| Menu | Minimal: three control lines and a recent-runs board with DISTANCE / ENEMIES / GATES toggle chips (one metric at a time, each run ranked against this device's top runs), all below the horizon; the live game world drifts behind the title (attract mode, drones firing). |
 | Ammo | You start with 14 shards, max 30. Empty tank = dry click — go soul hunting. |
 | Enemies | Drones emerge from doors in the floor/walls (or dive from the sky), match your speed ahead of you, and fire. One hit shatters them (**+50**). |
 | Telegraph | A wisp — the same glow it fires — charges up inside the crystal ~0.6 s before each bolt, readable even in slow-mo. |
 | Souls rule | **Kill a drone before its first shot and you keep its soul.** Once it has fired, the soul is spent — the crystal visibly goes cold. Slow-mo is how you beat the telegraph. |
 | Bolts | Ethereal comet-wisps with a spiral tail (the true path is straight = fair). Dodge them or shoot them down (**DEFLECT +40**). |
 | Souls | Kills leave a glowing wisp (**+1 ammo, +15**) that drifts gently toward you if you pass close. Some zones carry a free ambient soul. Every shot has to count. |
-| Gateways | A round **portal** (spinning ice torus + magenta energy ring, `GATE N` floating above it) stands at every 3rd zone. Flying through **shatters it into rigid ice** with a huge crystalline crash (nothing like a drone kill) blending into an acceleration whoosh, an FOV surge and hyperspace streak lines; the new speed tier is permanent, and shifts you up a speed tier (+40 pts). GATES is its own tracked score. |
+| Gateways | A round **portal** (spinning ice torus + magenta energy ring, `GATE N` floating above it) stands at every 3rd zone. Flying through **shatters it into rigid ice** with a real breaking-through-glass crash (embedded one-shot, washed in a long echo) blending into an acceleration whoosh; the FOV winds up then settles, hyperspace streaks rush past, and the new speed tier EASES in over ~1.4s and is permanent. Remaining enemies flee before the gate and nothing spawns for 1s after, and shifts you up a speed tier (+40 pts). GATES is its own tracked score. |
 | Shields | You can take **3 hits** (brief invulnerability after each). Third hit ends the run. |
 
 ## Weekly generated track
