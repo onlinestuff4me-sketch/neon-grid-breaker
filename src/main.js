@@ -1906,7 +1906,11 @@ const sfx = (() => {
     shot(weapon) {
       const r = selfRate();
       if (weapon === 'shotgun') {
-        if (playSample('shotgun', { rate: r, send: 0.3, fadeAfter: 1.2 })) return;
+        // pitched down for depth, with a synth sub-thump under the blast
+        if (playSample('shotgun', { rate: r * 0.75, gainMul: 1.15, send: 0.35, fadeAfter: 1.4 })) {
+          tone(150, 32, 0.28, 0.45, 'sine', r, 0.2);
+          return;
+        }
         noise(0.28, 550, 0.5, 0.75, r, 0.3); tone(160, 40, 0.18, 0.3, 'square', r);
       } else if (weapon === 'sniper') {   // same rifle crack, pitched down a touch
         if (playSample('gunshot', { rate: r * 0.85, send: 0.4 })) return;
@@ -1945,10 +1949,14 @@ const sfx = (() => {
     shatter() {   // heavy glass breaks, cycling 1-2-3 so kills never repeat
       const r = worldRate();
       shatterIdx = (shatterIdx % 3) + 1;
-      if (playSample('shatter' + shatterIdx, { rate: r, send: 0.3, fadeAfter: 1.8 })) return;
+      // heavy echo send so kills ring out like the rest of the world
+      if (playSample('shatter' + shatterIdx, { rate: r, send: 0.65, fadeAfter: 2.0 })) return;
       noise(0.5, 2600, 0.4, 0.5, r, 0.35); noise(0.35, 4200, 0.6, 0.3, r, 0.35);
     },
-    die() { tone(220, 40, 0.7, 0.4, 'sawtooth', 1, 0.5); noise(0.5, 400, 0.8, 0.4, 1, 0.5); },
+    die() {   // slowed way down: a long, deep grind as the run ends
+      tone(220, 30, 0.9, 0.4, 'sawtooth', 0.55, 0.5);
+      noise(0.6, 400, 0.8, 0.4, 0.5, 0.5);
+    },
     wave() {   // deep "next wave" hit, pitched down for weight
       if (playSample('nextwave', { rate: 0.8, send: 0.25 })) return;
       tone(440, 880, 0.18, 0.2, 'triangle');
