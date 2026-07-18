@@ -1,4 +1,7 @@
-// Procedural WebAudio for TIMESHARD. No samples, no network.
+import { GATE_CRASH_WAV_B64 } from './sfx.js';
+
+// Procedural WebAudio for GRID BREAKER — plus one embedded base64 one-shot
+// (the gate crash, from a user-supplied reference). Still zero network assets.
 // The signature trick: the ambient pad runs through a lowpass whose cutoff
 // tracks the global time scale — frozen time sounds muffled and distant,
 // flowing time blooms open. Call setFlow(0..1) every frame.
@@ -42,6 +45,22 @@ export class TimeshardAudio {
       this.musicGain.gain.value = 0.5;
       this.flowFilter.connect(this.musicGain);
       this.musicGain.connect(this.master);
+
+      // big-space echo bus (gate crash wants more room than the chime delay)
+      this.echo = this.ctx.createDelay(1.0);
+      this.echo.delayTime.value = 0.42;
+      const efb = this.ctx.createGain(); efb.gain.value = 0.45;
+      const ewet = this.ctx.createGain(); ewet.gain.value = 0.5;
+      this.echo.connect(efb); efb.connect(this.echo);
+      this.echo.connect(ewet); ewet.connect(this.master);
+
+      // decode the embedded gate-crash one-shot
+      const bin = atob(GATE_CRASH_WAV_B64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      this.ctx.decodeAudioData(bytes.buffer)
+        .then((b) => { this.gateBuf = b; })
+        .catch(() => { this.gateBuf = null; });
     }
     if (this.ctx.state === 'suspended') this.ctx.resume();
   }
@@ -259,43 +278,32 @@ export class TimeshardAudio {
     n.start(t); n.stop(t + 0.22);
   }
 
-  // Passing a gateway: a HUGE crystalline crash — deep thump, layered glass,
-  // long bell ring-out — nothing like a drone kill — blending into the whoosh.
+  // Passing a gateway: BREAKING THROUGH GLASS (the real recorded crash,
+  // washed in a big echo) blending into the acceleration whoosh.
   gate() {
     if (!this.ctx || this.muted) return;
     const t0 = this.ctx.currentTime;
 
-    // deep body thump
-    const sub = this.ctx.createOscillator();
-    sub.type = 'sine';
-    sub.frequency.setValueAtTime(85, t0);
-    sub.frequency.exponentialRampToValueAtTime(34, t0 + 0.4);
-    const sg = this.ctx.createGain();
-    this._env(sg, t0, 0.55, 0.005, 0.45);
-    sub.connect(sg); sg.connect(this.master);
-    sub.start(t0); sub.stop(t0 + 0.5);
-
-    // two-stage glass crash, bigger and darker than a drone crack
-    for (const [dt2, peak, hpf] of [[0, 0.5, 900], [0.07, 0.35, 1600]]) {
-      const src = this._noise(0.5);
-      const hp = this.ctx.createBiquadFilter();
-      hp.type = 'highpass'; hp.frequency.value = hpf;
+    if (this.gateBuf) {
+      const src = this.ctx.createBufferSource();
+      src.buffer = this.gateBuf;
       const g = this.ctx.createGain();
-      this._env(g, t0 + dt2, peak, 0.005, 0.4);
-      src.connect(hp); hp.connect(g); g.connect(this.master); g.connect(this.delay);
-      src.start(t0 + dt2); src.stop(t0 + dt2 + 0.55);
+      g.gain.value = 0.85;
+      src.connect(g);
+      g.connect(this.master);
+      g.connect(this.echo);  // the "more echoey" — long feedback tail
+      g.connect(this.delay); // plus the shorter shimmer delay
+      src.start(t0);
+    } else {
+      // fallback (buffer not decoded yet): a quick synthetic stand-in
+      const n2 = this._noise(0.5);
+      const hp = this.ctx.createBiquadFilter();
+      hp.type = 'highpass'; hp.frequency.value = 900;
+      const fg = this.ctx.createGain();
+      this._env(fg, t0, 0.5, 0.005, 0.4);
+      n2.connect(hp); hp.connect(fg); fg.connect(this.master); fg.connect(this.echo);
+      n2.start(t0); n2.stop(t0 + 0.55);
     }
-
-    // long tuned bell partials ringing out through the echo bus
-    [523, 784, 1046, 1568, 2093].forEach((f, i) => {
-      const o = this.ctx.createOscillator();
-      o.type = 'sine';
-      o.frequency.value = f * (1 + (Math.random() - 0.5) * 0.01);
-      const og = this.ctx.createGain();
-      this._env(og, t0 + 0.03 + i * 0.02, 0.12, 0.005, 0.9 + i * 0.15);
-      o.connect(og); og.connect(this.delay); og.connect(this.master);
-      o.start(t0 + 0.03 + i * 0.02); o.stop(t0 + 1.6);
-    });
 
     const t = t0 + 0.12;
 

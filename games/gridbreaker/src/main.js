@@ -347,13 +347,15 @@ const S = {
   trackHalf: ZONES.open.halfWidth,
   zoneIdx: 0,
   speed: TUNING.speed.base,
+  targetSpeed: TUNING.speed.base, // speed eases toward this — no sudden jumps
+  gateGraceT: 0,         // countdown before enemies may appear again
+  gateT: -1,             // seconds since last gate pass (-1 = idle)
   timeScale: 1,
   focus: TUNING.time.focusMax,
   focusOk: true,
   holdActive: false,
   gameTime: 0,
   time: 0,
-  fovKick: 0,            // gate-pass speed surge (fov punch, decays)
   shakeT: 0,
   invulnT: 0,
   deadTimer: 0,
@@ -373,7 +375,7 @@ const audio = new TimeshardAudio();
 let nextZoneZ = -8;
 
 // Debug/replay hook (also used by the Playwright verification script).
-window.__timeshard = { S, drones, bolts, souls, shots, zones, gates, camera };
+window.__timeshard = { S, drones, bolts, souls, shots, zones, gates, camera, audio };
 
 // ---------------------------------------------------------------------------
 // Zone environment building + streaming
@@ -515,7 +517,9 @@ function streamZones() {
 }
 
 function updateSpeed() {
-  S.speed = Math.min(TUNING.speed.max,
+  // sets the TARGET — S.speed eases toward it in the tick, so a gate feels
+  // like winding up, not a teleport to a new velocity
+  S.targetSpeed = Math.min(TUNING.speed.max,
     TUNING.speed.base + S.zoneIdx * TUNING.speed.perZone + S.stats.gates * TUNING.speed.perGate);
 }
 
@@ -542,7 +546,8 @@ function passGates() {
         spawnSpark(g.pos, 5, PALETTE.wispHalo);
         flash('rgba(255,47,214,0.15)', 450);
         spawnStreaks(g.z); // hyperspace lines rushing past
-        S.fovKick = 1; // the speed surge you can feel
+        S.gateT = 0; // starts the fov surge (ramps in, eases out)
+        S.gateGraceT = TUNING.gates.graceAfter; // breathing room before enemies
         S.shakeT = Math.max(S.shakeT, 0.2);
         updateHUD();
       }
@@ -590,6 +595,22 @@ function updateStreaks(dt) {
 // Doors + drones. A drone's life: door → emerge → attack → retreat.
 // ---------------------------------------------------------------------------
 function triggerPendingEvents() {
+  // Gates get a clean approach: remaining enemies break off and flee when a
+  // gate is close, and nothing new spawns until the post-gate grace expires.
+  const ng = gates.find((g) => !g.passed);
+  const gateNear = ng && (S.camZ - ng.z) < TUNING.gates.clearAhead && S.camZ > ng.z;
+  if (gateNear) {
+    for (const d of drones) {
+      if (!d.alive) continue;
+      if (d.state === 'attack' || d.state === 'dive') {
+        if (d.state !== 'retreat') { d.state = 'retreat'; d.t = 0; }
+      } else if (d.state === 'door' || d.state === 'emerge') {
+        removeDrone(d); // not fully out yet — the door just closes on them
+      }
+    }
+  }
+  if (gateNear || S.gateGraceT > 0) return;
+
   const cap = Math.round(ramp(TUNING.difficulty.concurrent, S.zoneIdx));
   for (let i = pendingEvents.length - 1; i >= 0; i--) {
     const e = pendingEvents[i];
@@ -1406,7 +1427,7 @@ function pauseGame() {
   clearPointers();
   audio.stopMusic();
   el('pauseScore').textContent = `${S.score}m`;
-  el('pauseShards').textContent = `SHARDS ✦${S.stats.kills} · GATES ∩${S.stats.gates}`;
+  el('pauseShards').textContent = `ENEMIES ✦${S.stats.kills} · GATES ∩${S.stats.gates}`;
   hideHowto();
   const s = scores.summary();
   const row = (r) => `${r.score} ✦${r.shards ?? 0} ∩${r.gates ?? 0}`;
@@ -1440,7 +1461,7 @@ function showGameOver(title = 'YOU DIED') {
   const acc = S.stats.shots
     ? Math.round(100 * (S.stats.kills + S.stats.deflects) / S.stats.shots) : 0;
   fillStats(el('overStats'), [
-    ['SHARDS', `✦${S.stats.kills}`],
+    ['ENEMIES', `✦${S.stats.kills}`],
     ['GATES', `∩${S.stats.gates}`],
     ['DEFLECTS', S.stats.deflects],
     ['SOULS', S.stats.souls],
@@ -1498,8 +1519,9 @@ function startRun() {
     mode: 'playing', shields: TUNING.player.shields, ammo: TUNING.player.ammoStart,
     score: 0, distance: 0, camZ: 0, camX: 0, steerX: 0,
     trackHalf: ZONES.open.halfWidth, zoneIdx: 0, speed: TUNING.speed.base,
+    targetSpeed: TUNING.speed.base, gateGraceT: 0, gateT: -1,
     timeScale: 1, focus: TUNING.time.focusMax, focusOk: true, holdActive: false,
-    gameTime: 0, fovKick: 0, shakeT: 0, invulnT: 0, deadTimer: 0,
+    gameTime: 0, shakeT: 0, invulnT: 0, deadTimer: 0,
     stats: { shots: 0, kills: 0, deflects: 0, souls: 0, gates: 0 },
   });
   trackGen = new TrackGen(weeklySeed(weeklyTag()));
@@ -1721,12 +1743,20 @@ function tick(tNow) {
   // gate portals idle-spin; the label sprite stays upright (it's a sibling)
   for (const g of gates) if (!g.passed) g.ring.rotation.z += dt * 0.5;
 
-  // gate-pass speed surge: hard fov punch that eases home slowly
-  if (S.fovKick > 0) {
-    S.fovKick = Math.max(0, S.fovKick - dt * 1.1);
-    camera.fov = 72 + S.fovKick * 18;
+  // gate-pass speed surge: fov winds UP over ~0.25s (the lurch of
+  // acceleration), then eases home slowly as the new speed settles in
+  if (S.gateT >= 0) {
+    S.gateT += dt;
+    const wind = Math.min(1, S.gateT / 0.25);
+    const settle = Math.max(0, 1 - Math.max(0, S.gateT - 0.25) / 1.6);
+    camera.fov = 72 + wind * settle * 18;
     camera.updateProjectionMatrix();
+    if (settle <= 0) { S.gateT = -1; camera.fov = 72; camera.updateProjectionMatrix(); }
   }
+  // speed itself eases toward its tier — acceleration, not teleportation
+  S.speed += (S.targetSpeed - S.speed) *
+    Math.min(1, (3 / TUNING.gates.accelTime) * dt);
+  if (S.gateGraceT > 0) S.gateGraceT -= dtGame;
   updateStreaks(dt);
 
   // --- camera: strafe bank + shake ---
