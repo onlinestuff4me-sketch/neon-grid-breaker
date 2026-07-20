@@ -516,12 +516,14 @@ function spawnBullet(pos, dir, fromPlayer, opt = 0, pierce = 0) {
     mesh, trail,
     pos: pos.clone(), prev: pos.clone(),
     vel: dir.clone().multiplyScalar(speed),
-    fromPlayer, pierce, life: 6, rippleAcc: 0, whizzed: false,
+    fromPlayer, pierce, life: 6, rippleAcc: 0,
+    whoosh: fromPlayer ? null : sfx.attachWhoosh(),   // incoming rounds sing
   });
 }
 
 function killBullet(i, sparkAt) {
   const b = bullets[i];
+  if (b.whoosh) sfx.detachWhoosh(b.whoosh);
   scene.remove(b.mesh); scene.remove(b.trail);
   b.trail.geometry.dispose();
   if (sparkAt) spawnSparks(sparkAt, b.fromPlayer ? 0x16181d : 0xff2d1a);
@@ -1310,13 +1312,13 @@ function updateBullets(sdt) {
     tp[3] = b.pos.x; tp[4] = b.pos.y; tp[5] = b.pos.z;
     b.trail.geometry.attributes.position.needsUpdate = true;
 
-    // whizz: an enemy round passing near your head gets a doppler-ish whoosh
-    if (!b.fromPlayer && !b.whizzed && player.alive) {
+    // whoosh: volume follows your live distance to the round; pitch rides the
+    // doppler of its radial speed (climbs while closing, sinks once past)
+    if (!b.fromPlayer && b.whoosh) {
       const wx = b.pos.x - player.pos.x, wy = b.pos.y - EYE_HEIGHT, wz = b.pos.z - player.pos.z;
-      if (wx * wx + wy * wy + wz * wz < 2.4 * 2.4) {
-        b.whizzed = true;
-        sfx.whizz();
-      }
+      const dist = Math.sqrt(wx * wx + wy * wy + wz * wz);
+      const vr = dist > 1e-4 ? -(b.vel.x * wx + b.vel.y * wy + b.vel.z * wz) / dist : 0;
+      sfx.updateWhoosh(b.whoosh, player.alive ? dist : Infinity, vr);
     }
 
     // wake: drop an expanding ring every fixed distance travelled
@@ -1628,6 +1630,9 @@ const sfx = (() => {
   let shatterIdx = 0;      // the three glass breaks cycle so kills never repeat
   let surfaceBuf = null;   // the time plunge, reversed — played when time resumes
   let resumeRetryT = 0;    // throttle for stuck-context resume attempts
+  let whooshBuf = null;    // shared 2s noise loop for all bullet whooshes
+  let whooshCount = 0;
+  const WHOOSH_MAX = 12;   // concurrent whoosh voices — plenty, and bounded
   let voUntilMs = 0;       // a voice line is playing until then — never overlap
   let waveVoEndMs = 0;     // when the wave-intro VO finishes
   let waveWords = 0;       // kill words spoken this wave (max 2: TIME then SHARD)
@@ -2026,10 +2031,51 @@ const sfx = (() => {
       noise(0.06, 3200, 2.2, 0.45, 1, 0.25);
       tone(950, 320, 0.11, 0.3, 'square', 1, 0.25);
     },
-    whizz() {   // a round passing your head — always the deep bullet-time whoosh
-      const r = 0.43, loud = 1.76;   // frozen-time flavor, whatever the clock says
-      noise(1.0, 480, 1.3, 0.55 * loud, r, 0.7);   // pure rushing air, no tonal tail
-      noise(0.7, 950, 1.8, 0.3 * loud, r, 0.6);
+    // --- per-bullet whoosh: every enemy round carries a looping bed of surf
+    // noise. Volume tracks your live distance to the round; pitch rides a
+    // doppler shift, so it climbs as it closes and sinks as it passes.
+    attachWhoosh() {
+      if (!ctx || whooshCount >= WHOOSH_MAX) return null;
+      if (!whooshBuf) {
+        const n = ctx.sampleRate * 2;
+        whooshBuf = ctx.createBuffer(1, n, ctx.sampleRate);
+        const d = whooshBuf.getChannelData(0);
+        for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+      }
+      const src = ctx.createBufferSource();
+      src.buffer = whooshBuf;
+      src.loop = true;
+      const filt = ctx.createBiquadFilter();
+      filt.type = 'lowpass';
+      filt.frequency.value = 1000;   // ocean-wave voicing, not hissy white noise
+      filt.Q.value = 0.4;
+      const g = ctx.createGain();
+      g.gain.value = 0;
+      src.connect(filt).connect(g);
+      route(g, 0.5);
+      src.start(ctx.currentTime, Math.random() * 2);   // decorrelate the loops
+      whooshCount++;
+      return { src, g, dead: false };
+    },
+    updateWhoosh(h, dist, vr) {   // vr: radial closing speed, + = approaching
+      if (!h || h.dead) return;
+      const prox = Math.max(0, 1 - dist / 9);
+      const loud = 1 + (1 - timeScale) * 0.8;   // dominates the mix when slowed
+      const want = prox * prox * 0.85 * loud;
+      const k = 0.25;   // per-frame smoothing — no zipper, quick response
+      h.g.gain.value += (want - h.g.gain.value) * k;
+      const dopp = Math.max(0.5, Math.min(1.7, 1 + (vr * timeScale) / 40));
+      const rate = (0.4 + 0.6 * timeScale) * dopp;
+      h.src.playbackRate.value += (rate - h.src.playbackRate.value) * k;
+    },
+    detachWhoosh(h) {
+      if (!h || h.dead) return;
+      h.dead = true;
+      whooshCount--;
+      try {   // quick fade so a bullet dying mid-swell doesn't click
+        h.g.gain.setTargetAtTime(0, ctx.currentTime, 0.03);
+        h.src.stop(ctx.currentTime + 0.15);
+      } catch { /* already stopped */ }
     },
     pickup() {   // the pump-action rack when you grab a gun
       if (playSample('pickup', { send: 0.12 })) return;
