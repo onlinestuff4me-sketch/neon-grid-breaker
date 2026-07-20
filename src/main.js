@@ -782,7 +782,7 @@ function updateMissiles(sdt) {
 }
 
 // ---------------------------------------------------------------------------
-// Weapon pickups — shattered gunners sometimes drop a shotgun. Dash over it.
+// Weapon pickups — shotgunners usually drop their gun; snipers always do.
 // ---------------------------------------------------------------------------
 const pickups = [];   // {g, spin, ring, t, life}
 const PICKUP_LIFE = 12;
@@ -927,11 +927,12 @@ function buildEnemyMesh(type) {
     } else if (type === 'shotgunner') {
       // mirrors the player's shotgun viewmodel: long thin side-by-side
       // barrels, a chunky receiver and a stock behind the grip
-      addBarrel(0.42, 0.045, -0.028);
-      addBarrel(0.42, 0.045, 0.028);
+      // barrels touch (no daylight between them) and the stock runs straight
+      // back along the barrel axis — same silhouette as the dropped pickup
+      addBarrel(0.42, 0.045, -0.0225);
+      addBarrel(0.42, 0.045, 0.0225);
       const stock = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.14, 0.075), MAT_BLACK);
-      stock.position.set(0, -0.42, 0.05);
-      stock.rotation.x = -0.3;
+      stock.position.set(0, -0.4, 0);
       egun.add(stock);
     } else if (type === 'heavy') {
       addBarrel(0.32, 0.07);
@@ -972,19 +973,20 @@ function buildEnemyMesh(type) {
   return { g, legL, legR, armL, armR, egun };
 }
 
-// Per-type combat config. drop: chance of a shotgun, or a weapon name for a
-// guaranteed named drop. mul: bullet speed multiplier. armored: body shots
+// Per-type combat config. drop: chance of a shotgun (shotgunners only — you
+// loot what they carry), or a weapon name for a guaranteed named drop.
+// mul: bullet speed multiplier. armored: body shots
 // bounce off — only headshots kill.
 const ENEMY_TYPES = {
-  gunner: { speed: 2.0, scale: [1, 1, 1], drop: 0.25, aimTime: 0.55, cd: [0.9, 0.8], mul: 1, pellets: 1 },
+  gunner: { speed: 2.0, scale: [1, 1, 1], drop: 0, aimTime: 0.55, cd: [0.9, 0.8], mul: 1, pellets: 1 },
   rusher: { speed: 3.4, scale: [0.85, 0.97, 0.85], drop: 0 },
-  heavy: { speed: 1.6, scale: [1.14, 1.05, 1.14], drop: 0.6, aimTime: 0.55, cd: [1.8, 1.0], mul: 1, pellets: 1, burst: 3 },
+  heavy: { speed: 1.6, scale: [1.14, 1.05, 1.14], drop: 0, aimTime: 0.55, cd: [1.8, 1.0], mul: 1, pellets: 1, burst: 3 },
   shotgunner: { speed: 1.8, scale: [1.06, 1, 1.06], drop: 0.8, aimTime: 0.65, cd: [1.6, 0.9], mul: 0.85, pellets: 5, spread: 0.09, engage: [8, 4] },
-  armored: { speed: 1.4, scale: [1.1, 1.06, 1.1], drop: 0.35, aimTime: 0.6, cd: [1.2, 0.8], mul: 1, pellets: 1, armored: true },
+  armored: { speed: 1.4, scale: [1.1, 1.06, 1.1], drop: 0, aimTime: 0.6, cd: [1.2, 0.8], mul: 1, pellets: 1, armored: true },
   sniper: { speed: 1.2, scale: [0.92, 1.05, 0.92], drop: 'sniper', aimTime: 1.35, cd: [2.4, 1.0], mul: 2.3, pellets: 1, engage: [26, 4] },
-  bomber: { speed: 1.7, scale: [1.05, 1, 1.05], drop: 0.3, aimTime: 0.8, cd: [2.4, 1.2], mul: 1, pellets: 1, engage: [9, 5] },
-  shieldbearer: { speed: 1.5, scale: [1.08, 1, 1.08], drop: 0.4, aimTime: 0.7, cd: [1.6, 1.0], mul: 1, pellets: 1, shielded: true },
-  rocketeer: { speed: 1.4, scale: [1.05, 1.02, 1.05], drop: 0.4, aimTime: 1.0, cd: [3.4, 1.4], mul: 1, pellets: 1, engage: [13, 6] },
+  bomber: { speed: 1.7, scale: [1.05, 1, 1.05], drop: 0, aimTime: 0.8, cd: [2.4, 1.2], mul: 1, pellets: 1, engage: [9, 5] },
+  shieldbearer: { speed: 1.5, scale: [1.08, 1, 1.08], drop: 0, aimTime: 0.7, cd: [1.6, 1.0], mul: 1, pellets: 1, shielded: true },
+  rocketeer: { speed: 1.4, scale: [1.05, 1.02, 1.05], drop: 0, aimTime: 1.0, cd: [3.4, 1.4], mul: 1, pellets: 1, engage: [13, 6] },
 };
 
 function pointInObstacle(x, z, pad) {
@@ -1550,6 +1552,18 @@ window.addEventListener('pointerup', onPointerUp, { passive: false });
 window.addEventListener('pointercancel', onPointerCancel, { passive: false });
 window.addEventListener('contextmenu', (e) => e.preventDefault());
 
+// Belt-and-braces audio unlock: browsers differ on which gesture type is
+// allowed to start audio (touchend vs click vs pointerdown), so hook them
+// all and keep trying until the context is actually running.
+const unlockEvs = ['pointerdown', 'pointerup', 'touchstart', 'touchend', 'mousedown', 'mouseup', 'click', 'keydown'];
+function tryUnlockAudio() {
+  sfx.init();
+  if (sfx.running()) {
+    for (const n of unlockEvs) window.removeEventListener(n, tryUnlockAudio, true);
+  }
+}
+for (const n of unlockEvs) window.addEventListener(n, tryUnlockAudio, { capture: true, passive: true });
+
 function vibrate(ms) {
   if (navigator.vibrate) navigator.vibrate(ms);
 }
@@ -1594,7 +1608,12 @@ const sfx = (() => {
   }
   let shatterIdx = 0;      // the three glass breaks cycle so kills never repeat
   let surfaceBuf = null;   // the time plunge, reversed — played when time resumes
+  let resumeRetryT = 0;    // throttle for stuck-context resume attempts
+  let voUntilMs = 0;       // a voice line is playing until then — never overlap
+  let waveVoEndMs = 0;     // when the wave-intro VO finishes
+  let waveWords = 0;       // kill words spoken this wave (max 2: TIME then SHARD)
 
+  // returns the played duration in seconds (truthy), or false if no sample
   function playSample(name, { rate = 1, send = 0.2, gainMul = 1, fadeAfter = 0 } = {}) {
     const s = samples[name];
     if (!ctx || !s) return false;
@@ -1612,7 +1631,7 @@ const sfx = (() => {
       g.gain.exponentialRampToValueAtTime(0.001, t + 1.0);
       src.stop(t + 1.05);
     }
-    return true;
+    return s.buf.duration / rate;
   }
 
   // Mobile browsers only allow speechSynthesis after it has spoken inside a
@@ -1641,6 +1660,9 @@ const sfx = (() => {
       return;
     }
     try { ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch { return; }
+    // some browsers hand out a suspended context even inside a gesture —
+    // resume immediately while we still count as user-initiated
+    if (ctx.state !== 'running') ctx.resume().catch(() => {});
     master = ctx.createGain();
     master.gain.value = muted ? 0 : 0.9;
     const comp = ctx.createDynamicsCompressor();   // keep the louder mix clean
@@ -1833,27 +1855,33 @@ const sfx = (() => {
     init,
     // called every frame: tape-slow the music, close the filter, open the echo
     // the announcer: a low, slow synthesized voice speaking the kill words
-    say(word) {
+    newWave() { waveWords = 0; },   // called at wave start: re-arm TIME + SHARD
+    say() {
+      // The announcer speaks exactly twice per wave — TIME for the first
+      // eligible kill, SHARD for the next — and never talks over itself or
+      // the wave VO (the first word also waits 5s after the wave VO ends).
       if (muted) return;
-      // recorded announcer first — identical on every device, unslowed like
-      // the kill words should be; TTS only if the sample failed to load
-      if (playSample(word === 'TIME' ? 'time' : 'shard', { send: 0.25 })) return;
+      const now = performance.now();
+      if (waveWords >= 2) return;
+      if (waveWords === 0 && now < waveVoEndMs + 5000) return;
+      if (now < voUntilMs) return;
+      const key = waveWords === 0 ? 'time' : 'shard';
+      const d = playSample(key, { send: 0.25 });
+      if (d) {
+        waveWords++;
+        voUntilMs = now + d * 1000 + 150;
+        return;
+      }
       if (!('speechSynthesis' in window)) return;
-      try {
-        const u = new SpeechSynthesisUtterance(word.toLowerCase() + '.');
+      try {   // TTS fallback, same quota rules
+        const u = new SpeechSynthesisUtterance(key + '.');
         u.rate = 0.75;
         u.pitch = 0.3;
         u.volume = 1;
         lastUtter = u;   // hold the reference — GC'd utterances go silent
-        if (speechSynthesis.speaking || speechSynthesis.pending) {
-          speechSynthesis.cancel();   // rapid kills: newest word wins
-          // Chrome drops a speak() issued in the same tick as cancel()
-          setTimeout(() => {
-            if (lastUtter === u) { try { speechSynthesis.speak(u); } catch { /* no TTS */ } }
-          }, 60);
-        } else {
-          speechSynthesis.speak(u);
-        }
+        speechSynthesis.speak(u);
+        waveWords++;
+        voUntilMs = now + 1200;
       } catch { /* no TTS on this browser — the visual flash still lands */ }
     },
     setMuted(m) {
@@ -1863,8 +1891,15 @@ const sfx = (() => {
       if (m) { try { speechSynthesis.cancel(); } catch { /* no TTS */ } }
     },
     isMuted() { return muted; },
+    running() { return !!(ctx && ctx.state === 'running'); },
     update(ts, dt) {
       if (!ctx) return;
+      // keep nudging a stuck context back to life (iOS backgrounding etc.)
+      resumeRetryT -= dt;
+      if (ctx.state !== 'running' && resumeRetryT <= 0) {
+        resumeRetryT = 1;
+        ctx.resume().catch(() => { /* needs a gesture — the unlock hooks retry */ });
+      }
       // the title screen keeps the music but silences the demo fight's SFX
       if (sfxBus) {
         const want = game.state === 'menu' ? 0 : 1;
@@ -1898,6 +1933,7 @@ const sfx = (() => {
     debug() {
       return ctx ? { state: ctx.state, musicRate: +musicRate.toFixed(2), music: !!musicSrc,
         samples: Object.keys(samples).length, surface: !!surfaceBuf,
+        voWords: waveWords, voWait: Math.max(0, Math.round(waveVoEndMs + 5000 - performance.now())),
         filter: musicFilter ? Math.round(musicFilter.frequency.value) : 0,
         echo: echoWet ? +echoWet.gain.value.toFixed(2) : 0,
         sbus: sfxBus ? +sfxBus.gain.value.toFixed(2) : 0,
@@ -1926,9 +1962,8 @@ const sfx = (() => {
       noise(0.06, 3200, 2.2, 0.45, 1, 0.25);
       tone(950, 320, 0.11, 0.3, 'square', 1, 0.25);
     },
-    whizz() {   // an enemy round passing your head — long and cavernous when slowed
-      const r = worldRate();
-      const loud = 1 + (1 - timeScale) * 0.8;   // slowed bullets DOMINATE the mix
+    whizz() {   // a round passing your head — always the deep bullet-time whoosh
+      const r = 0.43, loud = 1.76;   // frozen-time flavor, whatever the clock says
       noise(1.0, 480, 1.3, 0.55 * loud, r, 0.7);
       noise(0.7, 950, 1.8, 0.3 * loud, r, 0.6);
       tone(420, 90, 0.8, 0.22 * loud, 'sine', r, 0.6);
@@ -1957,9 +1992,12 @@ const sfx = (() => {
       tone(220, 30, 0.9, 0.4, 'sawtooth', 0.55, 0.5);
       noise(0.6, 400, 0.8, 0.4, 0.5, 0.5);
     },
-    wave() {   // deep "next wave" hit, pitched down for weight
-      if (playSample('nextwave', { rate: 0.8, send: 0.25 })) return;
-      tone(440, 880, 0.18, 0.2, 'triangle');
+    wave() {   // the wave VO, played the moment its banner card appears
+      const now = performance.now();
+      const d = playSample('nextwave', { rate: 0.8, send: 0.25 });
+      if (!d) tone(440, 880, 0.18, 0.2, 'triangle');
+      waveVoEndMs = now + (d ? d * 1000 : 400);
+      voUntilMs = Math.max(voUntilMs, waveVoEndMs);
     },
     lob() { const r = worldRate(); noise(0.16, 420, 1.1, 0.28, r, 0.3); },
     rocket() { const r = worldRate(); noise(0.5, 600, 0.7, 0.5, r, 0.5); tone(240, 90, 0.4, 0.2, 'sawtooth', r, 0.4); },
@@ -2029,7 +2067,7 @@ function renderScores() {
   el.scores.style.display = 'block';
   // a real leaderboard: sorted by the chosen metric, so #1 IS your best
   display.sort((a, b) => (b[scoreMetric] - a[scoreMetric]) || (b.at - a.at));
-  const unit = (v) => (scoreMetric === 'w' ? (v === 1 ? 'WAVE' : 'WAVES') : (v === 1 ? 'SHARD' : 'SHARDS'));
+  const unit = (v) => (scoreMetric === 'w' ? (v === 1 ? 'WAVE' : 'WAVES') : (v === 1 ? 'ENEMY' : 'ENEMIES'));
   const rows = display.slice(0, 5).map((r) =>
     `<div class="scrow"><span class="scval">${r[scoreMetric]}<em>${unit(r[scoreMetric])}</em></span>` +
     `<span class="scdate">${fmtWhen(r.at)}</span></div>`).join('');
@@ -2037,7 +2075,7 @@ function renderScores() {
     '<div class="schead">TOP RUNS</div>' +
     `<div class="scpills">` +
     `<span class="scpill${scoreMetric === 'w' ? ' active' : ''}" data-m="w">WAVES</span>` +
-    `<span class="scpill${scoreMetric === 'k' ? ' active' : ''}" data-m="k">SHARDS</span>` +
+    `<span class="scpill${scoreMetric === 'k' ? ' active' : ''}" data-m="k">ENEMIES</span>` +
     `</div>${rows}`;
 }
 
@@ -2257,8 +2295,12 @@ function startWave(n, quiet = false) {   // quiet: the clear card already announ
     resolvePlayerCollisions();   // in case a new block landed on the player
     for (let i = pickups.length - 1; i >= 0; i--) removePickup(i);
   }
-  if (!quiet) showBanner(`WAVE ${n}<small>${arenaChanged && n > 1 ? 'NEW ARENA' : 'THEY ARE COMING'}</small>`, 1500);
-  sfx.wave();
+  if (!quiet) {
+    showBanner(`WAVE ${n}<small>${arenaChanged && n > 1 ? 'NEW ARENA' : 'THEY ARE COMING'}</small>`, 1500);
+    sfx.wave();   // quiet waves already got their VO on the clear card
+  }
+  sfx.newWave();
+  killWordFlip = false;   // first kill of a wave always flashes TIME
 }
 
 function maxAlive() { return Math.min(2 + Math.floor(game.wave / 2), 5); }
@@ -2521,6 +2563,7 @@ function frame(now) {
       const next = game.wave + 1;
       const nextArena = Math.floor((next - 1) / 3) % LAYOUTS.length !== currentLayout;
       showBanner(`WAVE ${game.wave} CLEARED<small>NEXT: WAVE ${next}${nextArena ? ' · NEW ARENA' : ''}</small>`, 3300);
+      sfx.wave();   // the wave VO lands with this card
     }
   } else if (game.state === 'clear') {
     updateBullets(sdt);
