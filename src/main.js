@@ -2052,21 +2052,30 @@ const sfx = (() => {
       const g = ctx.createGain();
       g.gain.value = 0;
       src.connect(filt).connect(g);
-      route(g, 0.5);
+      g.connect(sfxBus);
+      const send = ctx.createGain();   // per-voice echo send — opens after the pass
+      send.gain.value = 0.25;
+      g.connect(send); send.connect(echoIn);
       src.start(ctx.currentTime, Math.random() * 2);   // decorrelate the loops
       whooshCount++;
-      return { src, g, dead: false };
+      return { src, g, send, dead: false };
     },
     updateWhoosh(h, dist, vr) {   // vr: radial closing speed, + = approaching
       if (!h || h.dead) return;
-      const prox = Math.max(0, 1 - dist / 9);
-      const loud = 1 + (1 - timeScale) * 0.8;   // dominates the mix when slowed
-      const want = prox * prox * 0.85 * loud;
+      // steep proximity curve: barely-there at range, swelling hard only when
+      // the round is genuinely close — keeps the rest of the mix on top
+      const prox = Math.max(0, 1 - dist / 8);
+      const loud = 1 + (1 - timeScale) * 0.8;
+      const want = Math.pow(prox, 4) * 0.75 * loud;
       const k = 0.25;   // per-frame smoothing — no zipper, quick response
       h.g.gain.value += (want - h.g.gain.value) * k;
-      const dopp = Math.max(0.5, Math.min(1.7, 1 + (vr * timeScale) / 40));
+      // doppler kicks in only once it's PAST you: neutral on approach, then
+      // the tail sinks deeper and blooms into the echo as it recedes
+      const receding = vr < 0;
+      const dopp = receding ? Math.max(0.45, 1 + (vr * timeScale) / 25) : 1;
       const rate = (0.4 + 0.6 * timeScale) * dopp;
       h.src.playbackRate.value += (rate - h.src.playbackRate.value) * k;
+      h.send.gain.value += ((receding ? 0.85 : 0.25) - h.send.gain.value) * k;
     },
     detachWhoosh(h) {
       if (!h || h.dead) return;
