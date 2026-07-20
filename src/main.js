@@ -2072,9 +2072,9 @@ const sfx = (() => {
       const prox = Math.max(0, 1 - dist / 6);
       let want = isFinite(dist) ? 0.05 + 0.45 * Math.pow(prox, 5) : 0;
       const receding = vr < 0;
-      // once it's past you the dry sound collapses to a quarter of its swell —
-      // what lingers is the echo, not the whoosh itself
-      if (receding) want = 0.05 + (want - 0.05) * 0.25;
+      // once it's past you the dry sound collapses to a tenth of its swell and
+      // the ambient floor drops out — only the echo lingers
+      if (receding) want = (want - 0.05) * 0.10;
       const k = 0.25;   // per-frame smoothing — no zipper, quick response
       h.g.gain.value += (want - h.g.gain.value) * k;
       // doppler on the WORLD-frame radial speed (not the slowed clock), so the
