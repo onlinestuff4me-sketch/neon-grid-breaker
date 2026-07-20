@@ -432,19 +432,26 @@ shotgunVM.visible = false;
 
 const sniperVM = new THREE.Group();
 {
-  const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.04, 0.85), MAT_BLACK);
+  const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.055, 0.85), MAT_BLACK);
   barrel.position.set(0, 0.02, -0.32);
   const body = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.09, 0.32), MAT_BLACK);
   body.position.set(0, 0, 0.05);
-  const scope = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.16), MAT_GUNMETAL);
-  scope.position.set(0, 0.08, 0.02);
+  const scope = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.06, 0.2), MAT_GUNMETAL);
+  scope.position.set(0, 0.09, 0.02);
   const grip = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.15, 0.08), MAT_BLACK);
   grip.position.set(0, -0.1, 0.14);
   grip.rotation.x = 0.3;
   sniperVM.add(barrel, body, scope, grip);
+  // canted slightly inward so the long barrel shows in profile at rest —
+  // dead-straight it foreshortens to almost nothing and looks unequipped
+  sniperVM.rotation.y = 0.16;
+  sniperVM.rotation.x = -0.02;
 }
 sniperVM.visible = false;
 gun.add(pistolVM, shotgunVM, sniperVM);
+// camera-attached meshes must never be frustum-culled: a stale bound can
+// blink the equipped gun out of existence
+gun.traverse((o) => { o.frustumCulled = false; });
 
 const muzzle = new THREE.Mesh(
   new THREE.SphereGeometry(0.045, 8, 8),
@@ -925,12 +932,18 @@ function buildEnemyMesh(type) {
       scope.position.set(0, -0.62, 0.08);
       egun.add(scope);
     } else if (type === 'shotgunner') {
-      // mirrors the player's shotgun viewmodel: long thin side-by-side
-      // barrels, a chunky receiver and a stock behind the grip
-      // barrels touch (no daylight between them) and the stock runs straight
-      // back along the barrel axis — same silhouette as the dropped pickup
-      addBarrel(0.42, 0.045, -0.0225);
-      addBarrel(0.42, 0.045, 0.0225);
+      // mirrors the player's shotgun: touching side-by-side barrels and a
+      // straight stock. Each barrel splits 70/30 so the muzzle tips (the far
+      // 30%) can light up on the firing telegraph.
+      const mkBarrel = (x) => {
+        const rear = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.294, 0.045), MAT_BLACK);
+        rear.position.set(x, -0.62 - 0.147, 0);
+        const tip = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.126, 0.045), MAT_BLACK);
+        tip.position.set(x, -0.62 - 0.294 - 0.063, 0);
+        egun.add(rear, tip);
+        return tip;
+      };
+      egun.userData.flash = [mkBarrel(-0.0225), mkBarrel(0.0225)];
       const stock = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.14, 0.075), MAT_BLACK);
       stock.position.set(0, -0.4, 0);
       egun.add(stock);
@@ -1094,9 +1107,15 @@ function enemyFire(e, toPlayer) {
   sfx.enemyShot();
 }
 
-// snipers carry their gun as a Group — flash its barrel, not the group
-function egunFlashTarget(e) {
-  return e.egun.isGroup ? e.egun.children[0] : e.egun;
+// Telegraph flash: shotgunners light up both muzzle tips; other grouped guns
+// flash their first barrel; a bare mesh (bomber's grenade) flashes whole.
+function setEgunFlash(e, mat) {
+  const tips = e.egun.isGroup && e.egun.userData.flash;
+  if (tips) {
+    for (const t of tips) t.material = mat;
+    return;
+  }
+  (e.egun.isGroup ? e.egun.children[0] : e.egun).material = mat;
 }
 
 // Enemies get on the trigger faster as waves progress: a touch quicker at
@@ -1176,10 +1195,10 @@ function updateEnemy(e, sdt) {
       const aimT = spec.aimTime * aimSpeedFactor();
       const t = Math.min(e.stateT / aimT, 1);
       e.armR.rotation.x = -t * (Math.PI / 2 - 0.06);
-      egunFlashTarget(e).material = e.stateT > aimT * 0.7 ? MAT_WHITEFLASH : MAT_BLACK;
+      setEgunFlash(e, e.stateT > aimT * 0.7 ? MAT_WHITEFLASH : MAT_BLACK);
       if (e.stateT >= aimT) {
         enemyFire(e, toPlayer);
-        egunFlashTarget(e).material = MAT_BLACK;
+        setEgunFlash(e, MAT_BLACK);
         if (spec.burst) {   // heavies always fire exactly spec.burst rounds
           e.state = 'burst'; e.stateT = 0;
           e.burstLeft = spec.burst - 1; e.burstT = 0.22;
@@ -1732,7 +1751,14 @@ const sfx = (() => {
       ns.connect(nf).connect(ng); ng.connect(off.destination);
       ns.start(0);
       const buf = await off.startRendering();
-      buf.getChannelData(0).reverse();
+      const d = buf.getChannelData(0);
+      d.reverse();
+      // reversed, the loud attack lands at the END — fade it out (and ease the
+      // first instant in) so time resuming doesn't end on a hard click
+      const outN = Math.floor(off.sampleRate * 0.09);
+      for (let i = 0; i < outN; i++) d[d.length - 1 - i] *= i / outN;
+      const inN = Math.floor(off.sampleRate * 0.02);
+      for (let i = 0; i < inN; i++) d[i] *= i / inN;
       surfaceBuf = buf;
     } catch { /* fall back to the old snap */ }
   }
@@ -1832,7 +1858,7 @@ const sfx = (() => {
     route(g, send);
     src.start(ctx.currentTime + at);
   }
-  function tone(f0, f1, dur, gainV, type = 'square', rate = 1, send = 0.15, at = 0) {
+  function tone(f0, f1, dur, gainV, type = 'square', rate = 1, send = 0.15, at = 0, att = 0) {
     if (!ctx) return;
     const t0 = ctx.currentTime + at;
     const o = ctx.createOscillator();
@@ -1840,7 +1866,12 @@ const sfx = (() => {
     o.frequency.setValueAtTime(f0 * rate, t0);
     o.frequency.exponentialRampToValueAtTime(Math.max(f1 * rate, 1), t0 + dur / rate);
     const g = ctx.createGain();
-    g.gain.setValueAtTime(gainV, t0);
+    if (att > 0) {   // soft attack: an instant-on oscillator clicks
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.linearRampToValueAtTime(gainV, t0 + att);
+    } else {
+      g.gain.setValueAtTime(gainV, t0);
+    }
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur / rate);
     o.connect(g);
     route(g, send);
@@ -1860,19 +1891,20 @@ const sfx = (() => {
       // The announcer speaks exactly twice per wave — TIME for the first
       // eligible kill, SHARD for the next — and never talks over itself or
       // the wave VO (the first word also waits 5s after the wave VO ends).
-      if (muted) return;
+      // Returns the word spoken (the kill flash shows only when it did).
+      if (muted) return null;
       const now = performance.now();
-      if (waveWords >= 2) return;
-      if (waveWords === 0 && now < waveVoEndMs + 5000) return;
-      if (now < voUntilMs) return;
+      if (waveWords >= 2) return null;
+      if (waveWords === 0 && now < waveVoEndMs + 5000) return null;
+      if (now < voUntilMs) return null;
       const key = waveWords === 0 ? 'time' : 'shard';
       const d = playSample(key, { send: 0.25 });
       if (d) {
         waveWords++;
         voUntilMs = now + d * 1000 + 150;
-        return;
+        return key.toUpperCase();
       }
-      if (!('speechSynthesis' in window)) return;
+      if (!('speechSynthesis' in window)) return null;
       try {   // TTS fallback, same quota rules
         const u = new SpeechSynthesisUtterance(key + '.');
         u.rate = 0.75;
@@ -1882,7 +1914,8 @@ const sfx = (() => {
         speechSynthesis.speak(u);
         waveWords++;
         voUntilMs = now + 1200;
-      } catch { /* no TTS on this browser — the visual flash still lands */ }
+        return key.toUpperCase();
+      } catch { return null; }
     },
     setMuted(m) {
       muted = m;
@@ -1912,7 +1945,7 @@ const sfx = (() => {
       if (musicFilter) musicFilter.frequency.value = 380 + 17100 * Math.pow(ts, 1.4);
       if (echoWet) echoWet.gain.value = 0.06 + (1 - ts) * 0.48;
       if (ts < 0.5 && lastTs >= 0.5) {          // plunge: deep sub-drop
-        tone(170, 28, 0.8, 0.5, 'sine', 1, 0.55);
+        tone(170, 28, 0.8, 0.5, 'sine', 1, 0.55, 0, 0.05);   // soft onset — no click
         noise(0.7, 260, 0.7, 0.22, 0.55, 0.55);
       } else if (ts >= 0.5 && lastTs < 0.5) {   // surface: the plunge, reversed
         if (surfaceBuf) {
@@ -1964,9 +1997,8 @@ const sfx = (() => {
     },
     whizz() {   // a round passing your head — always the deep bullet-time whoosh
       const r = 0.43, loud = 1.76;   // frozen-time flavor, whatever the clock says
-      noise(1.0, 480, 1.3, 0.55 * loud, r, 0.7);
+      noise(1.0, 480, 1.3, 0.55 * loud, r, 0.7);   // pure rushing air, no tonal tail
       noise(0.7, 950, 1.8, 0.3 * loud, r, 0.6);
-      tone(420, 90, 0.8, 0.22 * loud, 'sine', r, 0.6);
     },
     pickup() {   // the pump-action rack when you grab a gun
       if (playSample('pickup', { send: 0.12 })) return;
@@ -2252,19 +2284,20 @@ function updateEdgeArrows(playing) {
   }
 }
 
-let killWordFlip = false;
 const KILLFLASH_MS = 1300;       // long enough for the recorded word to land
 let killFlashUntil = 0;          // wave-clear waits for the last flash to finish
 
 function killWord() {
-  killWordFlip = !killWordFlip;
-  const word = killWordFlip ? 'TIME' : 'SHARD';
+  // the flash appears only when the announcer actually speaks the word —
+  // first two eligible kills of a wave — so sight and sound always agree
+  if (game.state === 'menu') return;
+  const word = sfx.say();
+  if (!word) return;
   const { svg } = buildWordSVG(word, 58);   // faceted letterforms, no shimmer
   el.flash.innerHTML = '<span class="kwskew"><span class="kwflash">' + svg + '</span></span>';
   killFlashUntil = performance.now() + KILLFLASH_MS;
   clearTimeout(killWord._t);
   killWord._t = setTimeout(() => { el.flash.innerHTML = ''; }, KILLFLASH_MS + 50);
-  if (game.state !== 'menu') sfx.say(word);   // the demo fight stays silent
 }
 
 function showBanner(html, dur = 1600) {
@@ -2297,10 +2330,9 @@ function startWave(n, quiet = false) {   // quiet: the clear card already announ
   }
   if (!quiet) {
     showBanner(`WAVE ${n}<small>${arenaChanged && n > 1 ? 'NEW ARENA' : 'THEY ARE COMING'}</small>`, 1500);
-    sfx.wave();   // quiet waves already got their VO on the clear card
+    if (n > 1) sfx.wave();   // wave 1 is the onboarding — it starts silent
   }
   sfx.newWave();
-  killWordFlip = false;   // first kill of a wave always flashes TIME
 }
 
 function maxAlive() { return Math.min(2 + Math.floor(game.wave / 2), 5); }
