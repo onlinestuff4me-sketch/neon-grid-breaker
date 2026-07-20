@@ -2062,20 +2062,20 @@ const sfx = (() => {
     },
     updateWhoosh(h, dist, vr) {   // vr: radial closing speed, + = approaching
       if (!h || h.dead) return;
-      // steep proximity curve: barely-there at range, swelling hard only when
-      // the round is genuinely close — keeps the rest of the mix on top
-      const prox = Math.max(0, 1 - dist / 8);
-      const loud = 1 + (1 - timeScale) * 0.8;
-      const want = Math.pow(prox, 4) * 0.75 * loud;
+      // volume: a soft 0.05 floor so distant rounds are present but never
+      // intrusive, then a very steep quintic ramp — a round must be within
+      // ~1.7m to clear 0.15, and a true graze escalates fast toward 0.5
+      const prox = Math.max(0, 1 - dist / 6);
+      const want = isFinite(dist) ? 0.05 + 0.45 * Math.pow(prox, 5) : 0;
       const k = 0.25;   // per-frame smoothing — no zipper, quick response
       h.g.gain.value += (want - h.g.gain.value) * k;
       // doppler kicks in only once it's PAST you: neutral on approach, then
-      // the tail sinks deeper and blooms into the echo as it recedes
+      // the tail sinks hard and drowns in the echo as it recedes
       const receding = vr < 0;
-      const dopp = receding ? Math.max(0.45, 1 + (vr * timeScale) / 25) : 1;
+      const dopp = receding ? Math.max(0.35, 1 + (vr * timeScale) / 18) : 1;
       const rate = (0.4 + 0.6 * timeScale) * dopp;
       h.src.playbackRate.value += (rate - h.src.playbackRate.value) * k;
-      h.send.gain.value += ((receding ? 0.85 : 0.25) - h.send.gain.value) * k;
+      h.send.gain.value += ((receding ? 1.0 : 0.2) - h.send.gain.value) * k;
     },
     detachWhoosh(h) {
       if (!h || h.dead) return;
