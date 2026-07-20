@@ -2070,16 +2070,19 @@ const sfx = (() => {
       // intrusive, then a very steep quintic ramp — a round must be within
       // ~1.7m to clear 0.15, and a true graze escalates fast toward 0.5
       const prox = Math.max(0, 1 - dist / 6);
-      const want = isFinite(dist) ? 0.05 + 0.45 * Math.pow(prox, 5) : 0;
+      let want = isFinite(dist) ? 0.05 + 0.45 * Math.pow(prox, 5) : 0;
+      const receding = vr < 0;
+      // once it's past you the dry sound collapses to a quarter of its swell —
+      // what lingers is the echo, not the whoosh itself
+      if (receding) want = 0.05 + (want - 0.05) * 0.25;
       const k = 0.25;   // per-frame smoothing — no zipper, quick response
       h.g.gain.value += (want - h.g.gain.value) * k;
-      // doppler kicks in only once it's PAST you: neutral on approach, then
-      // the tail sinks hard and drowns in the echo as it recedes
-      const receding = vr < 0;
-      const dopp = receding ? Math.max(0.35, 1 + (vr * timeScale) / 18) : 1;
+      // doppler on the WORLD-frame radial speed (not the slowed clock), so the
+      // pitch drop is just as audible in bullet time as at full speed
+      const dopp = receding ? Math.max(0.35, 1 + vr / 18) : 1;
       const rate = (0.4 + 0.6 * timeScale) * dopp;
       h.src.playbackRate.value += (rate - h.src.playbackRate.value) * k;
-      h.send.gain.value += ((receding ? 1.0 : 0.2) - h.send.gain.value) * k;
+      h.send.gain.value += ((receding ? 1.6 : 0.2) - h.send.gain.value) * k;
     },
     detachWhoosh(h) {
       if (!h || h.dead) return;
