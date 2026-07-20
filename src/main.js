@@ -1653,6 +1653,35 @@ const sfx = (() => {
     return s.buf.duration / rate;
   }
 
+  // iOS plays plain WebAudio in the "ambient" session, which the ring/silent
+  // switch mutes outright. A looping (silent) HTML <audio> element flips the
+  // session to "playback", which ignores the switch — the unmute.js trick.
+  let mediaShim = null;
+  function silentWavURI() {
+    const n = 2205;   // 0.05s of silence @44.1kHz mono 16-bit
+    const bytes = new Uint8Array(44 + n * 2);
+    const dv = new DataView(bytes.buffer);
+    const w = (o, s) => { for (let i = 0; i < s.length; i++) bytes[o + i] = s.charCodeAt(i); };
+    w(0, 'RIFF'); dv.setUint32(4, 36 + n * 2, true); w(8, 'WAVE'); w(12, 'fmt ');
+    dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
+    dv.setUint32(24, 44100, true); dv.setUint32(28, 88200, true);
+    dv.setUint16(32, 2, true); dv.setUint16(34, 16, true);
+    w(36, 'data'); dv.setUint32(40, n * 2, true);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return 'data:audio/wav;base64,' + btoa(bin);
+  }
+  function startMediaShim() {   // must be called from inside a user gesture
+    try {
+      if (!mediaShim) {
+        mediaShim = new Audio(silentWavURI());
+        mediaShim.loop = true;
+        mediaShim.setAttribute('playsinline', '');   // no fullscreen takeover
+      }
+      if (mediaShim.paused) mediaShim.play().catch(() => {});
+    } catch { /* no HTMLAudioElement — WebAudio alone will have to do */ }
+  }
+
   // Mobile browsers only allow speechSynthesis after it has spoken inside a
   // user gesture — prime it with a silent utterance on the first tap, and
   // keep a live reference so Chrome doesn't GC the utterance mid-speech.
@@ -1671,7 +1700,8 @@ const sfx = (() => {
   }
 
   function init() {
-    primeTTS();   // must run inside the gesture, even once audio is set up
+    primeTTS();        // must run inside the gesture, even once audio is set up
+    startMediaShim();  // ditto — re-kicks the playback session if iOS paused it
     if (ctx) {
       // 'suspended' after backgrounding, 'interrupted' on iOS — either way,
       // any user gesture should bring the sound back
@@ -1965,6 +1995,7 @@ const sfx = (() => {
     },
     debug() {
       return ctx ? { state: ctx.state, musicRate: +musicRate.toFixed(2), music: !!musicSrc,
+        shim: !!(mediaShim && !mediaShim.paused),
         samples: Object.keys(samples).length, surface: !!surfaceBuf,
         voWords: waveWords, voWait: Math.max(0, Math.round(waveVoEndMs + 5000 - performance.now())),
         filter: musicFilter ? Math.round(musicFilter.frequency.value) : 0,
