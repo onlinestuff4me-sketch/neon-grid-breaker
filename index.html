@@ -51,6 +51,13 @@
           text-align:center; font-size:13px; font-weight:900; letter-spacing:.26em; color:#16181d; }
   #ammo.shotgun { color:#ff2d1a; }
 
+  /* quiet escape hatch in the bottom bar's right corner */
+  #endrun { display:none; position:fixed; right:10px;
+            bottom:calc(env(safe-area-inset-bottom, 0px) + 12px); z-index:8;
+            padding:6px 8px; font-size:10px; font-weight:800; letter-spacing:.18em;
+            color:#5b616c; pointer-events:auto; }
+  body.slowmo #endrun { color:#8a909a; }
+
   /* "LOOK. OUT." retarget warning */
   #warn { position:absolute; left:0; right:0; top:34%; text-align:center; pointer-events:none; }
   .warnword { display:inline-block; margin:0 .12em; font-size:min(11vw,52px); font-weight:900;
@@ -180,6 +187,7 @@
   <div id="warn"></div>
   <div id="banner"></div>
   <div id="ammo">PISTOL · ∞</div>
+  <div id="endrun">END RUN</div>
 </div>
 
 <div id="tint"></div>

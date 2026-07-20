@@ -1498,6 +1498,10 @@ function onPointerDown(ev) {
     advanceFromOverlay();
     return;   // this pointer is never registered, so its release is inert
   }
+  if (ev.target && ev.target.closest && ev.target.closest('#endrun')) {
+    hitPlayer(true);   // walk away: same screen as death, gentler framing
+    return;            // never registered, so its release is inert
+  }
   input.pointers.set(ev.pointerId, {
     sx: ev.clientX, sy: ev.clientY, x: ev.clientX, y: ev.clientY,
     ox: ev.clientX, oy: ev.clientY, role: null, downT: performance.now(),
@@ -2225,6 +2229,7 @@ const el = {
   overlay: document.getElementById('overlay'),
   score: document.getElementById('score'),
   menubtn: document.getElementById('menubtn'),
+  endrun: document.getElementById('endrun'),
   flash: document.getElementById('flash'),
   banner: document.getElementById('banner'),
   tint: document.getElementById('tint'),
@@ -2279,6 +2284,7 @@ const MENU_HTML = {
 
 function showMenu() {
   clearField();
+  el.endrun.style.display = 'none';
   player.alive = true;
   player.pos.set(0, 0, 14);
   player.vel.set(0, 0, 0);
@@ -2419,14 +2425,15 @@ function startWave(n, quiet = false) {   // quiet: the clear card already announ
     if (n > 1) sfx.wave();   // wave 1 is the onboarding — it starts silent
   }
   sfx.newWave();
+  el.endrun.style.display = 'block';
 }
 
 function maxAlive() { return Math.min(2 + Math.floor(game.wave / 2), 5); }
 
 let deathAt = 0;
 
-function hitPlayer() {
-  if (!player.alive || player.iframes > 0) return;
+function hitPlayer(ended = false) {
+  if (!player.alive || (player.iframes > 0 && !ended)) return;
   player.alive = false;
   sprintTo = null;
   game.state = 'dead';
@@ -2435,13 +2442,16 @@ function hitPlayer() {
   recordRun();
   el.guide.style.opacity = 0;
   el.guide.style.display = 'none';
-  el.redflash.style.opacity = 1;
-  sfx.die();
-  vibrate([60, 40, 120]);
+  el.endrun.style.display = 'none';
+  if (!ended) {   // a chosen exit skips the death drama
+    el.redflash.style.opacity = 1;
+    sfx.die();
+    vibrate([60, 40, 120]);
+  }
   setTimeout(() => {
     if (game.state !== 'dead') return;   // already retried — don't resurrect the overlay
-    el.overlay.querySelector('h1').innerHTML = 'YOU<br><em>DIED</em>';
-    el.overlay.querySelector('.sub').textContent = 'ONE HIT IS ALL IT TAKES';
+    el.overlay.querySelector('h1').innerHTML = ended ? 'RUN<br><em>ENDED</em>' : 'YOU<br><em>DIED</em>';
+    el.overlay.querySelector('.sub').textContent = ended ? 'YOU CALLED IT' : 'ONE HIT IS ALL IT TAKES';
     const r = el.overlay.querySelector('.rules');
     r.innerHTML = `<div class="stats">${game.wave} WAVES · ${game.kills} SHATTERED · BEST ${bestWave} WAVES</div>`;
     r.style.display = 'flex';
@@ -2450,7 +2460,7 @@ function hitPlayer() {
     el.overlay.querySelector('.go').textContent = 'TAP TO RETRY WAVE';
     el.menubtn.style.display = 'inline-block';
     el.overlay.classList.remove('hidden');
-  }, 900);
+  }, ended ? 400 : 900);
 }
 
 function clearField() {
