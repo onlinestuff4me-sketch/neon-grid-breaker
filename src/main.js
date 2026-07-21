@@ -1126,6 +1126,7 @@ function removeEnemyShards(e) {
 
 function killEnemy(i, impulseDir) {
   const e = enemies[i];
+  removeEnemyShards(e);   // a mid-assembly kill (menu demo) must not leak shards
   if (timeMode === 'toggle' && (game.state === 'play' || game.state === 'intro')) {
     slowBank = Math.min(SLOWMO.cap, slowBank + SLOWMO.bonus);   // kills buy time
   }
@@ -1626,7 +1627,12 @@ function onPointerDown(ev) {
     return;            // never registered, so its release is inert
   }
   if (timeMode === 'toggle' && ev.target && ev.target.closest && ev.target.closest('#timebtn')) {
-    setTimeLocked(!timeLocked);
+    // press = slow immediately; a quick release keeps it locked (tap-toggle),
+    // a long press means "only while held" and releases on lift
+    timeBtnPointer = ev.pointerId;
+    timeBtnDownAt = performance.now();
+    timeBtnWasLocked = timeLocked;
+    if (!timeLocked) setTimeLocked(true);
     vibrate(8);
     return;   // the button never fires the gun
   }
@@ -1692,11 +1698,31 @@ function releasePointer(ev, isTapEligible) {
   input.holding = input.pointers.size > 0;
 }
 
+let timeBtnPointer = null, timeBtnDownAt = 0, timeBtnWasLocked = false;
+const TIMEBTN_TAP_MS = 280;
+
 function onPointerUp(ev) {
   sfx.init();   // some browsers only allow audio resume on the gesture's END
+  if (ev.pointerId === timeBtnPointer) {
+    timeBtnPointer = null;
+    if (performance.now() - timeBtnDownAt < TIMEBTN_TAP_MS) {
+      // quick tap: toggle (was locked -> off, was off -> stays locked)
+      if (timeBtnWasLocked) setTimeLocked(false);
+    } else {
+      setTimeLocked(false);   // long press: time flows again when you let go
+    }
+    return;
+  }
   releasePointer(ev, true);
 }
-function onPointerCancel(ev) { releasePointer(ev, false); }
+function onPointerCancel(ev) {
+  if (ev.pointerId === timeBtnPointer) {
+    timeBtnPointer = null;
+    setTimeLocked(false);
+    return;
+  }
+  releasePointer(ev, false);
+}
 
 renderer.domElement.style.touchAction = 'none';
 window.addEventListener('pointerdown', onPointerDown, { passive: false });
@@ -1730,7 +1756,7 @@ function vibrate(ms) {
 // ---------------------------------------------------------------------------
 const sfx = (() => {
   let ctx = null, master = null, sfxBus = null;
-  let echoIn = null, echoWet = null;
+  let echoIn = null, echoWet = null, echoSendBus = null;
   let musicSrc = null, musicGain = null, musicFilter = null;
   let musicRate = 1, lastTs = 1, building = false;
   let muted = false;
@@ -1862,6 +1888,8 @@ const sfx = (() => {
     sfxBus.connect(master);
     // feedback echo bus — dry at full speed, cavernous in bullet time
     echoIn = ctx.createGain();
+    echoSendBus = ctx.createGain();   // ducked with sfxBus (menu silences it)
+    echoSendBus.connect(echoIn);
     const delay = ctx.createDelay(1);
     delay.delayTime.value = 0.29;
     const damp = ctx.createBiquadFilter();
@@ -2022,7 +2050,9 @@ const sfx = (() => {
     if (send > 0) {
       const s = ctx.createGain();
       s.gain.value = send;
-      g.connect(s); s.connect(echoIn);
+      // sends go through the ducked echo bus, so menu-demo sounds can't
+      // leak their echoes into the start of a run
+      g.connect(s); s.connect(echoSendBus);
     }
   }
   function noise(dur, freq, q, gainV, rate = 1, send = 0.2, at = 0) {
@@ -2121,6 +2151,7 @@ const sfx = (() => {
       if (sfxBus) {
         const want = game.state === 'menu' ? 0 : 1;
         sfxBus.gain.value += (want - sfxBus.gain.value) * Math.min(dt * 8, 1);
+        if (echoSendBus) echoSendBus.gain.value = sfxBus.gain.value;
       }
       // slower easing = a long, audible turntable-style pitch glide
       const k = Math.min(dt * 4.5, 1);
@@ -2231,7 +2262,7 @@ const sfx = (() => {
       g.connect(sfxBus);
       const send = ctx.createGain();   // per-voice echo send — opens after the pass
       send.gain.value = 0.25;
-      g.connect(send); send.connect(echoIn);
+      g.connect(send); send.connect(echoSendBus);
       src.start(ctx.currentTime, Math.random() * 2);   // decorrelate the loops
       whooshCount++;
       return { src, g, send, dead: false };
@@ -2330,6 +2361,7 @@ try { bestWave = Math.max(1, +localStorage.getItem('timeshard_best') || 1); } ca
 
 // --- recent-runs table (last 5 runs; a run = menu start until death)
 let runStartAt = 0;
+let runPlayT = 0;   // real seconds actually in combat this run (all retries)
 let scoreMetric = 'w';   // 'w' = wave, 'k' = shards (kills)
 
 function loadRuns() {
@@ -2342,9 +2374,10 @@ function recordRun() {
   if (e) {   // retries extend the same run instead of adding a new row
     e.w = Math.max(e.w, game.wave);
     e.k = Math.max(e.k, game.kills);
+    e.d = Math.round(runPlayT);
     e.at = Date.now();
   } else {
-    runs.unshift({ id: runStartAt, w: game.wave, k: game.kills, at: Date.now() });
+    runs.unshift({ id: runStartAt, w: game.wave, k: game.kills, d: Math.round(runPlayT), at: Date.now() });
   }
   runs.sort((a, b) => b.at - a.at);
   try { localStorage.setItem('timeshard_runs', JSON.stringify(runs.slice(0, 5))); } catch { /* private mode */ }
@@ -2365,16 +2398,26 @@ function renderScores() {
   }
   el.scores.style.display = 'block';
   // a real leaderboard: sorted by the chosen metric, so #1 IS your best
-  display.sort((a, b) => (b[scoreMetric] - a[scoreMetric]) || (b.at - a.at));
-  const unit = (v) => (scoreMetric === 'w' ? (v === 1 ? 'WAVE' : 'WAVES') : (v === 1 ? 'ENEMY' : 'ENEMIES'));
+  display.sort((a, b) => ((b[scoreMetric] || 0) - (a[scoreMetric] || 0)) || (b.at - a.at));
+  const fmtVal = (r) => {
+    if (scoreMetric === 'd') {   // survival time as M:SS
+      if (r.d == null) return '—<em></em>';
+      const m = Math.floor(r.d / 60), s = String(r.d % 60).padStart(2, '0');
+      return `${m}:${s}<em>ALIVE</em>`;
+    }
+    const v = r[scoreMetric];
+    const unit = scoreMetric === 'w' ? (v === 1 ? 'WAVE' : 'WAVES') : (v === 1 ? 'ENEMY' : 'ENEMIES');
+    return `${v}<em>${unit}</em>`;
+  };
   const rows = display.slice(0, 5).map((r) =>
-    `<div class="scrow"><span class="scval">${r[scoreMetric]}<em>${unit(r[scoreMetric])}</em></span>` +
+    `<div class="scrow"><span class="scval">${fmtVal(r)}</span>` +
     `<span class="scdate">${fmtWhen(r.at)}</span></div>`).join('');
   el.scores.innerHTML =
     '<div class="schead">TOP RUNS</div>' +
     `<div class="scpills">` +
     `<span class="scpill${scoreMetric === 'w' ? ' active' : ''}" data-m="w">WAVES</span>` +
     `<span class="scpill${scoreMetric === 'k' ? ' active' : ''}" data-m="k">ENEMIES</span>` +
+    `<span class="scpill${scoreMetric === 'd' ? ' active' : ''}" data-m="d">TIME</span>` +
     `</div>${rows}`;
 }
 
@@ -2641,7 +2684,7 @@ function startWave(n, quiet = false) {   // quiet: the clear card already announ
   el.endrun.style.display = 'block';
   el.ammo.style.display = '';
   setTimeLocked(false);   // each wave starts at full speed in button mode
-  slowBank = Math.max(slowBank, SLOWMO.base);   // fresh charge every wave
+  if (n === 1) slowBank = SLOWMO.base;   // new run: fresh tank; waves carry over
   updateSlowMeter();
   updateModeUI();
 }
@@ -2736,6 +2779,7 @@ function advanceFromOverlay() {
     player.iframes = 1;
     game.kills = 0;
     runStartAt = Date.now();
+    runPlayT = 0;
     setWeapon('pistol');
     startWave(1);
     showGuide();
@@ -2800,7 +2844,7 @@ function frame(now) {
   // movement: stick deflection (or an active sprint) sets a target velocity,
   // and the body eases toward it — smooth in, smooth out
   let tvx = 0, tvz = 0;
-  if (player.alive && playing) {
+  if (player.alive && (playing || game.state === 'clear')) {   // roam between waves
     if (sprintTo) {
       const dx = sprintTo.g.position.x - player.pos.x;
       const dz = sprintTo.g.position.z - player.pos.z;
@@ -2904,6 +2948,7 @@ function frame(now) {
 
   // --- world (scaled time)
   if (playing) {
+    runPlayT += dt;   // survival clock for the TIME leaderboard
     // spawning
     if (game.state === 'intro') {
       game.stateT += dt;

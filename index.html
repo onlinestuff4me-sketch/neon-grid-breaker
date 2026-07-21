@@ -58,19 +58,23 @@
             color:#5b616c; pointer-events:auto; }
   body.slowmo #endrun { color:#8a909a; }
 
-  /* button-mode time control: a big easy target above the bottom bar */
-  #timebtn { display:none; position:fixed; right:14px;
-             bottom:calc(env(safe-area-inset-bottom, 0px) + 10vh); z-index:8;
-             width:64px; height:64px; border-radius:50%;
-             border:3px solid #16181d; background:rgba(238,240,243,.72);
+  /* button-mode time control: 96px hit zone, 64px visual — misses forgive.
+     Tap toggles bullet time; press-and-hold slows only while held. */
+  #timebtn { display:none; position:fixed; right:2px;
+             bottom:calc(env(safe-area-inset-bottom, 0px) + 9vh); z-index:8;
+             width:96px; height:96px; border-radius:50%;
              align-items:center; justify-content:center;
-             pointer-events:auto; transition:background .15s ease, border-color .15s ease; }
-  #timebtn::before { content:''; width:22px; height:22px;
+             pointer-events:auto; }
+  #timebtn::after { content:''; position:absolute; inset:16px; border-radius:50%;
+             border:3px solid #16181d; background:rgba(238,240,243,.72);
+             transition:background .15s ease, border-color .15s ease; }
+  #timebtn::before { content:''; width:22px; height:22px; z-index:1;
              background:#16181d;
              clip-path:polygon(0 0, 100% 0, 50% 46%, 100% 100%, 0 100%, 50% 54%);
              transition:background .15s ease; }
-  #timebtn.locked { background:#ff2d1a; border-color:#ff2d1a; }
+  #timebtn.locked::after { background:#ff2d1a; border-color:#ff2d1a; }
   #timebtn.locked::before { background:#fff; }
+  #timebtn.empty::after { border-color:#9aa0ab; opacity:.55; }
 
   /* onboarding pointer at the time button (button mode only) */
   #gtime { position:absolute; right:92px;
@@ -84,7 +88,6 @@
                pointer-events:none; }
   #slowfill { height:100%; width:50%; background:#ff2d1a; border-radius:2px; }
   body.slowmo #slowmeter { background:rgba(238,240,243,.25); }
-  #timebtn.empty { border-color:#9aa0ab; opacity:.55; }
   #timebtn.empty::before { background:#9aa0ab; }
 
   /* "LOOK. OUT." retarget warning */
@@ -168,10 +171,12 @@
   #scores .scdate { margin-left:auto; font-size:11px; font-weight:600; letter-spacing:.04em; color:#8a9099; }
 
   /* bottom row: how-to link + flat speaker toggle */
-  #menurow { position:absolute; left:0; right:0; bottom:calc(env(safe-area-inset-bottom, 0px) + 26px);
+  #menurow { position:absolute; left:0; right:0; bottom:calc(env(safe-area-inset-bottom, 0px) + 54px);
              display:flex; align-items:center; justify-content:center; height:44px; }
+  #moderow { position:absolute; left:0; right:0; bottom:calc(env(safe-area-inset-bottom, 0px) + 18px);
+             display:flex; align-items:center; justify-content:center; height:32px; }
   #modelink { font-size:11px; font-weight:800; letter-spacing:.28em; color:#7a8089;
-              text-decoration:underline; text-underline-offset:4px; padding:8px 6px; }
+              text-decoration:underline; text-underline-offset:4px; padding:8px 14px; }
   #howtolink { font-size:11px; font-weight:800; letter-spacing:.28em; color:#7a8089;
                text-shadow:0 0 10px rgba(232,234,238,.95); text-decoration:underline;
                text-underline-offset:4px; text-decoration-color:rgba(122,128,137,.5); }
@@ -245,9 +250,11 @@
   <div id="scores"></div>
   <div class="rules"></div>
   <div id="menurow">
-    <div id="modelink">TIME: CLASSIC</div>
     <div id="howtolink">HOW TO PLAY</div>
     <div id="sndbtn"></div>
+  </div>
+  <div id="moderow">
+    <div id="modelink">TIME: CLASSIC</div>
   </div>
   <div id="menubtn">MAIN MENU</div>
 </div>
