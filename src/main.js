@@ -1763,20 +1763,11 @@ const sfx = (() => {
   }
 
   // Render the slow-mo plunge offline, then flip it: the same sound played
-  // backwards becomes the "time resuming" cue.
+  // backwards becomes the "time resuming" cue. Noise-only — no tonal "boop".
   async function buildSurface() {
     try {
-      const off = new OfflineAudioContext(1, Math.ceil(ctx.sampleRate * 1.1), ctx.sampleRate);
-      const o = off.createOscillator();
-      o.type = 'sine';
-      o.frequency.setValueAtTime(170, 0);
-      o.frequency.exponentialRampToValueAtTime(28, 0.8);
-      const og = off.createGain();
-      og.gain.setValueAtTime(0.5, 0);
-      og.gain.exponentialRampToValueAtTime(0.0001, 0.8);
-      o.connect(og); og.connect(off.destination);
-      o.start(0); o.stop(0.85);
-      const n = Math.floor(off.sampleRate * 0.7);
+      const off = new OfflineAudioContext(1, Math.ceil(ctx.sampleRate * 1.5), ctx.sampleRate);
+      const n = Math.floor(off.sampleRate * 0.8);
       const nb = off.createBuffer(1, n, off.sampleRate);
       const nd = nb.getChannelData(0);
       for (let i = 0; i < n; i++) nd[i] = (Math.random() * 2 - 1) * (1 - i / n);
@@ -1786,7 +1777,7 @@ const sfx = (() => {
       const nf = off.createBiquadFilter();
       nf.type = 'bandpass'; nf.frequency.value = 260; nf.Q.value = 0.7;
       const ng = off.createGain();
-      ng.gain.value = 0.22;
+      ng.gain.value = 0.5;
       ns.connect(nf).connect(ng); ng.connect(off.destination);
       ns.start(0);
       const buf = await off.startRendering();
@@ -1983,17 +1974,16 @@ const sfx = (() => {
       if (musicSrc) musicSrc.playbackRate.value = musicRate;
       if (musicFilter) musicFilter.frequency.value = 380 + 17100 * Math.pow(ts, 1.4);
       if (echoWet) echoWet.gain.value = 0.06 + (1 - ts) * 0.48;
-      if (ts < 0.5 && lastTs >= 0.5) {          // plunge: deep sub-drop
-        tone(170, 28, 0.8, 0.5, 'sine', 1, 0.55, 0, 0.05);   // soft onset — no click
-        noise(0.7, 260, 0.7, 0.22, 0.55, 0.55);
+      if (ts < 0.5 && lastTs >= 0.5) {          // plunge: pure falling rush, no tone
+        noise(0.8, 260, 0.7, 0.5, 0.55, 0.95);
       } else if (ts >= 0.5 && lastTs < 0.5) {   // surface: the plunge, reversed
         if (surfaceBuf) {
           const src = ctx.createBufferSource();
           src.buffer = surfaceBuf;
           const g = ctx.createGain();
-          g.gain.value = 0.9;
+          g.gain.value = 1.1;
           src.connect(g);
-          route(g, 0.25);
+          route(g, 0.85);
           src.start();
         } else {
           noise(0.12, 2400, 0.9, 0.18, 1.5, 0.08);
@@ -2072,10 +2062,11 @@ const sfx = (() => {
       const prox = Math.max(0, 1 - dist / 6);
       let want = isFinite(dist) ? 0.05 + 0.45 * Math.pow(prox, 5) : 0;
       const receding = vr < 0;
-      // once it's past you the dry sound collapses to a tenth of its swell and
-      // the ambient floor drops out — only the echo lingers
-      if (receding) want = (want - 0.05) * 0.10;
-      const k = 0.25;   // per-frame smoothing — no zipper, quick response
+      // once it's past you the dry sound collapses toward zero — only the echo
+      // lingers. A slightly higher cut and a slower fade keep it from feeling
+      // like a hard cutoff.
+      if (receding) want = (want - 0.05) * 0.15;
+      const k = receding && want < h.g.gain.value ? 0.12 : 0.25;   // gentler decay
       h.g.gain.value += (want - h.g.gain.value) * k;
       // doppler on the WORLD-frame radial speed (not the slowed clock), so the
       // pitch drop is just as audible in bullet time as at full speed
