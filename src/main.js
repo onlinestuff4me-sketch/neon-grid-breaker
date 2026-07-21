@@ -694,6 +694,7 @@ function explodeGrenade(i) {
   }
   for (let j = enemies.length - 1; j >= 0; j--) {   // friendly fire is fair game
     const e = enemies[j];
+    if (e.state === 'assemble') continue;   // not material yet
     if (Math.hypot(e.pos.x - at.x, e.pos.z - at.z) < BLAST_R * 0.8) {
       killEnemy(j, _v1.set(e.pos.x - at.x, 0.5, e.pos.z - at.z).normalize());
     }
@@ -754,6 +755,7 @@ function explodeMissile(i) {
   }
   for (let j = enemies.length - 1; j >= 0; j--) {
     const e = enemies[j];
+    if (e.state === 'assemble') continue;   // not material yet
     if (Math.hypot(e.pos.x - at.x, e.pos.z - at.z) < MISSILE_BLAST * 0.8) {
       killEnemy(j, _v1.set(e.pos.x - at.x, 0.5, e.pos.z - at.z).normalize());
     }
@@ -996,12 +998,12 @@ const ENEMY_TYPES = {
   gunner: { speed: 2.0, scale: [1, 1, 1], drop: 0, aimTime: 0.55, cd: [0.9, 0.8], mul: 1, pellets: 1 },
   rusher: { speed: 3.4, scale: [0.85, 0.97, 0.85], drop: 0 },
   heavy: { speed: 1.6, scale: [1.14, 1.05, 1.14], drop: 0, aimTime: 0.55, cd: [1.8, 1.0], mul: 1, pellets: 1, burst: 3 },
-  shotgunner: { speed: 1.8, scale: [1.06, 1, 1.06], drop: 0.8, aimTime: 0.65, cd: [1.6, 0.9], mul: 0.85, pellets: 5, spread: 0.09, engage: [8, 4] },
+  shotgunner: { speed: 1.8, scale: [1.06, 1, 1.06], drop: 0.8, aimTime: 0.65, cd: [1.6, 0.9], mul: 0.85, pellets: 5, spread: 0.09, engage: [10, 4] },
   armored: { speed: 1.4, scale: [1.1, 1.06, 1.1], drop: 0, aimTime: 0.6, cd: [1.2, 0.8], mul: 1, pellets: 1, armored: true },
   sniper: { speed: 1.2, scale: [0.92, 1.05, 0.92], drop: 'sniper', aimTime: 1.35, cd: [2.4, 1.0], mul: 2.3, pellets: 1, engage: [26, 4] },
-  bomber: { speed: 1.7, scale: [1.05, 1, 1.05], drop: 0, aimTime: 0.8, cd: [2.4, 1.2], mul: 1, pellets: 1, engage: [9, 5] },
+  bomber: { speed: 1.7, scale: [1.05, 1, 1.05], drop: 0, aimTime: 0.8, cd: [2.4, 1.2], mul: 1, pellets: 1, engage: [11, 5] },
   shieldbearer: { speed: 1.5, scale: [1.08, 1, 1.08], drop: 0, aimTime: 0.7, cd: [1.6, 1.0], mul: 1, pellets: 1, shielded: true },
-  rocketeer: { speed: 1.4, scale: [1.05, 1.02, 1.05], drop: 0, aimTime: 1.0, cd: [3.4, 1.4], mul: 1, pellets: 1, engage: [13, 6] },
+  rocketeer: { speed: 1.4, scale: [1.05, 1.02, 1.05], drop: 0, aimTime: 1.0, cd: [3.4, 1.4], mul: 1, pellets: 1, engage: [16, 6] },
 };
 
 function pointInObstacle(x, z, pad) {
@@ -1035,12 +1037,36 @@ function spawnEnemy(type = 'gunner') {
   }
   parts.g.position.set(x, 0, z);
   scene.add(parts.g);
+  // materialize: red shards fly in from thin air and assemble into the body —
+  // the death shatter, reversed. Body stays hidden and unhittable until done.
+  parts.g.visible = false;
+  const shards = [];
+  const sy = spec.scale[1];
+  for (let i = 0; i < 18; i++) {
+    const mesh = new THREE.Mesh(shardGeo, Math.random() < 0.75 ? MAT_RED : MAT_DARKRED);
+    mesh.scale.setScalar(0.5 + Math.random() * 1.2);
+    const a = Math.random() * Math.PI * 2;
+    const r = 1.4 + Math.random() * 1.6;
+    const from = new THREE.Vector3(x + Math.sin(a) * r, 0.2 + Math.random() * 2.6, z + Math.cos(a) * r);
+    const to = new THREE.Vector3(
+      x + (Math.random() - 0.5) * 0.55,
+      (0.15 + Math.random() * 1.55) * sy,
+      z + (Math.random() - 0.5) * 0.55
+    );
+    mesh.position.copy(from);
+    scene.add(mesh);
+    shards.push({
+      mesh, from, to,
+      spin: new THREE.Vector3((Math.random() - 0.5) * 10, (Math.random() - 0.5) * 10, (Math.random() - 0.5) * 10),
+    });
+  }
   enemies.push({
     ...parts,
     type,
     speed: spec.speed,
     pos: parts.g.position,
-    state: 'advance',
+    state: 'assemble',
+    shards,
     stateT: 0,
     walkPhase: Math.random() * Math.PI * 2,
     strafe: Math.random() < 0.5 ? 1 : -1,
@@ -1048,15 +1074,23 @@ function spawnEnemy(type = 'gunner') {
     fireCd: ((type === 'sniper' ? 1.2 : 0.15) + Math.random() * 0.35) * aimSpeedFactor(),
     engageDist: spec.engage
       ? spec.engage[0] + Math.random() * spec.engage[1]
-      : 15 + Math.random() * 6,           // open fire from range, not point-blank
+      : 19 + Math.random() * 6,           // guns come up early — pressure from range
     burstLeft: 0,
     burstT: 0,
     alive: true,
   });
   if (type === 'sniper') {
     warnFlash(['SNIPER.']);
-    sfx.wave();
+    sfx.alert();   // its own stinger — sfx.wave() is the wave VO now
   }
+}
+
+const ASSEMBLE_T = 0.55;   // seconds (world time) for a spawn to pull together
+
+function removeEnemyShards(e) {
+  if (!e.shards) return;
+  for (const s of e.shards) scene.remove(s.mesh);
+  e.shards = null;
 }
 
 function killEnemy(i, impulseDir) {
@@ -1120,10 +1154,31 @@ function setEgunFlash(e, mat) {
   (e.egun.isGroup ? e.egun.children[0] : e.egun).material = mat;
 }
 
-// Enemies get on the trigger faster as waves progress: a touch quicker at
-// wave 1 (x0.95), down to x0.6 telegraphs and cooldowns by wave ~8.
+// Enemies get on the trigger faster as waves progress: already quick at
+// wave 1 (x0.8), down to x0.5 telegraphs and cooldowns by wave ~7.
 function aimSpeedFactor() {
-  return Math.max(0.6, 0.95 - (game.wave - 1) * 0.05);
+  return Math.max(0.5, 0.8 - (game.wave - 1) * 0.05);
+}
+
+// Same slab push-out the player uses: an enemy can never end a frame inside
+// a wall block, no matter what the steering did.
+function resolveEnemyCollisions(e) {
+  const r = 0.5;
+  const lim = ARENA_HALF - 1;
+  e.pos.x = Math.min(Math.max(e.pos.x, -lim), lim);
+  e.pos.z = Math.min(Math.max(e.pos.z, -lim), lim);
+  for (const o of obstacles) {
+    if (e.pos.x > o.min.x - r && e.pos.x < o.max.x + r &&
+        e.pos.z > o.min.z - r && e.pos.z < o.max.z + r) {
+      const dxl = e.pos.x - (o.min.x - r), dxr = (o.max.x + r) - e.pos.x;
+      const dzl = e.pos.z - (o.min.z - r), dzr = (o.max.z + r) - e.pos.z;
+      const m = Math.min(dxl, dxr, dzl, dzr);
+      if (m === dxl) e.pos.x = o.min.x - r;
+      else if (m === dxr) e.pos.x = o.max.x + r;
+      else if (m === dzl) e.pos.z = o.min.z - r;
+      else e.pos.z = o.max.z + r;
+    }
+  }
 }
 
 function updateEnemy(e, sdt) {
@@ -1147,9 +1202,30 @@ function updateEnemy(e, sdt) {
   let moveSpeed = 0;
 
   // a burst, once started, always completes — no melee interrupt mid-volley
-  if (dist < 1.5 && e.state !== 'melee' && e.state !== 'burst') { e.state = 'melee'; e.stateT = 0; }
+  if (dist < 1.5 && e.state !== 'melee' && e.state !== 'burst' && e.state !== 'assemble') {
+    e.state = 'melee'; e.stateT = 0;
+  }
 
   switch (e.state) {
+    case 'assemble': {
+      // shards converge from thin air into the body — the shatter, reversed
+      const t = Math.min(e.stateT / ASSEMBLE_T, 1);
+      const ease = 1 - Math.pow(1 - t, 3);
+      for (const s of e.shards) {
+        s.mesh.position.lerpVectors(s.from, s.to, ease);
+        s.mesh.rotation.x += s.spin.x * sdt * (1 - ease);
+        s.mesh.rotation.y += s.spin.y * sdt * (1 - ease);
+        s.mesh.rotation.z += s.spin.z * sdt * (1 - ease);
+        s.mesh.scale.setScalar(s.mesh.scale.x + (0.65 - s.mesh.scale.x) * 0.1);
+      }
+      if (t >= 1) {
+        removeEnemyShards(e);
+        e.g.visible = true;
+        e.state = 'advance';
+        e.stateT = 0;
+      }
+      return;   // not hittable, not moving, not shooting yet
+    }
     case 'advance': {
       moveSpeed = e.speed;
       e.strafeT -= sdt;
@@ -1179,9 +1255,7 @@ function updateEnemy(e, sdt) {
       dir.normalize();
       e.pos.x += dir.x * moveSpeed * sdt;
       e.pos.z += dir.z * moveSpeed * sdt;
-      const lim = ARENA_HALF - 1;
-      e.pos.x = Math.min(Math.max(e.pos.x, -lim), lim);
-      e.pos.z = Math.min(Math.max(e.pos.z, -lim), lim);
+      resolveEnemyCollisions(e);   // hard guarantee: steering can fail, this can't
 
       if (e.type !== 'rusher' && dist < e.engageDist && e.fireCd <= 0 &&
           (!ENEMY_TYPES[e.type].shielded || Math.cos(e.g.rotation.y - wantYaw) > 0.8) &&
@@ -1350,6 +1424,7 @@ function updateBullets(sdt) {
       let consumed = false;
       for (let j = enemies.length - 1; j >= 0; j--) {
         const e = enemies[j];
+        if (e.state === 'assemble') continue;   // still thin air — no hitbox
         const sy = e.g.scale.y, sx = Math.max(e.g.scale.x, 1);
         // head first: a sphere around the skull (bigger on armored units)
         const headR = (e.type === 'armored' ? 0.3 : 0.24) * sx;
@@ -2169,6 +2244,7 @@ const sfx = (() => {
       waveVoEndMs = now + (d ? d * 1000 : 400);
       voUntilMs = Math.max(voUntilMs, waveVoEndMs);
     },
+    alert() { tone(1100, 500, 0.3, 0.22, 'square', 1, 0.3); },   // sniper warning
     lob() { const r = worldRate(); noise(0.16, 420, 1.1, 0.28, r, 0.3); },
     rocket() { const r = worldRate(); noise(0.5, 600, 0.7, 0.5, r, 0.5); tone(240, 90, 0.4, 0.2, 'sawtooth', r, 0.4); },
     boom() {
@@ -2515,7 +2591,11 @@ function hitPlayer(ended = false) {
 }
 
 function clearField() {
-  for (let i = enemies.length - 1; i >= 0; i--) { scene.remove(enemies[i].g); enemies.splice(i, 1); }
+  for (let i = enemies.length - 1; i >= 0; i--) {
+    removeEnemyShards(enemies[i]);
+    scene.remove(enemies[i].g);
+    enemies.splice(i, 1);
+  }
   for (let i = bullets.length - 1; i >= 0; i--) killBullet(i, null);
   for (let i = debris.length - 1; i >= 0; i--) { scene.remove(debris[i].mesh); debris.splice(i, 1); }
   for (let i = ripples.length - 1; i >= 0; i--) {
@@ -2802,7 +2882,7 @@ document.addEventListener('visibilitychange', () => {
 
 // Debug hook for automated tests.
 window.__ts = {
-  game, player, enemies, bullets, pickups, ripples, camera, input,
+  game, player, enemies, bullets, pickups, ripples, camera, input, obstacles,
   sprint: () => sprintTo,
   audio: () => sfx.debug(),
   fire: playerFire, setWeapon, spawnEnemy, spawnPickup,
