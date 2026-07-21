@@ -1038,25 +1038,45 @@ function spawnEnemy(type = 'gunner') {
   parts.g.position.set(x, 0, z);
   scene.add(parts.g);
   // materialize: red shards fly in from thin air and assemble into the body —
-  // the death shatter, reversed. Body stays hidden and unhittable until done.
+  // the death shatter, reversed. It starts as a sparse dozen and accelerates,
+  // shard after shard, until the swarm almost silhouettes the full figure;
+  // only then does the real model take its place. Unhittable until formed.
   parts.g.visible = false;
   const shards = [];
-  const sy = spec.scale[1];
-  for (let i = 0; i < 18; i++) {
+  const sy = spec.scale[1], sxz = spec.scale[0];
+  // target points sampled over the humanoid volume: legs, torso, head
+  const bodyPoint = () => {
+    const pick = Math.random();
+    if (pick < 0.22) {   // legs: two columns
+      const side = Math.random() < 0.5 ? -0.14 : 0.14;
+      return [x + (side + (Math.random() - 0.5) * 0.1) * sxz, (0.05 + Math.random() * 0.55) * sy,
+        z + (Math.random() - 0.5) * 0.14 * sxz];
+    }
+    if (pick < 0.82) {   // torso + arms
+      return [x + (Math.random() - 0.5) * 0.72 * sxz, (0.6 + Math.random() * 0.85) * sy,
+        z + (Math.random() - 0.5) * 0.34 * sxz];
+    }
+    return [x + (Math.random() - 0.5) * 0.34 * sxz, (1.5 + Math.random() * 0.3) * sy,   // head
+      z + (Math.random() - 0.5) * 0.3 * sxz];
+  };
+  const N_INIT = 12, N_LATE = 58;
+  for (let i = 0; i < N_INIT + N_LATE; i++) {
+    const late = i >= N_INIT;
     const mesh = new THREE.Mesh(shardGeo, Math.random() < 0.75 ? MAT_RED : MAT_DARKRED);
-    mesh.scale.setScalar(0.5 + Math.random() * 1.2);
+    mesh.scale.setScalar(late ? 0.35 + Math.random() * 0.4 : 0.6 + Math.random() * 0.6);
     const a = Math.random() * Math.PI * 2;
-    const r = 1.4 + Math.random() * 1.6;
+    const r = 1.4 + Math.random() * 1.8;
     const from = new THREE.Vector3(x + Math.sin(a) * r, 0.2 + Math.random() * 2.6, z + Math.cos(a) * r);
-    const to = new THREE.Vector3(
-      x + (Math.random() - 0.5) * 0.55,
-      (0.15 + Math.random() * 1.55) * sy,
-      z + (Math.random() - 0.5) * 0.55
-    );
+    const to = new THREE.Vector3(...bodyPoint());
     mesh.position.copy(from);
+    mesh.visible = !late;
     scene.add(mesh);
     shards.push({
       mesh, from, to,
+      // accelerating schedule: sqrt spacing packs most arrivals into the
+      // back half, so the figure fills in faster and faster
+      activeAt: late ? 0.55 * Math.sqrt((i - N_INIT) / N_LATE) : 0,
+      travel: late ? 0.25 : 0.4,
       spin: new THREE.Vector3((Math.random() - 0.5) * 10, (Math.random() - 0.5) * 10, (Math.random() - 0.5) * 10),
     });
   }
@@ -1085,7 +1105,7 @@ function spawnEnemy(type = 'gunner') {
   }
 }
 
-const ASSEMBLE_T = 0.55;   // seconds (world time) for a spawn to pull together
+const ASSEMBLE_T = 0.85;   // seconds (world time) for a spawn to pull together
 
 function removeEnemyShards(e) {
   if (!e.shards) return;
@@ -1208,17 +1228,20 @@ function updateEnemy(e, sdt) {
 
   switch (e.state) {
     case 'assemble': {
-      // shards converge from thin air into the body — the shatter, reversed
-      const t = Math.min(e.stateT / ASSEMBLE_T, 1);
-      const ease = 1 - Math.pow(1 - t, 3);
+      // shards converge from thin air into the body — the shatter, reversed.
+      // Each shard has its own arrival time, so the figure fills in piece by
+      // piece until the swarm almost IS the enemy, then the model takes over.
       for (const s of e.shards) {
+        if (e.stateT < s.activeAt) continue;
+        s.mesh.visible = true;
+        const p = Math.min((e.stateT - s.activeAt) / s.travel, 1);
+        const ease = 1 - Math.pow(1 - p, 3);
         s.mesh.position.lerpVectors(s.from, s.to, ease);
         s.mesh.rotation.x += s.spin.x * sdt * (1 - ease);
         s.mesh.rotation.y += s.spin.y * sdt * (1 - ease);
         s.mesh.rotation.z += s.spin.z * sdt * (1 - ease);
-        s.mesh.scale.setScalar(s.mesh.scale.x + (0.65 - s.mesh.scale.x) * 0.1);
       }
-      if (t >= 1) {
+      if (e.stateT >= ASSEMBLE_T) {
         removeEnemyShards(e);
         e.g.visible = true;
         e.state = 'advance';
