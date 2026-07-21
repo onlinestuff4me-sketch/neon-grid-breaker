@@ -1130,6 +1130,7 @@ function killEnemy(i, impulseDir) {
   if (timeMode === 'toggle' && (game.state === 'play' || game.state === 'intro')) {
     slowBank = Math.min(SLOWMO.cap, slowBank + SLOWMO.bonus);   // kills buy time
   }
+  if (game.state !== 'menu') vibrate(15);   // every kill lands in the thumb
   spawnShatter(e.pos, impulseDir);
   const drop = ENEMY_TYPES[e.type].drop;
   if (typeof drop === 'string') spawnPickup(e.pos, drop);           // named loot
@@ -1572,8 +1573,36 @@ function pickupAtScreen(px, py) {
 }
 
 function onPointerDown(ev) {
-  ev.preventDefault();
+  // "inside settings" means inside the CARD — the backdrop covers the screen
+  const inSettings = ev.target && ev.target.closest && ev.target.closest('#settings .htpcard');
+  if (!inSettings) ev.preventDefault();   // sliders need native pointer handling
   sfx.init();
+  if (el.settings.style.display === 'flex') {   // settings modal open
+    if (inSettings) {
+      if (ev.target.closest && ev.target.closest('#sethaptics')) {
+        setHaptics(!hapticsOn);
+        el.sethaptics.textContent = hapticsOn ? 'ON' : 'OFF';
+        el.sethaptics.classList.toggle('on', hapticsOn);
+        vibrate(15);   // demo thump so the toggle speaks for itself
+      }
+      return;   // taps inside the card (incl. sliders) don't close it
+    }
+    el.settings.style.display = 'none';   // tap outside closes
+    return;
+  }
+  if (game.state === 'paused') {
+    if (ev.target && ev.target.closest) {
+      if (ev.target.closest('#psettings')) { openSettings(); return; }
+      if (ev.target.closest('#pendrun')) {
+        el.pausemenu.style.display = 'none';
+        game.state = game.pausedFrom || 'play';
+        hitPlayer(true);
+        return;
+      }
+    }
+    closePause();   // RESUME or any tap outside the buttons
+    return;
+  }
   if (el.htp.style.display === 'flex') {   // how-to modal open
     el.htp.style.display = 'none';
     if (ev.target && ev.target.closest && ev.target.closest('#enmlink')) {
@@ -1605,6 +1634,10 @@ function onPointerDown(ev) {
         el.htp.style.display = 'flex';
         return;
       }
+      if (ev.target.closest('#setlink')) {
+        openSettings();
+        return;
+      }
       if (ev.target.closest('#modelink')) {   // classic hold vs time button
         timeMode = timeMode === 'toggle' ? 'classic' : 'toggle';
         try { localStorage.setItem('timeshard_mode', timeMode); } catch { /* private mode */ }
@@ -1622,8 +1655,8 @@ function onPointerDown(ev) {
     advanceFromOverlay();
     return;   // this pointer is never registered, so its release is inert
   }
-  if (ev.target && ev.target.closest && ev.target.closest('#endrun')) {
-    hitPlayer(true);   // walk away: same screen as death, gentler framing
+  if (ev.target && ev.target.closest && ev.target.closest('#pausebtn')) {
+    openPause();
     return;            // never registered, so its release is inert
   }
   if (timeMode === 'toggle' && ev.target && ev.target.closest && ev.target.closest('#timebtn')) {
@@ -1743,8 +1776,15 @@ function tryUnlockAudio() {
 }
 for (const n of unlockEvs) window.addEventListener(n, tryUnlockAudio, { capture: true, passive: true });
 
+let hapticsOn = true;
+try { hapticsOn = localStorage.getItem('timeshard_haptics') !== '0'; } catch { /* private mode */ }
+
 function vibrate(ms) {
-  if (navigator.vibrate) navigator.vibrate(ms);
+  if (hapticsOn && navigator.vibrate) navigator.vibrate(ms);
+}
+function setHaptics(on) {
+  hapticsOn = on;
+  try { localStorage.setItem('timeshard_haptics', on ? '1' : '0'); } catch { /* private mode */ }
 }
 
 // ---------------------------------------------------------------------------
@@ -1761,6 +1801,13 @@ const sfx = (() => {
   let musicRate = 1, lastTs = 1, building = false;
   let muted = false;
   try { muted = localStorage.getItem('timeshard_muted') === '1'; } catch { /* private mode */ }
+  let musicVol = 1, sfxVol = 1;
+  try {
+    const mv = parseFloat(localStorage.getItem('timeshard_musicvol'));
+    const sv = parseFloat(localStorage.getItem('timeshard_sfxvol'));
+    if (!Number.isNaN(mv)) musicVol = Math.min(Math.max(mv, 0), 1);
+    if (!Number.isNaN(sv)) sfxVol = Math.min(Math.max(sv, 0), 1);
+  } catch { /* private mode */ }
 
   // --- sampled sounds (recorded SFX in assets/sfx, mp3 for universal decode)
   // Fetched immediately so bytes are in flight during the menu; decoded once
@@ -2042,7 +2089,7 @@ const sfx = (() => {
       musicSrc.loop = true;
       musicSrc.connect(musicFilter);
       musicSrc.start();
-      musicGain.gain.setTargetAtTime(0.26, ctx.currentTime, 1.2);   // fade in
+      musicGain.gain.setTargetAtTime(0.26 * musicVol, ctx.currentTime, 1.2);   // fade in
     } catch { /* keep SFX even if music fails */ }
   }
 
@@ -2141,6 +2188,16 @@ const sfx = (() => {
     },
     isMuted() { return muted; },
     running() { return !!(ctx && ctx.state === 'running'); },
+    setMusicVol(v) {
+      musicVol = Math.min(Math.max(v, 0), 1);
+      try { localStorage.setItem('timeshard_musicvol', String(musicVol)); } catch { /* private mode */ }
+      if (ctx && musicGain) musicGain.gain.setTargetAtTime(0.26 * musicVol, ctx.currentTime, 0.1);
+    },
+    setSfxVol(v) {
+      sfxVol = Math.min(Math.max(v, 0), 1);   // the duck loop applies it next frame
+      try { localStorage.setItem('timeshard_sfxvol', String(sfxVol)); } catch { /* private mode */ }
+    },
+    vols() { return { music: musicVol, sfx: sfxVol }; },
     update(ts, dt) {
       if (!ctx) return;
       // keep nudging a stuck context back to life (iOS backgrounding etc.)
@@ -2151,7 +2208,7 @@ const sfx = (() => {
       }
       // the title screen keeps the music but silences the demo fight's SFX
       if (sfxBus) {
-        const want = game.state === 'menu' ? 0 : 1;
+        const want = (game.state === 'menu' ? 0 : 1) * sfxVol;
         sfxBus.gain.value += (want - sfxBus.gain.value) * Math.min(dt * 8, 1);
         if (echoSendBus) echoSendBus.gain.value = sfxBus.gain.value;
       }
@@ -2288,6 +2345,10 @@ const sfx = (() => {
       const prox = Math.max(0, 1 - dist / 6);
       let want = isFinite(dist) ? 0.05 + 0.45 * Math.pow(prox, 5) : 0;
       const receding = vr < 0;
+      if (receding && !h.receded) {   // the instant it passes: a graze tick
+        h.receded = true;
+        if (dist < 1.6 && game.state !== 'menu') vibrate(6);
+      }
       // once it's past you the dry sound collapses toward zero — only the echo
       // lingers. A slightly higher cut and a slower fade keep it from feeling
       // like a hard cutoff.
@@ -2490,8 +2551,39 @@ function setTimeLocked(v) {
   timeLocked = v;
   el.timebtn.classList.toggle('locked', v);
 }
+
+// --- pause: freezes the whole simulation; settings + end run live inside
+function openPause() {
+  if (game.state !== 'play' && game.state !== 'intro' && game.state !== 'clear') return;
+  game.pausedFrom = game.state;
+  game.state = 'paused';
+  el.pausemenu.style.display = 'flex';
+  input.pointers.clear();
+  input.stickX = input.stickY = 0;
+  input.holding = false;
+  stickUI(false);
+}
+function closePause() {
+  if (game.state !== 'paused') return;
+  game.state = game.pausedFrom || 'play';
+  el.pausemenu.style.display = 'none';
+}
+function openSettings() {
+  const v = sfx.vols();
+  el.setmusic.value = v.music;
+  el.setsfx.value = v.sfx;
+  el.sethaptics.textContent = hapticsOn ? 'ON' : 'OFF';
+  el.sethaptics.classList.toggle('on', hapticsOn);
+  el.settings.style.display = 'flex';
+}
+// tagline follows the mode: both are true statements about how time obeys you
+function taglineFor() {
+  return timeMode === 'toggle' ? 'YOU DECIDE WHEN TIME MOVES' : 'TIME MOVES ONLY WHEN YOU LET GO';
+}
+
 function updateModeUI() {
   el.modelink.textContent = 'TIME: ' + (timeMode === 'toggle' ? 'BUTTON' : 'CLASSIC');
+  if (game.state === 'menu') el.overlay.querySelector('.sub').textContent = taglineFor();
   const inRun = game.state === 'play' || game.state === 'intro' || game.state === 'clear';
   const on = timeMode === 'toggle' && inRun;
   el.timebtn.style.display = on ? 'flex' : 'none';
@@ -2508,7 +2600,13 @@ const el = {
   overlay: document.getElementById('overlay'),
   score: document.getElementById('score'),
   menubtn: document.getElementById('menubtn'),
-  endrun: document.getElementById('endrun'),
+  pausebtn: document.getElementById('pausebtn'),
+  pausemenu: document.getElementById('pausemenu'),
+  settings: document.getElementById('settings'),
+  setlink: document.getElementById('setlink'),
+  setmusic: document.getElementById('setmusic'),
+  setsfx: document.getElementById('setsfx'),
+  sethaptics: document.getElementById('sethaptics'),
   timebtn: document.getElementById('timebtn'),
   modelink: document.getElementById('modelink'),
   gtime: document.getElementById('gtime'),
@@ -2569,7 +2667,7 @@ const MENU_HTML = {
 
 function showMenu() {
   clearField();
-  el.endrun.style.display = 'none';
+  el.pausebtn.style.display = 'none';
   setTimeLocked(false);
   updateModeUI();
   player.alive = true;
@@ -2589,7 +2687,7 @@ function showMenu() {
   el.guide.style.opacity = 0;
   el.guide.style.display = 'none';
   el.overlay.querySelector('h1').innerHTML = MENU_HTML.h1;
-  el.overlay.querySelector('.sub').innerHTML = MENU_HTML.sub;
+  el.overlay.querySelector('.sub').textContent = taglineFor();
   el.overlay.querySelector('.rules').innerHTML = MENU_HTML.rules;
   el.overlay.querySelector('.go').innerHTML = MENU_HTML.go;
   el.overlay.querySelector('.rules').style.display = 'none';
@@ -2713,7 +2811,7 @@ function startWave(n, quiet = false) {   // quiet: the clear card already announ
     if (n > 1) sfx.wave();   // wave 1 is the onboarding — it starts silent
   }
   sfx.newWave();
-  el.endrun.style.display = 'block';
+  el.pausebtn.style.display = 'block';
   el.ammo.style.display = '';
   setTimeLocked(false);   // each wave starts at full speed in button mode
   if (n === 1) slowBank = SLOWMO.base;   // new run: fresh tank; waves carry over
@@ -2735,7 +2833,7 @@ function hitPlayer(ended = false) {
   recordRun();
   el.guide.style.opacity = 0;
   el.guide.style.display = 'none';
-  el.endrun.style.display = 'none';
+  el.pausebtn.style.display = 'none';
   el.ammo.style.display = 'none';   // the overlay's stats line lands there
   setTimeLocked(false);
   el.timebtn.style.display = 'none';
@@ -2843,6 +2941,11 @@ function frame(now) {
   const dt = Math.min((now - lastT) / 1000, 0.05);
   lastT = now;
 
+  if (game.state === 'paused') {   // hard freeze: just keep the frame up
+    renderer.render(scene, camera);
+    return;
+  }
+
   // --- time scale: frozen while a finger is down — but time moves (a little)
   // when YOU move, so dodging costs the world a few frames
   const playing = game.state === 'play' || game.state === 'intro';
@@ -2853,6 +2956,7 @@ function frame(now) {
       if (slowBank <= 0) {
         slowBank = 0;
         setTimeLocked(false);   // time rushes back — resume SFX fires as usual
+        vibrate([30, 40, 30]);  // double thump: the tank just ran dry
       }
     }
     updateSlowMeter();
@@ -3005,6 +3109,7 @@ function frame(now) {
       game.state = 'clear';
       game.stateT = 0;
       setTimeLocked(false);   // the break runs at full speed; button resets
+      vibrate(20);
       // one readable card for the whole break — the next wave starts quietly
       const next = game.wave + 1;
       const nextArena = Math.floor((next - 1) / 3) % LAYOUTS.length !== currentLayout;
@@ -3068,6 +3173,10 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // Debug hook for automated tests.
+// settings sliders drive the mixer live
+el.setmusic.addEventListener('input', () => sfx.setMusicVol(+el.setmusic.value));
+el.setsfx.addEventListener('input', () => sfx.setSfxVol(+el.setsfx.value));
+
 window.__ts = {
   game, player, enemies, bullets, pickups, ripples, camera, input, obstacles,
   sprint: () => sprintTo,
