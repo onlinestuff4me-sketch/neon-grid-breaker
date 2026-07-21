@@ -1832,6 +1832,8 @@ const sfx = (() => {
     time: ['assets/sfx/time.mp3', 2.6],
     shatterw: ['assets/sfx/shatterword.mp3', 1.7],
   };
+  // announcer voicing: pitched down and echoed like the Next Wave hit
+  const VOICE = { rate: 0.8, send: 0.6 };
   const sampleFetch = {};
   const samples = {};
   for (const [name, [url]] of Object.entries(SAMPLE_SRC)) {
@@ -2167,7 +2169,7 @@ const sfx = (() => {
       if (waveWords === 0 && now < waveVoEndMs + 5000) return null;
       if (now < voUntilMs) return null;
       const key = waveWords === 0 ? 'time' : 'shatterw';
-      const d = playSample(key, { send: 0.25 });
+      const d = playSample(key, { rate: VOICE.rate, send: VOICE.send });
       if (d) {
         waveWords++;
         voUntilMs = now + d * 1000 + 150;
@@ -2771,7 +2773,7 @@ function updateEdgeArrows(playing) {
   }
 }
 
-const KILLFLASH_MS = 1300;       // long enough for the recorded word to land
+const KILLFLASH_MS = 1600;       // long enough for the slowed recorded word
 let killFlashUntil = 0;          // wave-clear waits for the last flash to finish
 
 function killWord() {
@@ -3187,6 +3189,12 @@ document.addEventListener('visibilitychange', () => {
 // settings sliders drive the mixer live
 el.setmusic.addEventListener('input', () => sfx.setMusicVol(+el.setmusic.value));
 el.setsfx.addEventListener('input', () => sfx.setSfxVol(+el.setsfx.value));
+
+// network-first service worker: home-screen installs pick up every deploy
+// automatically and keep working offline
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js').catch(() => { /* http or old browser */ });
+}
 
 window.__ts = {
   game, player, enemies, bullets, pickups, ripples, camera, input, obstacles,
