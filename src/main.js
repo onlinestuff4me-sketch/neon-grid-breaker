@@ -1767,17 +1767,17 @@ const sfx = (() => {
   async function buildSurface() {
     try {
       const off = new OfflineAudioContext(1, Math.ceil(ctx.sampleRate * 1.5), ctx.sampleRate);
-      const n = Math.floor(off.sampleRate * 0.8);
+      const n = Math.floor(off.sampleRate * 0.9);
       const nb = off.createBuffer(1, n, off.sampleRate);
       const nd = nb.getChannelData(0);
       for (let i = 0; i < n; i++) nd[i] = (Math.random() * 2 - 1) * (1 - i / n);
       const ns = off.createBufferSource();
       ns.buffer = nb;
-      ns.playbackRate.value = 0.55;
+      ns.playbackRate.value = 0.7;
       const nf = off.createBiquadFilter();
-      nf.type = 'bandpass'; nf.frequency.value = 260; nf.Q.value = 0.7;
+      nf.type = 'bandpass'; nf.frequency.value = 700; nf.Q.value = 0.4;
       const ng = off.createGain();
-      ng.gain.value = 0.5;
+      ng.gain.value = 0.6;
       ns.connect(nf).connect(ng); ng.connect(off.destination);
       ns.start(0);
       const buf = await off.startRendering();
@@ -1975,7 +1975,9 @@ const sfx = (() => {
       if (musicFilter) musicFilter.frequency.value = 380 + 17100 * Math.pow(ts, 1.4);
       if (echoWet) echoWet.gain.value = 0.06 + (1 - ts) * 0.48;
       if (ts < 0.5 && lastTs >= 0.5) {          // plunge: pure falling rush, no tone
-        noise(0.8, 260, 0.7, 0.5, 0.55, 0.95);
+        // wide airy band up at whoosh frequencies — narrow low bands read as
+        // a boomy "boop" through the echo, not as moving air
+        noise(0.9, 700, 0.4, 0.6, 0.7, 0.95);
       } else if (ts >= 0.5 && lastTs < 0.5) {   // surface: the plunge, reversed
         if (surfaceBuf) {
           const src = ctx.createBufferSource();
@@ -2420,6 +2422,7 @@ function startWave(n, quiet = false) {   // quiet: the clear card already announ
   }
   sfx.newWave();
   el.endrun.style.display = 'block';
+  el.ammo.style.display = '';
 }
 
 function maxAlive() { return Math.min(2 + Math.floor(game.wave / 2), 5); }
@@ -2437,6 +2440,7 @@ function hitPlayer(ended = false) {
   el.guide.style.opacity = 0;
   el.guide.style.display = 'none';
   el.endrun.style.display = 'none';
+  el.ammo.style.display = 'none';   // the overlay's stats line lands there
   if (!ended) {   // a chosen exit skips the death drama
     el.redflash.style.opacity = 1;
     sfx.die();
@@ -2447,7 +2451,8 @@ function hitPlayer(ended = false) {
     el.overlay.querySelector('h1').innerHTML = ended ? 'RUN<br><em>ENDED</em>' : 'YOU<br><em>DIED</em>';
     el.overlay.querySelector('.sub').textContent = ended ? 'YOU CALLED IT' : 'ONE HIT IS ALL IT TAKES';
     const r = el.overlay.querySelector('.rules');
-    r.innerHTML = `<div class="stats">${game.wave} WAVES · ${game.kills} SHATTERED · BEST ${bestWave} WAVES</div>`;
+    r.innerHTML = `<div class="stats">${game.wave} ${game.wave === 1 ? 'WAVE' : 'WAVES'} · ` +
+      `${game.kills} SHATTERED · BEST ${bestWave} ${bestWave === 1 ? 'WAVE' : 'WAVES'}</div>`;
     r.style.display = 'flex';
     el.scores.style.display = 'none';
     el.menurow.style.display = 'none';
