@@ -1614,17 +1614,25 @@ function onPointerDown(ev) {
     return;
   }
   if (el.htp.style.display === 'flex') {   // how-to modal open
-    el.htp.style.display = 'none';
-    if (ev.target && ev.target.closest && ev.target.closest('#enmlink')) {
-      el.enm.style.display = 'flex';   // hop over to the enemies page
+    if (ev.target && ev.target.closest && ev.target.closest('#htp .htpcard')) {
+      if (ev.target.closest('#enmlink')) {
+        el.htp.style.display = 'none';
+        el.enm.style.display = 'flex';   // hop over to the enemies page
+      }
+      return;   // taps inside the card don't close it — only outside does
     }
+    el.htp.style.display = 'none';
     return;
   }
   if (el.enm.style.display === 'flex') {   // enemies modal open
-    el.enm.style.display = 'none';
-    if (ev.target && ev.target.closest && ev.target.closest('#enmback')) {
-      el.htp.style.display = 'flex';   // back to how-to
+    if (ev.target && ev.target.closest && ev.target.closest('#enm .htpcard')) {
+      if (ev.target.closest('#enmback')) {
+        el.enm.style.display = 'none';
+        el.htp.style.display = 'flex';   // back to how-to
+      }
+      return;
     }
+    el.enm.style.display = 'none';
     return;
   }
   if (game.state === 'menu' || game.state === 'dead' || game.state === 'gameover') {
@@ -1658,6 +1666,10 @@ function onPointerDown(ev) {
       }
       if (ev.target.closest('#scores') || ev.target.closest('.rules')) return;   // reading
     }
+    // on the main menu only TAP TO BEGIN starts a run — a stray tap right
+    // after closing settings must not launch you into a wave
+    if (game.state === 'menu' &&
+        !(ev.target && ev.target.closest && ev.target.closest('.go'))) return;
     advanceFromOverlay();
     return;   // this pointer is never registered, so its release is inert
   }
@@ -1670,6 +1682,7 @@ function onPointerDown(ev) {
     // a long press means "only while held" and releases on lift
     timeBtnPointer = ev.pointerId;
     timeBtnDownAt = performance.now();
+    timeBtnDownX = ev.clientX; timeBtnDownY = ev.clientY;
     timeBtnWasLocked = timeLocked;
     if (!timeLocked) setTimeLocked(true);
     vibrate(8);
@@ -1683,6 +1696,21 @@ function onPointerDown(ev) {
 }
 
 function onPointerMove(ev) {
+  if (ev.pointerId === timeBtnPointer) {
+    // a swipe that starts on the time button is a look flick, not a press —
+    // undo the accidental toggle and hand the pointer over to the look control
+    if (Math.hypot(ev.clientX - timeBtnDownX, ev.clientY - timeBtnDownY) > TIMEBTN_SLIP_PX) {
+      if (!timeBtnWasLocked) setTimeLocked(false);
+      timeBtnPointer = null;
+      input.pointers.set(ev.pointerId, {
+        sx: timeBtnDownX, sy: timeBtnDownY, x: ev.clientX, y: ev.clientY,
+        ox: ev.clientX, oy: ev.clientY, role: 'look', downT: performance.now(),
+      });
+      input.holding = true;
+      applyLook(ev.clientX - timeBtnDownX, ev.clientY - timeBtnDownY);
+    }
+    return;
+  }
   const p = input.pointers.get(ev.pointerId);
   if (!p) return;
   ev.preventDefault();
@@ -1692,6 +1720,9 @@ function onPointerMove(ev) {
     p.role = p.sx < window.innerWidth * 0.5 ? 'move' : 'look';
     p.ox = p.x; p.oy = p.y;         // the stick anchors where the drag begins
     if (p.role === 'move') sprintTo = null;   // manual move cancels a sprint
+    // the tap dead-zone swallowed the first ~18px of the gesture; replay it
+    // (minus this event's dx/dy, applied below) so fast flicks aren't blunted
+    if (p.role === 'look') applyLook(p.x - dx - p.sx, p.y - dy - p.sy);
   }
   if (p.role === 'move') {
     let ddx = p.x - p.ox, ddy = p.y - p.oy;
@@ -1705,12 +1736,16 @@ function onPointerMove(ev) {
     input.stickY = ddy / STICK_RADIUS;
     stickUI(true, p.ox, p.oy, p.x, p.y);
   } else if (p.role === 'look') {
-    const w = window.innerWidth;
-    player.yaw -= (dx / w) * LOOK_SENS;
-    player.pitch -= (dy / w) * LOOK_SENS;
-    player.pitch = Math.min(Math.max(player.pitch, -1.2), 1.2);
-    input.lookIdle = 0;
+    applyLook(dx, dy);
   }
+}
+
+function applyLook(dx, dy) {
+  const w = window.innerWidth;
+  player.yaw -= (dx / w) * LOOK_SENS;
+  player.pitch -= (dy / w) * LOOK_SENS;
+  player.pitch = Math.min(Math.max(player.pitch, -1.2), 1.2);
+  input.lookIdle = 0;
 }
 
 function releasePointer(ev, isTapEligible) {
@@ -1738,7 +1773,9 @@ function releasePointer(ev, isTapEligible) {
 }
 
 let timeBtnPointer = null, timeBtnDownAt = 0, timeBtnWasLocked = false;
+let timeBtnDownX = 0, timeBtnDownY = 0;
 const TIMEBTN_TAP_MS = 280;
+const TIMEBTN_SLIP_PX = 26;   // slide this far off the button = look gesture
 
 function onPointerUp(ev) {
   sfx.init();   // some browsers only allow audio resume on the gesture's END
@@ -1802,7 +1839,7 @@ function setHaptics(on) {
 // ---------------------------------------------------------------------------
 const sfx = (() => {
   let ctx = null, master = null, sfxBus = null;
-  let echoIn = null, echoWet = null, echoSendBus = null;
+  let echoIn = null, echoWet = null, echoSendBus = null, voiceBus = null;
   let musicSrc = null, musicGain = null, musicFilter = null;
   let musicRate = 1, lastTs = 1, building = false;
   let muted = false;
@@ -1855,7 +1892,7 @@ const sfx = (() => {
   let waveWords = 0;       // kill words spoken this wave (max 2: TIME then SHATTER)
 
   // returns the played duration in seconds (truthy), or false if no sample
-  function playSample(name, { rate = 1, send = 0.2, gainMul = 1, fadeAfter = 0 } = {}) {
+  function playSample(name, { rate = 1, send = 0.2, gainMul = 1, fadeAfter = 0, voice = false } = {}) {
     const s = samples[name];
     if (!ctx || !s) return false;
     const src = ctx.createBufferSource();
@@ -1864,7 +1901,16 @@ const sfx = (() => {
     const g = ctx.createGain();
     g.gain.value = s.gain * gainMul;
     src.connect(g);
-    route(g, send);
+    if (voice) {
+      g.connect(voiceBus);
+      if (send > 0) {
+        const sg = ctx.createGain();
+        sg.gain.value = send;
+        g.connect(sg); sg.connect(echoSendBus);
+      }
+    } else {
+      route(g, send);
+    }
     src.start(ctx.currentTime);
     if (fadeAfter > 0) {   // long tails get eased out so overlaps don't pile up
       const t = ctx.currentTime + fadeAfter / rate;
@@ -1943,6 +1989,8 @@ const sfx = (() => {
     comp.connect(ctx.destination);
     sfxBus = ctx.createGain();
     sfxBus.connect(master);
+    voiceBus = ctx.createGain();   // the announcer rides above the duck
+    voiceBus.connect(master);
     // feedback echo bus — dry at full speed, cavernous in bullet time
     echoIn = ctx.createGain();
     echoSendBus = ctx.createGain();   // ducked with sfxBus (menu silences it)
@@ -2169,7 +2217,7 @@ const sfx = (() => {
       if (waveWords === 0 && now < waveVoEndMs + 5000) return null;
       if (now < voUntilMs) return null;
       const key = waveWords === 0 ? 'time' : 'shatterw';
-      const d = playSample(key, { rate: VOICE.rate, send: VOICE.send });
+      const d = playSample(key, { rate: VOICE.rate, send: VOICE.send, voice: true });
       if (d) {
         waveWords++;
         voUntilMs = now + d * 1000 + 150;
@@ -2217,8 +2265,11 @@ const sfx = (() => {
       // the title screen keeps the music but silences the demo fight's SFX
       if (sfxBus) {
         const want = (game.state === 'menu' ? 0 : 1) * sfxVol;
-        sfxBus.gain.value += (want - sfxBus.gain.value) * Math.min(dt * 8, 1);
+        // quick, smooth duck under the announcer so voice lines cut through
+        const duckF = performance.now() < voUntilMs ? 0.3 : 1;
+        sfxBus.gain.value += (want * duckF - sfxBus.gain.value) * Math.min(dt * 8, 1);
         if (echoSendBus) echoSendBus.gain.value = sfxBus.gain.value;
+        if (voiceBus) voiceBus.gain.value += (want - voiceBus.gain.value) * Math.min(dt * 8, 1);
       }
       // slower easing = a long, audible turntable-style pitch glide
       const k = Math.min(dt * 4.5, 1);
@@ -2409,7 +2460,7 @@ const sfx = (() => {
     },
     wave() {   // the wave VO, played the moment its banner card appears
       const now = performance.now();
-      const d = playSample('nextwave', { rate: 0.8, send: 0.25 });
+      const d = playSample('nextwave', { rate: 0.8, send: 0.25, voice: true });
       if (!d) tone(440, 880, 0.18, 0.2, 'triangle');
       waveVoEndMs = now + (d ? d * 1000 : 400);
       voUntilMs = Math.max(voUntilMs, waveVoEndMs);
@@ -3199,7 +3250,7 @@ if ('serviceWorker' in navigator) {
 window.__ts = {
   game, player, enemies, bullets, pickups, ripples, camera, input, obstacles,
   sprint: () => sprintTo,
-  audio: () => sfx.debug(),
+  audio: () => sfx.debug(), sfx,
   slow: () => ({ bank: +slowBank.toFixed(2), locked: timeLocked, mode: timeMode }),
   fire: playerFire, setWeapon, spawnEnemy, spawnPickup,
   shot: (px, py, pz, dx, dy, dz, fromPlayer) =>
