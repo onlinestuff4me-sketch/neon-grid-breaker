@@ -1790,6 +1790,8 @@ const sfx = (() => {
   let surfaceBuf = null;   // synth fallback resume (reversed synth plunge)
   let resumeBuf = null;    // the timeslow recording reversed — preferred resume
   let resumeRetryT = 0;    // throttle for stuck-context resume attempts
+  let slowPhase = false;   // stinger hysteresis: are we in the slow regime?
+  let slowFromCombat = false;   // did this slow phase begin during combat?
   let whooshBuf = null;    // shared 2s noise loop for all bullet whooshes
   let whooshCount = 0;
   const WHOOSH_MAX = 12;   // concurrent whoosh voices — plenty, and bounded
@@ -2159,7 +2161,16 @@ const sfx = (() => {
       if (musicSrc) musicSrc.playbackRate.value = musicRate;
       if (musicFilter) musicFilter.frequency.value = 380 + 17100 * Math.pow(ts, 1.4);
       if (echoWet) echoWet.gain.value = 0.06 + (1 - ts) * 0.48;
-      if (ts < 0.5 && lastTs >= 0.5) {          // plunge: the timeslow recording
+      // stinger state machine with hysteresis (slow below 0.45, fast above
+      // 0.55). The menu idles at exactly 0.5, and death/menu transitions move
+      // timeScale too — stingers only play for transitions that BEGAN in
+      // combat, so run starts and retries stay silent.
+      const inCombat = game.state === 'play' || game.state === 'intro';
+      const enteringSlow = ts < 0.45 && !slowPhase;
+      const leavingSlow = ts > 0.55 && slowPhase;
+      if (enteringSlow) { slowPhase = true; slowFromCombat = inCombat; }
+      if (leavingSlow) slowPhase = false;
+      if (enteringSlow && inCombat) {   // plunge: the timeslow recording
         const s = samples.timeslow;
         if (s) {
           // tape slowing down: the playback rate eases from 1 to half speed,
@@ -2177,7 +2188,7 @@ const sfx = (() => {
         } else {
           noise(0.9, 700, 0.4, 0.6, 0.7, 0.95);
         }
-      } else if (ts >= 0.5 && lastTs < 0.5) {   // surface: the plunge, reversed
+      } else if (leavingSlow && inCombat && slowFromCombat) {   // surface: the plunge, reversed
         if (resumeBuf) {
           // a record spinning back up: just the soft rev, quick and clean
           const src = ctx.createBufferSource();
@@ -2216,6 +2227,7 @@ const sfx = (() => {
         master: master ? +master.gain.value.toFixed(2) : 0 } : null;
     },
     shot(weapon) {
+      if (game.state === 'menu') return;   // demo stays silent
       const r = selfRate();
       if (weapon === 'shotgun') {
         // pitched down for depth, with a synth sub-thump under the blast
@@ -2234,7 +2246,8 @@ const sfx = (() => {
         noise(0.14, 1600, 0.7, 0.5, r, 0.25); tone(320, 70, 0.1, 0.25, 'square', r);
       }
     },
-    clank() {   // armor shrugging off a body shot
+    clank() {
+      if (game.state === 'menu') return;   // demo stays silent   // armor shrugging off a body shot
       noise(0.06, 3200, 2.2, 0.45, 1, 0.25);
       tone(950, 320, 0.11, 0.3, 'square', 1, 0.25);
     },
@@ -2242,7 +2255,7 @@ const sfx = (() => {
     // noise. Volume tracks your live distance to the round; pitch rides a
     // doppler shift, so it climbs as it closes and sinks as it passes.
     attachWhoosh() {
-      if (!ctx || whooshCount >= WHOOSH_MAX) return null;
+      if (!ctx || whooshCount >= WHOOSH_MAX || game.state === 'menu') return null;
       if (!whooshBuf) {
         const n = ctx.sampleRate * 2;
         whooshBuf = ctx.createBuffer(1, n, ctx.sampleRate);
@@ -2297,7 +2310,8 @@ const sfx = (() => {
         h.src.stop(ctx.currentTime + 0.15);
       } catch { /* already stopped */ }
     },
-    pickup() {   // the pump-action rack when you grab a gun
+    pickup() {
+      if (game.state === 'menu') return;   // demo stays silent   // the pump-action rack when you grab a gun
       if (playSample('pickup', { send: 0.12 })) return;
       noise(0.035, 1900, 1.4, 0.5, 1, 0.08, 0);
       noise(0.1, 750, 0.9, 0.5, 1, 0.12, 0.09);
@@ -2305,19 +2319,22 @@ const sfx = (() => {
       tone(230, 150, 0.09, 0.35, 'square', 1, 0.1, 0.21);
     },
     enemyShot() {
+      if (game.state === 'menu') return;   // demo stays silent
       const r = worldRate();
       const loud = 1 + (1 - timeScale) * 0.7;
       noise(0.2, 700, 0.8, 0.55 * loud, r, 0.5);
       tone(190, 45, 0.16, 0.3 * loud, 'square', r, 0.45);
     },
-    shatter() {   // heavy glass breaks, cycling 1-2-3 so kills never repeat
+    shatter() {
+      if (game.state === 'menu') return;   // demo stays silent   // heavy glass breaks, cycling 1-2-3 so kills never repeat
       const r = worldRate();
       shatterIdx = (shatterIdx % 3) + 1;
       // heavy echo send so kills ring out like the rest of the world
       if (playSample('shatter' + shatterIdx, { rate: r, send: 0.65, fadeAfter: 2.0 })) return;
       noise(0.5, 2600, 0.4, 0.5, r, 0.35); noise(0.35, 4200, 0.6, 0.3, r, 0.35);
     },
-    die() {   // slowed way down: a long, deep grind as the run ends
+    die() {
+      if (game.state === 'menu') return;   // demo stays silent   // slowed way down: a long, deep grind as the run ends
       tone(220, 30, 0.9, 0.4, 'sawtooth', 0.55, 0.5);
       noise(0.6, 400, 0.8, 0.4, 0.5, 0.5);
     },
@@ -2328,10 +2345,23 @@ const sfx = (() => {
       waveVoEndMs = now + (d ? d * 1000 : 400);
       voUntilMs = Math.max(voUntilMs, waveVoEndMs);
     },
-    alert() { tone(1100, 500, 0.3, 0.22, 'square', 1, 0.3); },   // sniper warning
-    lob() { const r = worldRate(); noise(0.16, 420, 1.1, 0.28, r, 0.3); },
-    rocket() { const r = worldRate(); noise(0.5, 600, 0.7, 0.5, r, 0.5); tone(240, 90, 0.4, 0.2, 'sawtooth', r, 0.4); },
+    alert() {   // sniper warning
+      if (game.state === 'menu') return;   // demo stays silent
+      tone(1100, 500, 0.3, 0.22, 'square', 1, 0.3);
+    },
+    lob() {
+      if (game.state === 'menu') return;   // demo stays silent
+      const r = worldRate();
+      noise(0.16, 420, 1.1, 0.28, r, 0.3);
+    },
+    rocket() {
+      if (game.state === 'menu') return;   // demo stays silent
+      const r = worldRate();
+      noise(0.5, 600, 0.7, 0.5, r, 0.5);
+      tone(240, 90, 0.4, 0.2, 'sawtooth', r, 0.4);
+    },
     boom() {
+      if (game.state === 'menu') return;   // demo stays silent
       const r = worldRate();
       if (playSample('explosion', { rate: r, send: 0.4, fadeAfter: 2.2 })) return;
       noise(0.6, 180, 0.5, 0.85, r, 0.55);
@@ -2500,6 +2530,7 @@ const el = {
   htp: document.getElementById('htp'),
   enm: document.getElementById('enm'),
   menurow: document.getElementById('menurow'),
+  moderow: document.getElementById('moderow'),
 };
 renderScores();
 
@@ -2563,6 +2594,7 @@ function showMenu() {
   el.overlay.querySelector('.go').innerHTML = MENU_HTML.go;
   el.overlay.querySelector('.rules').style.display = 'none';
   el.menurow.style.display = 'flex';
+  el.moderow.style.display = 'flex';
   renderScores();
   updateSndBtn();
   el.menubtn.style.display = 'none';
@@ -2722,6 +2754,7 @@ function hitPlayer(ended = false) {
     r.style.display = 'flex';
     el.scores.style.display = 'none';
     el.menurow.style.display = 'none';
+    el.moderow.style.display = 'none';   // keep the stats line's row clear
     el.overlay.querySelector('.go').textContent = 'TAP TO RETRY WAVE';
     el.menubtn.style.display = 'inline-block';
     el.overlay.classList.remove('hidden');
@@ -2971,6 +3004,7 @@ function frame(now) {
         performance.now() >= killFlashUntil) {   // let the final kill's word land first
       game.state = 'clear';
       game.stateT = 0;
+      setTimeLocked(false);   // the break runs at full speed; button resets
       // one readable card for the whole break — the next wave starts quietly
       const next = game.wave + 1;
       const nextArena = Math.floor((next - 1) / 3) % LAYOUTS.length !== currentLayout;
