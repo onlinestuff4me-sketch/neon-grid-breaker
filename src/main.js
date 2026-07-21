@@ -1064,14 +1064,16 @@ function spawnEnemy(type = 'gunner') {
       z + (Math.random() - 0.5) * part[5] * sxz
     );
   };
-  const N_INIT = 12, N_LATE = 58;
+  // tuner-approved: N_INIT 6, N_LATE 150, WINDOW 0.9T, CURVE 0.35,
+  // TRAVEL 0.06s, REVEAL 0.95, RADIUS 1.1m
+  const N_INIT = 6, N_LATE = 150;
   for (let i = 0; i < N_INIT + N_LATE; i++) {
     const late = i >= N_INIT;
     const mesh = new THREE.Mesh(shardGeo, Math.random() < 0.75 ? MAT_RED : MAT_DARKRED);
     const size = late ? 0.35 + Math.random() * 0.4 : 0.6 + Math.random() * 0.6;
     mesh.scale.setScalar(size);
     const a = Math.random() * Math.PI * 2;
-    const r = 1.4 + Math.random() * 1.8;
+    const r = 1.1 + Math.random() * 1.8;
     const from = new THREE.Vector3(x + Math.sin(a) * r, 0.2 + Math.random() * 2.6, z + Math.cos(a) * r);
     const to = bodyPoint();
     mesh.position.copy(from);
@@ -1079,10 +1081,10 @@ function spawnEnemy(type = 'gunner') {
     scene.add(mesh);
     shards.push({
       mesh, from, to, size,
-      // accelerating schedule: sqrt spacing packs most arrivals into the
-      // back half, so the figure fills in faster and faster
-      activeAt: late ? ASSEMBLE_T * 0.62 * Math.sqrt((i - N_INIT) / N_LATE) : 0,
-      travel: ASSEMBLE_T * (late ? 0.3 : 0.48),
+      // hard-accelerating schedule (curve 0.35): a trickle at first, then a
+      // torrent — the figure floods in right before the reveal
+      activeAt: late ? ASSEMBLE_T * 0.9 * Math.pow((i - N_INIT) / N_LATE, 0.35) : 0,
+      travel: late ? 0.06 : ASSEMBLE_T * 0.48,
       spin: new THREE.Vector3((Math.random() - 0.5) * 10, (Math.random() - 0.5) * 10, (Math.random() - 0.5) * 10),
     });
   }
@@ -1112,7 +1114,7 @@ function spawnEnemy(type = 'gunner') {
 }
 
 const ASSEMBLE_T = 0.25;      // seconds (world time) for a spawn to pull together
-const ASSEMBLE_REVEAL = 0.75; // fraction of T when the body appears under the
+const ASSEMBLE_REVEAL = 0.95; // fraction of T when the body appears under the
                               // shards, which then shrink into its surface —
                               // the swap reads as a settle, not a pop
 
@@ -1124,6 +1126,9 @@ function removeEnemyShards(e) {
 
 function killEnemy(i, impulseDir) {
   const e = enemies[i];
+  if (timeMode === 'toggle' && (game.state === 'play' || game.state === 'intro')) {
+    slowBank = Math.min(SLOWMO.cap, slowBank + SLOWMO.bonus);   // kills buy time
+  }
   spawnShatter(e.pos, impulseDir);
   const drop = ENEMY_TYPES[e.type].drop;
   if (typeof drop === 'string') spawnPickup(e.pos, drop);           // named loot
@@ -2401,15 +2406,28 @@ let timeMode = 'classic';
 try { if (localStorage.getItem('timeshard_mode') === 'toggle') timeMode = 'toggle'; } catch { /* private mode */ }
 let timeLocked = false;
 
+// Button mode runs on a slow-mo bank: each wave charges it to BASE seconds,
+// it drains in real time while locked, and every kill pours BONUS back in.
+// Empty bank -> time snaps back (the usual resume sound/visuals fire).
+const SLOWMO = { base: 5, bonus: 2, cap: 10, drain: 1 };
+let slowBank = SLOWMO.base;
+
 function setTimeLocked(v) {
+  if (v && timeMode === 'toggle' && slowBank <= 0) return;   // dry tank
   timeLocked = v;
   el.timebtn.classList.toggle('locked', v);
 }
 function updateModeUI() {
   el.modelink.textContent = 'TIME: ' + (timeMode === 'toggle' ? 'BUTTON' : 'CLASSIC');
   const inRun = game.state === 'play' || game.state === 'intro' || game.state === 'clear';
-  el.timebtn.style.display = timeMode === 'toggle' && inRun ? 'flex' : 'none';
+  const on = timeMode === 'toggle' && inRun;
+  el.timebtn.style.display = on ? 'flex' : 'none';
+  el.slowmeter.style.display = on ? 'block' : 'none';
   el.gtime.style.display = timeMode === 'toggle' ? '' : 'none';
+}
+function updateSlowMeter() {
+  el.slowfill.style.width = Math.max(0, Math.min(1, slowBank / SLOWMO.cap)) * 100 + '%';
+  el.timebtn.classList.toggle('empty', slowBank <= 0);
 }
 let demoT = 0, demoSpawnT = 0.3, demoKillT = 4;   // menu attract-mode clocks
 
@@ -2421,6 +2439,8 @@ const el = {
   timebtn: document.getElementById('timebtn'),
   modelink: document.getElementById('modelink'),
   gtime: document.getElementById('gtime'),
+  slowmeter: document.getElementById('slowmeter'),
+  slowfill: document.getElementById('slowfill'),
   flash: document.getElementById('flash'),
   banner: document.getElementById('banner'),
   tint: document.getElementById('tint'),
@@ -2621,6 +2641,8 @@ function startWave(n, quiet = false) {   // quiet: the clear card already announ
   el.endrun.style.display = 'block';
   el.ammo.style.display = '';
   setTimeLocked(false);   // each wave starts at full speed in button mode
+  slowBank = Math.max(slowBank, SLOWMO.base);   // fresh charge every wave
+  updateSlowMeter();
   updateModeUI();
 }
 
@@ -2747,6 +2769,17 @@ function frame(now) {
   // --- time scale: frozen while a finger is down — but time moves (a little)
   // when YOU move, so dodging costs the world a few frames
   const playing = game.state === 'play' || game.state === 'intro';
+  // button mode: the bank drains in real time while locked; empty = snap back
+  if (timeMode === 'toggle' && playing) {
+    if (timeLocked) {
+      slowBank -= dt * SLOWMO.drain;
+      if (slowBank <= 0) {
+        slowBank = 0;
+        setTimeLocked(false);   // time rushes back — resume SFX fires as usual
+      }
+    }
+    updateSlowMeter();
+  }
   let target = TIME_FULL;
   // classic: any touch slows time. button mode: only the time button does.
   const slowActive = timeMode === 'toggle' ? timeLocked : input.holding;
@@ -2960,6 +2993,7 @@ window.__ts = {
   game, player, enemies, bullets, pickups, ripples, camera, input, obstacles,
   sprint: () => sprintTo,
   audio: () => sfx.debug(),
+  slow: () => ({ bank: +slowBank.toFixed(2), locked: timeLocked, mode: timeMode }),
   fire: playerFire, setWeapon, spawnEnemy, spawnPickup,
   shot: (px, py, pz, dx, dy, dz, fromPlayer) =>
     spawnBullet(new THREE.Vector3(px, py, pz), new THREE.Vector3(dx, dy, dz).normalize(), fromPlayer),

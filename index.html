@@ -77,6 +77,16 @@
            bottom:calc(env(safe-area-inset-bottom, 0px) + 10vh + 18px);
            font-size:13px; font-weight:900; letter-spacing:.2em; color:#ff2d1a; }
 
+  /* slow-mo bank meter (button mode): drains while locked, kills refill it */
+  #slowmeter { display:none; position:fixed; left:16px; right:16px;
+               top:calc(env(safe-area-inset-top, 0px) + 38px); height:4px;
+               background:rgba(22,24,29,.16); border-radius:2px; z-index:7;
+               pointer-events:none; }
+  #slowfill { height:100%; width:50%; background:#ff2d1a; border-radius:2px; }
+  body.slowmo #slowmeter { background:rgba(238,240,243,.25); }
+  #timebtn.empty { border-color:#9aa0ab; opacity:.55; }
+  #timebtn.empty::before { background:#9aa0ab; }
+
   /* "LOOK. OUT." retarget warning */
   #warn { position:absolute; left:0; right:0; top:34%; text-align:center; pointer-events:none; }
   .warnword { display:inline-block; margin:0 .12em; font-size:min(11vw,52px); font-weight:900;
@@ -210,6 +220,7 @@
   <div id="ammo">PISTOL · ∞</div>
   <div id="endrun">END RUN</div>
   <div id="timebtn"></div>
+  <div id="slowmeter"><div id="slowfill"></div></div>
 </div>
 
 <div id="tint"></div>
