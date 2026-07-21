@@ -1621,6 +1621,7 @@ const sfx = (() => {
     shatter2: ['assets/sfx/shatter2.mp3', 0.8],
     shatter3: ['assets/sfx/shatter3.mp3', 0.8],
     nextwave: ['assets/sfx/nextwave.mp3', 1.6],
+    timeslow: ['assets/sfx/timeslow.mp3', 5.0],   // very quiet master -> boosted
     time: ['assets/sfx/time.mp3', 2.6],
     shard: ['assets/sfx/shard.mp3', 2.6],
   };
@@ -1632,7 +1633,8 @@ const sfx = (() => {
       .catch(() => null);
   }
   let shatterIdx = 0;      // the three glass breaks cycle so kills never repeat
-  let surfaceBuf = null;   // the time plunge, reversed — played when time resumes
+  let surfaceBuf = null;   // synth fallback resume (reversed synth plunge)
+  let resumeBuf = null;    // the timeslow recording reversed — preferred resume
   let resumeRetryT = 0;    // throttle for stuck-context resume attempts
   let whooshBuf = null;    // shared 2s noise loop for all bullet whooshes
   let whooshCount = 0;
@@ -1756,14 +1758,32 @@ const sfx = (() => {
     for (const [name, [, gainV]] of Object.entries(SAMPLE_SRC)) {
       sampleFetch[name]
         .then((ab) => (ab ? ctx.decodeAudioData(ab) : null))
-        .then((buf) => { if (buf) samples[name] = { buf, gain: gainV }; })
+        .then((buf) => {
+          if (!buf) return;
+          samples[name] = { buf, gain: gainV };
+          if (name === 'timeslow') resumeBuf = reverseBuffer(buf);
+        })
         .catch(() => { /* keep the synth fallback */ });
     }
     buildSurface();
   }
 
+  // Flip a decoded buffer end-for-end, with a short fade where the original
+  // attack lands (now the tail) so it never ends on a click.
+  function reverseBuffer(buf) {
+    const r = ctx.createBuffer(buf.numberOfChannels, buf.length, buf.sampleRate);
+    for (let c = 0; c < buf.numberOfChannels; c++) {
+      const s = buf.getChannelData(c), d = r.getChannelData(c);
+      for (let i = 0; i < s.length; i++) d[i] = s[s.length - 1 - i];
+      const outN = Math.floor(buf.sampleRate * 0.06);
+      for (let i = 0; i < outN; i++) d[d.length - 1 - i] *= i / outN;
+    }
+    return r;
+  }
+
   // Render the slow-mo plunge offline, then flip it: the same sound played
   // backwards becomes the "time resuming" cue. Noise-only — no tonal "boop".
+  // (Synth fallback — the timeslow recording is preferred when it loads.)
   async function buildSurface() {
     try {
       const off = new OfflineAudioContext(1, Math.ceil(ctx.sampleRate * 1.5), ctx.sampleRate);
@@ -1974,12 +1994,38 @@ const sfx = (() => {
       if (musicSrc) musicSrc.playbackRate.value = musicRate;
       if (musicFilter) musicFilter.frequency.value = 380 + 17100 * Math.pow(ts, 1.4);
       if (echoWet) echoWet.gain.value = 0.06 + (1 - ts) * 0.48;
-      if (ts < 0.5 && lastTs >= 0.5) {          // plunge: pure falling rush, no tone
-        // wide airy band up at whoosh frequencies — narrow low bands read as
-        // a boomy "boop" through the echo, not as moving air
-        noise(0.9, 700, 0.4, 0.6, 0.7, 0.95);
+      if (ts < 0.5 && lastTs >= 0.5) {          // plunge: the timeslow recording
+        const s = samples.timeslow;
+        if (s) {
+          // tape slowing down: the playback rate eases from 1 to half speed,
+          // dragging the ending out longer and deeper, drenched in echo
+          const src = ctx.createBufferSource();
+          src.buffer = s.buf;
+          const t0 = ctx.currentTime;
+          src.playbackRate.setValueAtTime(1, t0);
+          src.playbackRate.exponentialRampToValueAtTime(0.5, t0 + s.buf.duration * 1.5);
+          const g = ctx.createGain();
+          g.gain.value = s.gain;
+          src.connect(g);
+          route(g, 0.95);
+          src.start(t0);
+        } else {
+          noise(0.9, 700, 0.4, 0.6, 0.7, 0.95);
+        }
       } else if (ts >= 0.5 && lastTs < 0.5) {   // surface: the plunge, reversed
-        if (surfaceBuf) {
+        if (resumeBuf) {
+          // a record spinning back up: reversed recording, fast and accelerating
+          const src = ctx.createBufferSource();
+          src.buffer = resumeBuf;
+          const t0 = ctx.currentTime;
+          src.playbackRate.setValueAtTime(1.6, t0);
+          src.playbackRate.exponentialRampToValueAtTime(3.2, t0 + 0.7);
+          const g = ctx.createGain();
+          g.gain.value = (samples.timeslow ? samples.timeslow.gain : 1) * 1.1;
+          src.connect(g);
+          route(g, 0.5);
+          src.start(t0);
+        } else if (surfaceBuf) {
           const src = ctx.createBufferSource();
           src.buffer = surfaceBuf;
           const g = ctx.createGain();
