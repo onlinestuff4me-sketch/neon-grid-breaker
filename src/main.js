@@ -1621,7 +1621,7 @@ const sfx = (() => {
     shatter2: ['assets/sfx/shatter2.mp3', 0.8],
     shatter3: ['assets/sfx/shatter3.mp3', 0.8],
     nextwave: ['assets/sfx/nextwave.mp3', 1.6],
-    timeslow: ['assets/sfx/timeslow.mp3', 5.0],   // very quiet master -> boosted
+    timeslow: ['assets/sfx/timeslow.mp3', 3.4],   // very quiet master -> boosted
     time: ['assets/sfx/time.mp3', 2.6],
     shard: ['assets/sfx/shard.mp3', 2.6],
   };
@@ -1761,22 +1761,28 @@ const sfx = (() => {
         .then((buf) => {
           if (!buf) return;
           samples[name] = { buf, gain: gainV };
-          if (name === 'timeslow') resumeBuf = reverseBuffer(buf);
+          if (name === 'timeslow') resumeBuf = buildResume(buf);
         })
         .catch(() => { /* keep the synth fallback */ });
     }
     buildSurface();
   }
 
-  // Flip a decoded buffer end-for-end, with a short fade where the original
-  // attack lands (now the tail) so it never ends on a click.
-  function reverseBuffer(buf) {
-    const r = ctx.createBuffer(buf.numberOfChannels, buf.length, buf.sampleRate);
+  // The resume keeps ONLY the recording's decay segment (1.4s-2.2s),
+  // reversed: a soft rev-up with the loud body of the clip dropped entirely.
+  function buildResume(buf) {
+    const sr = buf.sampleRate;
+    const a = Math.min(Math.floor(sr * 1.4), buf.length - 1);
+    const b = Math.min(Math.floor(sr * 2.2), buf.length);
+    const n = Math.max(b - a, sr * 0.2);
+    const r = ctx.createBuffer(buf.numberOfChannels, n, sr);
     for (let c = 0; c < buf.numberOfChannels; c++) {
       const s = buf.getChannelData(c), d = r.getChannelData(c);
-      for (let i = 0; i < s.length; i++) d[i] = s[s.length - 1 - i];
-      const outN = Math.floor(buf.sampleRate * 0.06);
-      for (let i = 0; i < outN; i++) d[d.length - 1 - i] *= i / outN;
+      for (let i = 0; i < n; i++) d[i] = s[Math.max(b - 1 - i, 0)];
+      const inN = Math.floor(sr * 0.02);
+      for (let i = 0; i < inN; i++) d[i] *= i / inN;
+      const outN = Math.floor(sr * 0.08);
+      for (let i = 0; i < outN; i++) d[n - 1 - i] *= i / outN;
     }
     return r;
   }
@@ -2014,14 +2020,14 @@ const sfx = (() => {
         }
       } else if (ts >= 0.5 && lastTs < 0.5) {   // surface: the plunge, reversed
         if (resumeBuf) {
-          // a record spinning back up: reversed recording, fast and accelerating
+          // a record spinning back up: just the soft rev, quick and clean
           const src = ctx.createBufferSource();
           src.buffer = resumeBuf;
           const t0 = ctx.currentTime;
-          src.playbackRate.setValueAtTime(1.6, t0);
-          src.playbackRate.exponentialRampToValueAtTime(3.2, t0 + 0.7);
+          src.playbackRate.setValueAtTime(1.4, t0);
+          src.playbackRate.exponentialRampToValueAtTime(2.4, t0 + 0.5);
           const g = ctx.createGain();
-          g.gain.value = (samples.timeslow ? samples.timeslow.gain : 1) * 1.1;
+          g.gain.value = samples.timeslow ? samples.timeslow.gain : 1;
           src.connect(g);
           route(g, 0.5);
           src.start(t0);
