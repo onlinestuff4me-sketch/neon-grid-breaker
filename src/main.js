@@ -1,4 +1,4 @@
-// TIMESHARD — a first-person time-manipulation arcade shooter for portrait mobile.
+// TIME SHATTER — a first-person time-manipulation arcade shooter for portrait mobile.
 //
 // Core mechanic: time only flows when your finger is off the screen.
 //   HOLD + DRAG  -> time freezes (~5%), look around and aim
@@ -1585,14 +1585,24 @@ function onPointerDown(ev) {
         el.sethaptics.classList.toggle('on', hapticsOn);
         vibrate(15);   // demo thump so the toggle speaks for itself
       }
+      if (ev.target.closest && ev.target.closest('#modelink')) {
+        timeMode = timeMode === 'toggle' ? 'classic' : 'toggle';
+        try { localStorage.setItem('timeshard_mode', timeMode); } catch { /* private mode */ }
+        updateModeUI();
+      }
       return;   // taps inside the card (incl. sliders) don't close it
     }
     el.settings.style.display = 'none';   // tap outside closes
+    if (game.state === 'paused') el.pausemenu.style.display = 'flex';
     return;
   }
   if (game.state === 'paused') {
     if (ev.target && ev.target.closest) {
-      if (ev.target.closest('#psettings')) { openSettings(); return; }
+      if (ev.target.closest('#psettings')) {
+        el.pausemenu.style.display = 'none';   // one card at a time
+        openSettings();
+        return;
+      }
       if (ev.target.closest('#pendrun')) {
         el.pausemenu.style.display = 'none';
         game.state = game.pausedFrom || 'play';
@@ -1631,17 +1641,13 @@ function onPointerDown(ev) {
         return;
       }
       if (ev.target.closest('#howtolink')) {   // open the how-to modal
+        document.getElementById('htptime').textContent =
+          timeMode === 'toggle' ? 'TIME BUTTON — stops time' : 'HOLD — freezes time';
         el.htp.style.display = 'flex';
         return;
       }
       if (ev.target.closest('#setlink')) {
         openSettings();
-        return;
-      }
-      if (ev.target.closest('#modelink')) {   // classic hold vs time button
-        timeMode = timeMode === 'toggle' ? 'classic' : 'toggle';
-        try { localStorage.setItem('timeshard_mode', timeMode); } catch { /* private mode */ }
-        updateModeUI();
         return;
       }
       const pill = ev.target.closest('.scpill');
@@ -1824,7 +1830,7 @@ const sfx = (() => {
     nextwave: ['assets/sfx/nextwave.mp3', 1.6],
     timeslow: ['assets/sfx/timeslow.mp3', 3.4],   // very quiet master -> boosted
     time: ['assets/sfx/time.mp3', 2.6],
-    shard: ['assets/sfx/shard.mp3', 2.6],
+    shatterw: ['assets/sfx/shatterword.mp3', 1.7],
   };
   const sampleFetch = {};
   const samples = {};
@@ -1844,7 +1850,7 @@ const sfx = (() => {
   const WHOOSH_MAX = 12;   // concurrent whoosh voices — plenty, and bounded
   let voUntilMs = 0;       // a voice line is playing until then — never overlap
   let waveVoEndMs = 0;     // when the wave-intro VO finishes
-  let waveWords = 0;       // kill words spoken this wave (max 2: TIME then SHARD)
+  let waveWords = 0;       // kill words spoken this wave (max 2: TIME then SHATTER)
 
   // returns the played duration in seconds (truthy), or false if no sample
   function playSample(name, { rate = 1, send = 0.2, gainMul = 1, fadeAfter = 0 } = {}) {
@@ -2149,10 +2155,10 @@ const sfx = (() => {
     init,
     // called every frame: tape-slow the music, close the filter, open the echo
     // the announcer: a low, slow synthesized voice speaking the kill words
-    newWave() { waveWords = 0; },   // called at wave start: re-arm TIME + SHARD
+    newWave() { waveWords = 0; },   // called at wave start: re-arm TIME + SHATTER
     say() {
       // The announcer speaks exactly twice per wave — TIME for the first
-      // eligible kill, SHARD for the next — and never talks over itself or
+      // eligible kill, SHATTER for the next — and never talks over itself or
       // the wave VO (the first word also waits 5s after the wave VO ends).
       // Returns the word spoken (the kill flash shows only when it did).
       if (muted) return null;
@@ -2160,16 +2166,16 @@ const sfx = (() => {
       if (waveWords >= 2) return null;
       if (waveWords === 0 && now < waveVoEndMs + 5000) return null;
       if (now < voUntilMs) return null;
-      const key = waveWords === 0 ? 'time' : 'shard';
+      const key = waveWords === 0 ? 'time' : 'shatterw';
       const d = playSample(key, { send: 0.25 });
       if (d) {
         waveWords++;
         voUntilMs = now + d * 1000 + 150;
-        return key.toUpperCase();
+        return key === 'shatterw' ? 'SHATTER' : 'TIME';
       }
       if (!('speechSynthesis' in window)) return null;
       try {   // TTS fallback, same quota rules
-        const u = new SpeechSynthesisUtterance(key + '.');
+        const u = new SpeechSynthesisUtterance((key === 'shatterw' ? 'shatter' : key) + '.');
         u.rate = 0.75;
         u.pitch = 0.3;
         u.volume = 1;
@@ -2177,7 +2183,7 @@ const sfx = (() => {
         speechSynthesis.speak(u);
         waveWords++;
         voUntilMs = now + 1200;
-        return key.toUpperCase();
+        return key === 'shatterw' ? 'SHATTER' : 'TIME';
       } catch { return null; }
     },
     setMuted(m) {
@@ -2536,8 +2542,8 @@ function composeWave(n) {
 let timeScale = 1;
 
 // --- time-control mode: 'classic' (hold to slow) or 'toggle' (button locks it)
-let timeMode = 'classic';
-try { if (localStorage.getItem('timeshard_mode') === 'toggle') timeMode = 'toggle'; } catch { /* private mode */ }
+let timeMode = 'toggle';   // button mode is the default
+try { if (localStorage.getItem('timeshard_mode') === 'classic') timeMode = 'classic'; } catch { /* private mode */ }
 let timeLocked = false;
 
 // Button mode runs on a slow-mo bank: each wave charges it to BASE seconds,
@@ -2550,6 +2556,7 @@ function setTimeLocked(v) {
   if (v && timeMode === 'toggle' && slowBank <= 0) return;   // dry tank
   timeLocked = v;
   el.timebtn.classList.toggle('locked', v);
+  if (v) el.timebtn.classList.remove('hint');   // lesson learned
 }
 
 // --- pause: freezes the whole simulation; settings + end run live inside
@@ -2574,15 +2581,17 @@ function openSettings() {
   el.setsfx.value = v.sfx;
   el.sethaptics.textContent = hapticsOn ? 'ON' : 'OFF';
   el.sethaptics.classList.toggle('on', hapticsOn);
+  el.modelink.textContent = timeMode === 'toggle' ? 'BUTTON' : 'CLASSIC';
+  el.modelink.classList.toggle('on', timeMode === 'toggle');
   el.settings.style.display = 'flex';
 }
-// tagline follows the mode: both are true statements about how time obeys you
 function taglineFor() {
-  return timeMode === 'toggle' ? 'YOU DECIDE WHEN TIME MOVES' : 'TIME MOVES ONLY WHEN YOU LET GO';
+  return 'STOP TIME. SHATTER THEM ALL.';
 }
 
 function updateModeUI() {
-  el.modelink.textContent = 'TIME: ' + (timeMode === 'toggle' ? 'BUTTON' : 'CLASSIC');
+  el.modelink.textContent = timeMode === 'toggle' ? 'BUTTON' : 'CLASSIC';
+  el.modelink.classList.toggle('on', timeMode === 'toggle');
   if (game.state === 'menu') el.overlay.querySelector('.sub').textContent = taglineFor();
   const inRun = game.state === 'play' || game.state === 'intro' || game.state === 'clear';
   const on = timeMode === 'toggle' && inRun;
@@ -2636,7 +2645,7 @@ renderScores();
 // snapshot below, so MAIN MENU restores the styled title too
 {
   const tw = Math.min(Math.round(window.innerWidth * 0.84), 330);
-  const built = buildWordSVG('SHARD', Math.round(tw * 100 / 464));
+  const built = buildWordSVG('SHATTER', Math.round(tw * 100 / 648));
   titleW = built.W;
   el.overlay.querySelector('h1').innerHTML = 'TIME' + built.svg;
   collectTitleFacets();
@@ -2771,7 +2780,7 @@ function killWord() {
   if (game.state === 'menu') return;
   const word = sfx.say();
   if (!word) return;
-  const { svg } = buildWordSVG(word, 58);   // faceted letterforms, no shimmer
+  const { svg } = buildWordSVG(word, word.length > 5 ? 44 : 58);   // fits SHATTER
   el.flash.innerHTML = '<span class="kwskew"><span class="kwflash">' + svg + '</span></span>';
   killFlashUntil = performance.now() + KILLFLASH_MS;
   clearTimeout(killWord._t);
@@ -2892,6 +2901,8 @@ function showGuide() {
   const g = el.guide;
   g.style.display = 'flex';
   g.style.opacity = 1;
+  // in button mode, the clock pulses until it's pressed for the first time
+  if (timeMode === 'toggle') el.timebtn.classList.add('hint');
   setTimeout(() => { g.style.opacity = 0; }, 3000);   // hold 3s...
   setTimeout(() => { g.style.display = 'none'; }, 5200);   // ...fade 2s, gone
   game.introLen = 3;   // the first enemy steps out as the guide starts to fade

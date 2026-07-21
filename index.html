@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#e8eaee">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%23e8eaee'/><rect x='4' y='4' width='8' height='8' fill='%23ff2d1a'/></svg>">
-<title>TIMESHARD</title>
+<title>TIME SHATTER</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; -webkit-user-select:none; user-select:none; -webkit-tap-highlight-color:transparent; }
   html, body { height:100%; overflow:hidden; background:#e8eaee; touch-action:none; overscroll-behavior:none; }
@@ -68,9 +68,9 @@
   .setrow { display:grid; grid-template-columns:78px 1fr; gap:14px; align-items:center;
             width:230px; text-align:left; font-size:11px; letter-spacing:.16em; }
   .setrow input[type="range"] { width:100%; accent-color:#ff2d1a; height:30px; }
-  #sethaptics { justify-self:start; padding:7px 20px; border:2px solid rgba(22,24,29,.4);
+  .setpill { justify-self:start; padding:7px 20px; border:2px solid rgba(22,24,29,.4);
                 border-radius:999px; font-size:11px; font-weight:900; letter-spacing:.2em; }
-  #sethaptics.on { border-color:#ff2d1a; color:#ff2d1a; }
+  .setpill.on { border-color:#ff2d1a; color:#ff2d1a; }
 
   /* button-mode time control: 96px hit zone, 64px visual — misses forgive.
      Tap toggles bullet time; press-and-hold slows only while held. */
@@ -103,6 +103,9 @@
   #slowfill { height:100%; width:50%; background:#ff2d1a; border-radius:2px; }
   body.slowmo #slowmeter { background:rgba(238,240,243,.25); }
   #timebtn.empty::before { background:#9aa0ab; }
+  @keyframes tpulse { 0%,100% { box-shadow:0 0 0 0 rgba(255,45,26,.55); }
+                      55% { box-shadow:0 0 0 14px rgba(255,45,26,0); } }
+  #timebtn.hint::after { animation:tpulse 1.3s ease-out infinite; }
 
   /* "LOOK. OUT." retarget warning */
   #warn { position:absolute; left:0; right:0; top:34%; text-align:center; pointer-events:none; }
@@ -189,12 +192,10 @@
              display:flex; align-items:center; justify-content:center; height:44px; }
   #moderow { position:absolute; left:0; right:0; bottom:calc(env(safe-area-inset-bottom, 0px) + 18px);
              display:flex; align-items:center; justify-content:center; height:32px; }
-  #modelink { font-size:11px; font-weight:800; letter-spacing:.28em; color:#7a8089;
-              text-decoration:underline; text-underline-offset:4px; padding:8px 14px; }
+
   #howtolink, #setlink { font-size:11px; font-weight:800; letter-spacing:.28em; color:#7a8089;
                text-shadow:0 0 10px rgba(232,234,238,.95); text-decoration:underline;
                text-underline-offset:4px; text-decoration-color:rgba(122,128,137,.5); }
-  #setlink { margin-left:22px; }
   #sndbtn { position:absolute; right:20px; top:50%; transform:translateY(-50%);
             width:44px; height:44px; border-radius:50%;
             display:flex; align-items:center; justify-content:center; color:#7a8089;
@@ -206,6 +207,7 @@
   #htp, #enm { position:fixed; inset:0; z-index:12; display:none; align-items:center; justify-content:center;
                background:rgba(22,24,29,.35); }
   .htpcard { background:#eef0f3; border-radius:20px; padding:30px 34px; text-align:center;
+             width:min(330px, 86vw);
              display:flex; flex-direction:column; gap:11px; box-shadow:0 12px 48px rgba(22,24,29,.35);
              font-size:13px; font-weight:700; letter-spacing:.12em; color:#40444c;
              max-width:min(330px, 86vw); }
@@ -255,22 +257,21 @@
   <div class="gt gtL">MOVE</div>
   <div class="gt gtR">LOOK</div>
   <div class="gfire">TAP ANYWHERE TO SHOOT</div>
-  <div id="gtime">TIME &#9654;</div>
+  <div id="gtime">CONTROL TIME &#9654;</div>
 </div>
 
 <div id="overlay">
-  <h1>TIME<br><em>SHARD</em></h1>
-  <div class="sub">TIME MOVES ONLY WHEN YOU LET GO</div>
+  <h1>TIME<br><em>SHATTER</em></h1>
+  <div class="sub">STOP TIME. SHATTER THEM ALL.</div>
   <div class="go">TAP TO BEGIN</div>
   <div id="scores"></div>
   <div class="rules"></div>
   <div id="menurow">
     <div id="howtolink">HOW TO PLAY</div>
-    <div id="setlink">SETTINGS</div>
     <div id="sndbtn"></div>
   </div>
   <div id="moderow">
-    <div id="modelink">TIME: CLASSIC</div>
+    <div id="setlink">SETTINGS</div>
   </div>
   <div id="menubtn">MAIN MENU</div>
 </div>
@@ -278,7 +279,7 @@
 <div id="htp">
   <div class="htpcard">
     <h2>HOW TO PLAY</h2>
-    <div>HOLD — freezes time</div>
+    <div id="htptime">HOLD — freezes time</div>
     <div>LEFT thumb — move</div>
     <div>RIGHT thumb — look</div>
     <div>TAP anywhere — shoot</div>
@@ -317,7 +318,8 @@
     <h2>SETTINGS</h2>
     <div class="setrow"><span>MUSIC</span><input type="range" id="setmusic" min="0" max="1" step="0.05" value="1"></div>
     <div class="setrow"><span>EFFECTS</span><input type="range" id="setsfx" min="0" max="1" step="0.05" value="1"></div>
-    <div class="setrow"><span>HAPTICS</span><div id="sethaptics" class="on">ON</div></div>
+    <div class="setrow"><span>HAPTICS</span><div id="sethaptics" class="setpill on">ON</div></div>
+    <div class="setrow"><span>TIME</span><div id="modelink" class="setpill on">BUTTON</div></div>
     <div class="htpclose">TAP OUTSIDE TO CLOSE</div>
   </div>
 </div>

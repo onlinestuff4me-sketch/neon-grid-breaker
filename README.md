@@ -1,4 +1,4 @@
-# TIMESHARD
+# TIME SHATTER
 
 A first-person time-manipulation arcade shooter built for **portrait-mode mobile**,
 where **time only moves when you let go of the screen**.
@@ -27,7 +27,7 @@ Everything runs off holds, drags, and taps — one thumb works, two thumbs sing:
 - **Six enemy types**: gunners, fast bare-handed rushers (wave 2), spread-firing shotgunners (wave 3), burst-firing heavies and a looming long-barrel sniper whose shots fly twice as fast (wave 4), and gunmetal armored units that only headshots can crack — aim for the red head (wave 5)
 - **Weapon pickups**: enemies drop shotguns (4 shells, 6-pellet spread), and a slain sniper always drops his rifle — 3 rounds that pierce through multiple enemies. Tap a drop to sprint to it, or run over it (drops magnetize when close); grabbing one racks a satisfying pump-action
 - **First-run onboarding**: wave 1 opens with a zone guide (move left / look right / tap to fire) and enemies hold their fire until it clears
-- **TIMESHARD rules**: one hit kills you; one hit shatters them; endless escalating waves with enemy bullets creeping faster each wave
+- **TIME SHATTER rules**: one hit kills you; one hit shatters them; endless escalating waves with enemy bullets creeping faster each wave
 - **Rotating arenas**: the cover layout changes every 3 waves (scattered cover → pillar court → corridors)
 - Synthesized sound effects (WebAudio, no assets), haptic feedback, kill-word flashes, best-wave tracking (localStorage)
 
