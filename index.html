@@ -24,7 +24,7 @@
           transform:scaleY(0); transition:transform .3s ease; pointer-events:none; }
   #lbtop { top:0; transform-origin:top; }
   #lbbot { bottom:0; transform-origin:bottom; }
-  body.slowmo .lbar { transform:scaleY(1); }
+  body.slowmo .lbar { transform:scaleY(1.4); }   /* heavier vignette in bullet time */
 
   /* ---- HUD ---- */
   #hud { position:fixed; inset:0; pointer-events:none; z-index:7;
@@ -57,6 +57,25 @@
             padding:6px 8px; font-size:10px; font-weight:800; letter-spacing:.18em;
             color:#5b616c; pointer-events:auto; }
   body.slowmo #endrun { color:#8a909a; }
+
+  /* button-mode time control: a big easy target above the bottom bar */
+  #timebtn { display:none; position:fixed; right:14px;
+             bottom:calc(env(safe-area-inset-bottom, 0px) + 10vh); z-index:8;
+             width:64px; height:64px; border-radius:50%;
+             border:3px solid #16181d; background:rgba(238,240,243,.72);
+             align-items:center; justify-content:center;
+             pointer-events:auto; transition:background .15s ease, border-color .15s ease; }
+  #timebtn::before { content:''; width:22px; height:22px;
+             background:#16181d;
+             clip-path:polygon(0 0, 100% 0, 50% 46%, 100% 100%, 0 100%, 50% 54%);
+             transition:background .15s ease; }
+  #timebtn.locked { background:#ff2d1a; border-color:#ff2d1a; }
+  #timebtn.locked::before { background:#fff; }
+
+  /* onboarding pointer at the time button (button mode only) */
+  #gtime { position:absolute; right:92px;
+           bottom:calc(env(safe-area-inset-bottom, 0px) + 10vh + 18px);
+           font-size:13px; font-weight:900; letter-spacing:.2em; color:#ff2d1a; }
 
   /* "LOOK. OUT." retarget warning */
   #warn { position:absolute; left:0; right:0; top:34%; text-align:center; pointer-events:none; }
@@ -141,6 +160,8 @@
   /* bottom row: how-to link + flat speaker toggle */
   #menurow { position:absolute; left:0; right:0; bottom:calc(env(safe-area-inset-bottom, 0px) + 26px);
              display:flex; align-items:center; justify-content:center; height:44px; }
+  #modelink { font-size:11px; font-weight:800; letter-spacing:.28em; color:#7a8089;
+              text-decoration:underline; text-underline-offset:4px; padding:8px 6px; }
   #howtolink { font-size:11px; font-weight:800; letter-spacing:.28em; color:#7a8089;
                text-shadow:0 0 10px rgba(232,234,238,.95); text-decoration:underline;
                text-underline-offset:4px; text-decoration-color:rgba(122,128,137,.5); }
@@ -188,6 +209,7 @@
   <div id="banner"></div>
   <div id="ammo">PISTOL · ∞</div>
   <div id="endrun">END RUN</div>
+  <div id="timebtn"></div>
 </div>
 
 <div id="tint"></div>
@@ -202,6 +224,7 @@
   <div class="gt gtL">MOVE</div>
   <div class="gt gtR">LOOK</div>
   <div class="gfire">TAP ANYWHERE TO SHOOT</div>
+  <div id="gtime">TIME &#9654;</div>
 </div>
 
 <div id="overlay">
@@ -211,6 +234,7 @@
   <div id="scores"></div>
   <div class="rules"></div>
   <div id="menurow">
+    <div id="modelink">TIME: CLASSIC</div>
     <div id="howtolink">HOW TO PLAY</div>
     <div id="sndbtn"></div>
   </div>

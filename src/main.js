@@ -1044,39 +1044,45 @@ function spawnEnemy(type = 'gunner') {
   parts.g.visible = false;
   const shards = [];
   const sy = spec.scale[1], sxz = spec.scale[0];
-  // target points sampled over the humanoid volume: legs, torso, head
+  // target points sampled from the REAL body-part boxes, so the finished
+  // swarm matches the model's silhouette and the reveal is near-seamless
+  const PARTS = [
+    [0.45, 0, 1.12, 0.44, 0.62, 0.26],     // weight, cx, cy, w, h, d — torso
+    [0.12, 0, 1.62, 0.26, 0.28, 0.26],     // head
+    [0.10, 0, 0.74, 0.38, 0.20, 0.24],     // hips
+    [0.11, -0.11, 0.34, 0.15, 0.64, 0.17], // legs
+    [0.11, 0.11, 0.34, 0.15, 0.64, 0.17],
+    [0.055, -0.29, 1.15, 0.11, 0.5, 0.13], // arms
+    [0.055, 0.29, 1.15, 0.11, 0.5, 0.13],
+  ];
   const bodyPoint = () => {
-    const pick = Math.random();
-    if (pick < 0.22) {   // legs: two columns
-      const side = Math.random() < 0.5 ? -0.14 : 0.14;
-      return [x + (side + (Math.random() - 0.5) * 0.1) * sxz, (0.05 + Math.random() * 0.55) * sy,
-        z + (Math.random() - 0.5) * 0.14 * sxz];
-    }
-    if (pick < 0.82) {   // torso + arms
-      return [x + (Math.random() - 0.5) * 0.72 * sxz, (0.6 + Math.random() * 0.85) * sy,
-        z + (Math.random() - 0.5) * 0.34 * sxz];
-    }
-    return [x + (Math.random() - 0.5) * 0.34 * sxz, (1.5 + Math.random() * 0.3) * sy,   // head
-      z + (Math.random() - 0.5) * 0.3 * sxz];
+    let pick = Math.random(), part = PARTS[0];
+    for (const p of PARTS) { pick -= p[0]; if (pick <= 0) { part = p; break; } }
+    return new THREE.Vector3(
+      x + (part[1] + (Math.random() - 0.5) * part[3]) * sxz,
+      (part[2] + (Math.random() - 0.5) * part[4]) * sy,
+      z + (Math.random() - 0.5) * part[5] * sxz
+    );
   };
   const N_INIT = 12, N_LATE = 58;
   for (let i = 0; i < N_INIT + N_LATE; i++) {
     const late = i >= N_INIT;
     const mesh = new THREE.Mesh(shardGeo, Math.random() < 0.75 ? MAT_RED : MAT_DARKRED);
-    mesh.scale.setScalar(late ? 0.35 + Math.random() * 0.4 : 0.6 + Math.random() * 0.6);
+    const size = late ? 0.35 + Math.random() * 0.4 : 0.6 + Math.random() * 0.6;
+    mesh.scale.setScalar(size);
     const a = Math.random() * Math.PI * 2;
     const r = 1.4 + Math.random() * 1.8;
     const from = new THREE.Vector3(x + Math.sin(a) * r, 0.2 + Math.random() * 2.6, z + Math.cos(a) * r);
-    const to = new THREE.Vector3(...bodyPoint());
+    const to = bodyPoint();
     mesh.position.copy(from);
     mesh.visible = !late;
     scene.add(mesh);
     shards.push({
-      mesh, from, to,
+      mesh, from, to, size,
       // accelerating schedule: sqrt spacing packs most arrivals into the
       // back half, so the figure fills in faster and faster
-      activeAt: late ? 0.55 * Math.sqrt((i - N_INIT) / N_LATE) : 0,
-      travel: late ? 0.25 : 0.4,
+      activeAt: late ? ASSEMBLE_T * 0.62 * Math.sqrt((i - N_INIT) / N_LATE) : 0,
+      travel: ASSEMBLE_T * (late ? 0.3 : 0.48),
       spin: new THREE.Vector3((Math.random() - 0.5) * 10, (Math.random() - 0.5) * 10, (Math.random() - 0.5) * 10),
     });
   }
@@ -1105,7 +1111,10 @@ function spawnEnemy(type = 'gunner') {
   }
 }
 
-const ASSEMBLE_T = 0.85;   // seconds (world time) for a spawn to pull together
+const ASSEMBLE_T = 0.25;      // seconds (world time) for a spawn to pull together
+const ASSEMBLE_REVEAL = 0.75; // fraction of T when the body appears under the
+                              // shards, which then shrink into its surface —
+                              // the swap reads as a settle, not a pop
 
 function removeEnemyShards(e) {
   if (!e.shards) return;
@@ -1230,7 +1239,11 @@ function updateEnemy(e, sdt) {
     case 'assemble': {
       // shards converge from thin air into the body — the shatter, reversed.
       // Each shard has its own arrival time, so the figure fills in piece by
-      // piece until the swarm almost IS the enemy, then the model takes over.
+      // piece until the swarm almost IS the enemy. In the final stretch the
+      // real model fades up UNDERNEATH the shards while they shrink into its
+      // surface, so there is no visible pop — just a settle.
+      const shrinkP = Math.max(0, (e.stateT / ASSEMBLE_T - ASSEMBLE_REVEAL) / (1 - ASSEMBLE_REVEAL));
+      if (shrinkP > 0) e.g.visible = true;
       for (const s of e.shards) {
         if (e.stateT < s.activeAt) continue;
         s.mesh.visible = true;
@@ -1240,6 +1253,7 @@ function updateEnemy(e, sdt) {
         s.mesh.rotation.x += s.spin.x * sdt * (1 - ease);
         s.mesh.rotation.y += s.spin.y * sdt * (1 - ease);
         s.mesh.rotation.z += s.spin.z * sdt * (1 - ease);
+        if (shrinkP > 0) s.mesh.scale.setScalar(s.size * (1 - shrinkP));
       }
       if (e.stateT >= ASSEMBLE_T) {
         removeEnemyShards(e);
@@ -1585,6 +1599,12 @@ function onPointerDown(ev) {
         el.htp.style.display = 'flex';
         return;
       }
+      if (ev.target.closest('#modelink')) {   // classic hold vs time button
+        timeMode = timeMode === 'toggle' ? 'classic' : 'toggle';
+        try { localStorage.setItem('timeshard_mode', timeMode); } catch { /* private mode */ }
+        updateModeUI();
+        return;
+      }
       const pill = ev.target.closest('.scpill');
       if (pill) {   // re-sort the score table
         scoreMetric = pill.dataset.m;
@@ -1599,6 +1619,11 @@ function onPointerDown(ev) {
   if (ev.target && ev.target.closest && ev.target.closest('#endrun')) {
     hitPlayer(true);   // walk away: same screen as death, gentler framing
     return;            // never registered, so its release is inert
+  }
+  if (timeMode === 'toggle' && ev.target && ev.target.closest && ev.target.closest('#timebtn')) {
+    setTimeLocked(!timeLocked);
+    vibrate(8);
+    return;   // the button never fires the gun
   }
   input.pointers.set(ev.pointerId, {
     sx: ev.clientX, sy: ev.clientY, x: ev.clientX, y: ev.clientY,
@@ -2370,6 +2395,22 @@ function composeWave(n) {
 }
 
 let timeScale = 1;
+
+// --- time-control mode: 'classic' (hold to slow) or 'toggle' (button locks it)
+let timeMode = 'classic';
+try { if (localStorage.getItem('timeshard_mode') === 'toggle') timeMode = 'toggle'; } catch { /* private mode */ }
+let timeLocked = false;
+
+function setTimeLocked(v) {
+  timeLocked = v;
+  el.timebtn.classList.toggle('locked', v);
+}
+function updateModeUI() {
+  el.modelink.textContent = 'TIME: ' + (timeMode === 'toggle' ? 'BUTTON' : 'CLASSIC');
+  const inRun = game.state === 'play' || game.state === 'intro' || game.state === 'clear';
+  el.timebtn.style.display = timeMode === 'toggle' && inRun ? 'flex' : 'none';
+  el.gtime.style.display = timeMode === 'toggle' ? '' : 'none';
+}
 let demoT = 0, demoSpawnT = 0.3, demoKillT = 4;   // menu attract-mode clocks
 
 const el = {
@@ -2377,6 +2418,9 @@ const el = {
   score: document.getElementById('score'),
   menubtn: document.getElementById('menubtn'),
   endrun: document.getElementById('endrun'),
+  timebtn: document.getElementById('timebtn'),
+  modelink: document.getElementById('modelink'),
+  gtime: document.getElementById('gtime'),
   flash: document.getElementById('flash'),
   banner: document.getElementById('banner'),
   tint: document.getElementById('tint'),
@@ -2432,6 +2476,8 @@ const MENU_HTML = {
 function showMenu() {
   clearField();
   el.endrun.style.display = 'none';
+  setTimeLocked(false);
+  updateModeUI();
   player.alive = true;
   player.pos.set(0, 0, 14);
   player.vel.set(0, 0, 0);
@@ -2574,6 +2620,8 @@ function startWave(n, quiet = false) {   // quiet: the clear card already announ
   sfx.newWave();
   el.endrun.style.display = 'block';
   el.ammo.style.display = '';
+  setTimeLocked(false);   // each wave starts at full speed in button mode
+  updateModeUI();
 }
 
 function maxAlive() { return Math.min(2 + Math.floor(game.wave / 2), 5); }
@@ -2592,6 +2640,8 @@ function hitPlayer(ended = false) {
   el.guide.style.display = 'none';
   el.endrun.style.display = 'none';
   el.ammo.style.display = 'none';   // the overlay's stats line lands there
+  setTimeLocked(false);
+  el.timebtn.style.display = 'none';
   if (!ended) {   // a chosen exit skips the death drama
     el.redflash.style.opacity = 1;
     sfx.die();
@@ -2698,7 +2748,9 @@ function frame(now) {
   // when YOU move, so dodging costs the world a few frames
   const playing = game.state === 'play' || game.state === 'intro';
   let target = TIME_FULL;
-  if (playing && input.holding) {
+  // classic: any touch slows time. button mode: only the time button does.
+  const slowActive = timeMode === 'toggle' ? timeLocked : input.holding;
+  if (playing && slowActive) {
     const speedNorm = Math.min(player.vel.length() / MOVE_SPEED, 1);
     target = TIME_SLOW + (TIME_MOVE_MAX - TIME_SLOW) * speedNorm;
   }
