@@ -1892,7 +1892,7 @@ function updateEnemy(e, sdt) {
     // fixed rate (in world time, so bullet time helps you circle him).
     let dYaw = wantYaw - e.g.rotation.y;
     dYaw = ((dYaw + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
-    const maxTurn = 1.1 * sdt;
+    const maxTurn = 0.7 * sdt;   // slow slew: circling him is a real option
     e.g.rotation.y += Math.max(-maxTurn, Math.min(maxTurn, dYaw));
   } else {
     e.g.rotation.y = wantYaw;
@@ -2219,15 +2219,23 @@ function updateBullets(sdt) {
         }
         if (!headshot && !bodyshot) continue;
         if (ENEMY_TYPES[e.type].shielded) {
-          // the riot shield eats anything arriving from the front — flank him
-          const fx = Math.sin(e.g.rotation.y), fz = Math.cos(e.g.rotation.y);   // shield faces this way
-          const bl = Math.max(Math.hypot(b.vel.x, b.vel.z), 1e-6);
-          const frontal = (b.vel.x / bl) * fx + (b.vel.z / bl) * fz < -0.35;
-          if (frontal) {
-            spawnSparks(b.pos, 0xf4f5f7);
-            sfx.clank();
-            consumed = true;
-            break;
+          // only the PLATE blocks: intersect the bullet's path with the
+          // shield rectangle in his local frame — his gun side, head-over
+          // and legs-under are all fair targets now
+          const cyw = Math.cos(e.g.rotation.y), syw = Math.sin(e.g.rotation.y);
+          const lx = (p) => ((p.x - e.pos.x) * cyw - (p.z - e.pos.z) * syw) / sx;
+          const lz = (p) => ((p.x - e.pos.x) * syw + (p.z - e.pos.z) * cyw) / sx;
+          const az = lz(b.prev), bz = lz(b.pos);
+          const t2 = bz !== az ? (0.52 - az) / (bz - az) : -1;
+          if (t2 >= 0 && t2 <= 1) {
+            const xi = lx(b.prev) + (lx(b.pos) - lx(b.prev)) * t2;
+            const yi = (b.prev.y + (b.pos.y - b.prev.y) * t2) / sy;
+            if (xi > -0.7 && xi < 0.22 && yi > 0.47 && yi < 1.78) {
+              spawnSparks(b.pos, 0xf4f5f7);
+              sfx.clank();
+              consumed = true;
+              break;
+            }
           }
         }
         if (bodyshot && e.type === 'armored') {
@@ -2461,7 +2469,11 @@ function onPointerMove(ev) {
   const dx = ev.clientX - p.x, dy = ev.clientY - p.y;
   p.x = ev.clientX; p.y = ev.clientY;
   if (!p.role && Math.hypot(p.x - p.sx, p.y - p.sy) > TAP_PX) {
-    p.role = p.sx < window.innerWidth * 0.5 ? 'move' : 'look';
+    // if the other thumb is already steering, this finger is LOOK no matter
+    // where it landed — two-handed play shouldn't care about screen halves
+    let hasMove = false;
+    for (const q of input.pointers.values()) if (q !== p && q.role === 'move') hasMove = true;
+    p.role = hasMove ? 'look' : (p.sx < window.innerWidth * 0.5 ? 'move' : 'look');
     p.ox = p.x; p.oy = p.y;         // the stick anchors where the drag begins
     if (p.role === 'move') sprintTo = null;   // manual move cancels a sprint
     // the tap dead-zone swallowed the first ~18px of the gesture; replay it
@@ -3186,6 +3198,9 @@ const sfx = (() => {
       if (game.state === 'menu') return;   // demo stays silent
       const r = worldRate();
       const loud = 1 + (1 - timeScale) * 0.7;
+      // the same iron as the player's pistol — their guns are just as real,
+      // pitched slightly loose so volleys don't machine-gun into one tone
+      if (playSample('gunshot', { rate: r * (0.94 + Math.random() * 0.08), send: 0.3, gainMul: 0.75 * loud })) return;
       noise(0.2, 700, 0.8, 0.55 * loud, r, 0.5);
       tone(190, 45, 0.16, 0.3 * loud, 'square', r, 0.45);
     },
