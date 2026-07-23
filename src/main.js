@@ -878,92 +878,444 @@ function updatePickups(dt, sdt) {
 }
 
 // ---------------------------------------------------------------------------
-// Enemies — red boxy humanoids. States: advance -> aim -> fire, melee up close.
+// Enemies — sculpted crystal humanoids (ported 1:1 from the Character Tuner).
+// States: advance -> aim -> fire, melee up close.
 // ---------------------------------------------------------------------------
 const enemies = [];
 
+// tuner-approved body parameters (the values line)
+const EP = { head: 0.29, neck: 0.05, shld: 0.5, waist: 0.3, chest: 0.24, hip: 0.36,
+  lean: 3 * Math.PI / 180, musc: 0.45, armt: 0.1, legt: 0.14,
+  elbow: 22 * Math.PI / 180, knee: 8 * Math.PI / 180, jit: 0.018 };
+const LOFT_N = 8;   // SCULPTED · 8
+
+const enemyMatCache = {};
+function EM(hex) {
+  return enemyMatCache[hex] || (enemyMatCache[hex] = new THREE.MeshLambertMaterial({ color: hex }));
+}
+const MAT_SASH = new THREE.MeshLambertMaterial({ color: 0x16181d, side: THREE.DoubleSide });
+
+function rnd01(s) { const x = Math.sin(s * 127.1) * 43758.5453; return x - Math.floor(x); }
+
+// polygon soup -> flat-shaded BufferGeometry; each triangle is wound so its
+// normal points away from the hull's centroid (keeps Lambert lighting sane)
+function facesToGeo(v, faces, orient = true) {
+  let cx = 0, cy = 0, cz = 0;
+  for (const p of v) { cx += p[0]; cy += p[1]; cz += p[2]; }
+  cx /= v.length; cy /= v.length; cz /= v.length;
+  const pos = [];
+  for (const f of faces) {
+    for (let i = 1; i < f.length - 1; i++) {
+      let a = v[f[0]], b = v[f[i]], c = v[f[i + 1]];
+      if (orient) {
+        const nx = (b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1]);
+        const ny = (b[2] - a[2]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[2] - a[2]);
+        const nz = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+        const ox = (a[0] + b[0] + c[0]) / 3 - cx, oy = (a[1] + b[1] + c[1]) / 3 - cy, oz = (a[2] + b[2] + c[2]) / 3 - cz;
+        if (nx * ox + ny * oy + nz * oz < 0) { const t = b; b = c; c = t; }
+      }
+      pos.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.computeVertexNormals();
+  return geo;
+}
+
+const BOXF = [[0, 1, 2, 3], [4, 5, 6, 7], [0, 1, 5, 4], [2, 3, 7, 6], [0, 3, 7, 4], [1, 2, 6, 5]];
+function tboxGeo(wb, wt, h, db, dt) {   // tapered box, hangs from its pivot
+  return facesToGeo([
+    [-wb / 2, -h, -db / 2], [wb / 2, -h, -db / 2], [wt / 2, 0, -dt / 2], [-wt / 2, 0, -dt / 2],
+    [-wb / 2, -h, db / 2], [wb / 2, -h, db / 2], [wt / 2, 0, dt / 2], [-wt / 2, 0, dt / 2]], BOXF);
+}
+
+// stacked N-gon rings -> faceted organic volume; jitter is bilaterally
+// symmetric and mostly tangential, so contours stay smooth and human
+function loftGeo(prof, pid, jit, seed) {
+  const N = LOFT_N, v = [];
+  const mir = (i) => ((N / 2 - 1 - i) % N + N) % N;
+  prof.forEach((r, ri) => {
+    const j = jit * (r.jm !== undefined ? r.jm : 1);
+    for (let i = 0; i < N; i++) {
+      const c = Math.min(i, mir(i));
+      const k = seed * 57.3 + pid * 13.7 + (ri * N + c) * 3.1;
+      const sgn = i === c ? 1 : -1;
+      const da = i === mir(i) ? 0 : sgn * (rnd01(k) * 2 - 1) * j * 1.6 / Math.max(r.rx + r.rz, 0.12);
+      const dy = (rnd01(k + 71.7) * 2 - 1) * j * 0.6;
+      const dr = 1 + (rnd01(k + 143.9) * 2 - 1) * j * 3;
+      const a = ((i + 0.5) / N) * Math.PI * 2 + da;
+      v.push([Math.cos(a) * r.rx * dr, r.y + dy, Math.sin(a) * r.rz * dr + (r.oz || 0)]);
+    }
+  });
+  const f = [];
+  for (let r = 0; r < prof.length - 1; r++)
+    for (let i = 0; i < N; i++)
+      f.push([r * N + i, r * N + (i + 1) % N, (r + 1) * N + (i + 1) % N, (r + 1) * N + i]);
+  f.push([...Array(N).keys()]);
+  f.push([...Array(N).keys()].map(i => (prof.length - 1) * N + i));
+  return facesToGeo(v, f);
+}
+
+const limbProf2 = (len, r0, r1, r2) => [
+  { y: 0, rx: r0, rz: r0 * 0.92, jm: 0.35 },
+  { y: -len * 0.42, rx: r1, rz: r1 * 0.92 },
+  { y: -len * 0.85, rx: (r1 + r2) * 0.42, rz: (r1 + r2) * 0.4 },
+  { y: -len, rx: r2, rz: r2 * 0.92, jm: 0.4 },
+];
+
 function buildEnemyMesh(type) {
   const g = new THREE.Group();
-  // armored units are gunmetal with a bright red head — the head is the target
-  const bodyMat = type === 'armored' ? MAT_GUNMETAL
-    : (type === 'rusher' || type === 'sniper') ? MAT_DARKRED : MAT_RED;
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.62, 0.26), bodyMat);
-  torso.position.y = 1.12;
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.28, 0.26), MAT_RED);
-  head.position.y = 1.62;
-  if (type === 'armored') head.scale.setScalar(1.25);
-  const hips = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.2, 0.24), type === 'armored' ? MAT_GUNMETAL : MAT_DARKRED);
-  hips.position.y = 0.74;
+  const P = { ...EP };
+  // per-type builds: the heavy is broader everywhere, the bomber pear-shaped
+  if (type === 'heavy') { P.shld *= 1.18; P.waist *= 1.22; P.chest *= 1.15; P.hip *= 1.1; P.armt *= 1.3; P.legt *= 1.15; }
+  if (type === 'bomber') { P.waist *= 1.35; P.hip *= 1.12; P.chest *= 1.12; }
+  const seed = 1 + Math.floor(Math.random() * 97);
+  const jit = P.jit, m = P.musc;
+  const C = type === 'armored' ? { body: 0x3a3d45, chest: 0x3a3d45, pelvis: 0x33363d, head: 0xe03222 }
+    : type === 'sniper' ? { body: 0xb81205, chest: 0xa21507, pelvis: 0x8c1004, head: 0xc8281a }
+    : type === 'rusher' ? { body: 0xe0321f, chest: 0xe83a26, pelvis: 0xc8281a, head: 0xf5533f }
+    : { body: 0xc8281a, chest: 0xd3291b, pelvis: 0xa21507, head: 0xe03222 };
+  const lean = P.lean + (type === 'rusher' ? 0.22 : 0);   // the rusher stalks hunched
+  const headH = P.head * 1.08;
+  const headBot = 1.62 - headH / 2;
+  const torsoTop = headBot - P.neck;
+  const hipTop = 0.86, torsoBot = hipTop - 0.05;   // chest bottom tucks into pelvis
+  const th = torsoTop - torsoBot;
 
-  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.64, 0.17), bodyMat);
-  legL.geometry = legL.geometry.clone();
-  legL.geometry.translate(0, -0.32, 0);
-  legL.position.set(-0.11, 0.66, 0);
-  const legR = legL.clone();
-  legR.position.x = 0.11;
+  const chestProf = [
+    { y: -th, rx: P.waist / 2, rz: P.chest * 0.4 },
+    { y: -th * 0.6, rx: (P.waist + (P.shld - P.waist) * 0.42) / 2 + m * 0.012, rz: P.chest * 0.52 + m * 0.012 },
+    { y: -th * 0.18, rx: P.shld / 2 * 0.98 + m * 0.02, rz: P.chest * 0.5, jm: 0.35 },
+    { y: -th * 0.06, rx: P.shld / 2 * 0.86, rz: P.chest * 0.44, jm: 0.25 },
+    { y: 0, rx: P.shld / 2 * 0.56, rz: P.chest * 0.34, jm: 0.2 },
+  ];
+  // the hunch pivots at the WAIST so it can never open a gap at the beltline;
+  // `collar` holds everything expressed in collar-relative coordinates
+  const chestG = new THREE.Group();
+  chestG.position.y = torsoBot;
+  chestG.rotation.x = lean;
+  g.add(chestG);
+  const collar = new THREE.Group();
+  collar.position.y = th;
+  chestG.add(collar);
+  const chest = new THREE.Mesh(loftGeo(chestProf, 1, jit, seed), EM(C.chest));
+  collar.add(chest);
 
-  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.5, 0.13), bodyMat);
-  armL.geometry = armL.geometry.clone();
-  armL.geometry.translate(0, -0.25, 0);
-  armL.position.set(-0.29, 1.4, 0);
+  if (P.neck > 0.005) {
+    const neck = new THREE.Mesh(loftGeo([
+      { y: -(P.neck + 0.02), rx: P.head * 0.24, rz: P.head * 0.24 },
+      { y: 0, rx: P.head * 0.21, rz: P.head * 0.22 },
+    ], 2, jit * 0.6, seed), EM(C.body));
+    neck.position.y = P.neck + 0.01;
+    collar.add(neck);
+  }
+  const hh = headH, hr = P.head;
+  // the sniper's head wears a swept-back hood
+  const headProf = type === 'sniper' ? [
+    { y: -hh, rx: hr * 0.3, rz: hr * 0.34, jm: 0.3 },
+    { y: -hh * 0.75, rx: hr * 0.46, rz: hr * 0.52, oz: -hr * 0.03 },
+    { y: -hh * 0.48, rx: hr * 0.51, rz: hr * 0.58, oz: -hr * 0.06 },
+    { y: -hh * 0.22, rx: hr * 0.48, rz: hr * 0.56, oz: -hr * 0.14 },
+    { y: 0.05, rx: hr * 0.24, rz: hr * 0.4, oz: -hr * 0.3, jm: 0.12 },
+  ] : [
+    { y: -hh, rx: hr * 0.3, rz: hr * 0.34, jm: 0.3 },
+    { y: -hh * 0.78, rx: hr * 0.44, rz: hr * 0.49 },
+    { y: -hh * 0.52, rx: hr * 0.5, rz: hr * 0.545 },
+    { y: -hh * 0.3, rx: hr * 0.5, rz: hr * 0.54 },
+    { y: -hh * 0.12, rx: hr * 0.44, rz: hr * 0.48, jm: 0.3 },
+    { y: 0, rx: hr * 0.26, rz: hr * 0.3, jm: 0.15 },
+  ];
+  const head = new THREE.Mesh(loftGeo(headProf, 3, jit, seed), EM(C.head));
+  head.position.y = 1.62 + hh / 2 - torsoTop;   // head center stays at 1.62
+  collar.add(head);
 
-  // gun arm: pivots at the shoulder, raises to horizontal when aiming
-  const armR = new THREE.Group();
-  armR.position.set(0.29, 1.4, 0);
-  const armRMesh = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.5, 0.13), bodyMat);
-  armRMesh.position.y = -0.25;
-  armR.add(armRMesh);
-  // Guns live in the gun arm's local space, where -y runs from the shoulder
-  // down the arm and out past the hand. Barrels extend along -y, so when the
-  // arm raises to horizontal the barrel points straight at the player —
-  // every gun reads as grip + receiver + barrel, not a floating handle.
+  const ph2 = hipTop - 0.62;
+  const pelvis = new THREE.Mesh(loftGeo([
+    { y: -ph2, rx: P.hip / 2 * 0.8, rz: P.chest * 0.36 },
+    { y: -ph2 * 0.45, rx: P.hip / 2, rz: P.chest * 0.4 },
+    { y: 0, rx: P.hip / 2 * 0.9, rz: P.chest * 0.43 },
+  ], 4, jit, seed), EM(C.pelvis));
+  pelvis.position.y = hipTop;
+  g.add(pelvis);
+
+  // legs: thigh group at the hip (game swings rotation.x), shin group at the
+  // knee with the resting bend, wedge shoe rigid at 90° to the shin
+  const thighL = 0.44, shinLen = 0.36;
+  const mkLeg = (side) => {
+    const leg = new THREE.Group();
+    leg.position.set(side * (P.hip / 2 - P.legt / 2 + 0.01), 0.86, 0);
+    leg.add(new THREE.Mesh(loftGeo(limbProf2(thighL, P.legt * 0.62, P.legt * (0.58 + 0.22 * m), P.legt * 0.42), 5 + side, jit, seed), EM(C.body)));
+    const shin = new THREE.Group();
+    shin.position.y = -thighL;
+    shin.rotation.x = EP.knee;
+    shin.add(new THREE.Mesh(loftGeo(limbProf2(shinLen, P.legt * 0.46, P.legt * (0.48 + 0.26 * m), P.legt * 0.3), 7 + side, jit, seed), EM(C.body)));
+    const fw = P.legt, ft = fw * 0.72;
+    const foot = new THREE.Mesh(facesToGeo([
+      [-fw / 2, 0, -0.11], [fw / 2, 0, -0.11], [fw / 2, 0.085, -0.11], [-fw / 2, 0.085, -0.11],
+      [-ft / 2, 0, 0.23], [ft / 2, 0, 0.23], [ft / 2, 0.028, 0.23], [-ft / 2, 0.028, 0.23]], BOXF), EM(C.pelvis));
+    foot.position.y = -shinLen - 0.02;
+    shin.add(foot);
+    leg.add(shin);
+    g.add(leg);
+    return { leg, shin };
+  };
+  const LG = mkLeg(-1), RG = mkLeg(1);
+  const legL = LG.leg, legR = RG.leg;
+
+  // arms: shoulder group on the collar (rides the hunch), forearm group at
+  // the elbow. The gun arm rests nearly straight so the aim raise points true.
+  const upperL = 0.3, foreL = 0.28;
+  const mkArm = (side) => {
+    const arm = new THREE.Group();
+    arm.position.set(side * (P.shld / 2 + P.armt * 0.1), -0.05, 0);
+    collar.add(arm);
+    const ur0 = P.armt * (0.62 + 0.1 * m);
+    arm.add(new THREE.Mesh(loftGeo([
+      { y: 0.045, rx: ur0 * 0.55, rz: ur0 * 0.5, jm: 0.2 },
+      { y: -0.01, rx: ur0, rz: ur0 * 0.92, jm: 0.35 },
+      { y: -upperL * 0.42, rx: P.armt * (0.56 + 0.3 * m), rz: P.armt * (0.56 + 0.3 * m) * 0.92 },
+      { y: -upperL * 0.85, rx: (P.armt * (0.56 + 0.3 * m) + P.armt * 0.42) * 0.42, rz: (P.armt * (0.56 + 0.3 * m) + P.armt * 0.42) * 0.4 },
+      { y: -upperL, rx: P.armt * 0.42, rz: P.armt * 0.42 * 0.92, jm: 0.4 },
+    ], 11 + side, jit, seed), EM(C.body)));
+    const fore = new THREE.Group();
+    fore.position.y = -upperL;
+    fore.rotation.x = -(side > 0 ? 0.12 : EP.elbow);
+    fore.add(new THREE.Mesh(loftGeo(limbProf2(foreL + 0.06, P.armt * 0.46, P.armt * (0.48 + 0.2 * m), P.armt * 0.3), 13 + side, jit, seed), EM(C.body)));
+    arm.add(fore);
+    return { arm, fore };
+  };
+  const AL = mkArm(-1), AR = mkArm(1);
+  const armL = AL.arm;
+  // gun arm keeps the original group contract for the aim animation
+  const armR = AR.arm;
+  // hands + weapons live in FOREARM space; the wrist is at y = -foreL. Guns
+  // sit DISTAL of the closed fist (grip covered, butt showing) so black never
+  // interpenetrates red — barrels still run along -y for the aim raise.
+  const addHand = (fa, side, fist) => {
+    if (fist) {
+      const f = new THREE.Mesh(tboxGeo(P.armt * 0.95, P.armt * 0.85, 0.11, P.armt * 0.95, P.armt * 0.85), EM(C.body));
+      f.position.set(0, -foreL - 0.04, -0.055);
+      fa.add(f);
+    } else {
+      const palm = new THREE.Mesh(tboxGeo(P.armt * 0.82, P.armt * 0.62, 0.14, P.armt * 0.52, P.armt * 0.4), EM(C.body));
+      palm.position.set(0, -foreL - 0.02, 0.008);
+      const thumb = new THREE.Mesh(tboxGeo(0.032, 0.026, 0.07, 0.04, 0.032), EM(C.body));
+      thumb.position.set(-side * P.armt * 0.5, -foreL - 0.03, 0.025);
+      fa.add(palm, thumb);
+    }
+  };
+  const handheld = type !== 'rusher' && type !== 'rocketeer' && type !== 'laser';
+  addHand(AL.fore, -1, false);
+  addHand(AR.fore, 1, type === 'rocketeer' || (handheld && type !== 'bomber'));
   let egun = null;
-  if (type === 'bomber') {   // a grenade in the throwing hand
-    egun = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8), MAT_BLACK);
-    egun.position.set(0, -0.52, -0.05);
-    armR.add(egun);
-  } else if (type !== 'rusher') {   // rushers come at you bare-handed
+  if (handheld && type !== 'bomber') {
     egun = new THREE.Group();
-    const addBarrel = (len, thick, x = 0) => {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(thick, len, thick), MAT_BLACK);
-      m.position.set(x, -0.62 - len / 2, 0);
-      egun.add(m);   // first barrel added = the flash target
-      return m;
+    egun.position.y = -foreL;
+    const bar = (len, thick, x = 0) => {
+      const b = new THREE.Mesh(tboxGeo(thick, thick, len, thick, thick), MAT_BLACK);
+      b.position.set(x, -0.3, 0);
+      egun.add(b);   // first barrel added = the flash target
+      return b;
     };
     if (type === 'sniper') {
-      addBarrel(0.55, 0.04);
-      const scope = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.12, 0.045), MAT_GUNMETAL);
-      scope.position.set(0, -0.62, 0.08);
+      bar(0.55, 0.04);
+      const scope = new THREE.Mesh(tboxGeo(0.045, 0.045, 0.12, 0.045, 0.045), MAT_GUNMETAL);
+      scope.position.set(0, -0.24, 0.07);
       egun.add(scope);
     } else if (type === 'shotgunner') {
-      // mirrors the player's shotgun: touching side-by-side barrels and a
-      // straight stock. Each barrel splits 70/30 so the muzzle tips (the far
-      // 30%) can light up on the firing telegraph.
-      const mkBarrel = (x) => {
-        const rear = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.294, 0.045), MAT_BLACK);
-        rear.position.set(x, -0.62 - 0.147, 0);
-        const tip = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.126, 0.045), MAT_BLACK);
-        tip.position.set(x, -0.62 - 0.294 - 0.063, 0);
-        egun.add(rear, tip);
-        return tip;
-      };
-      egun.userData.flash = [mkBarrel(-0.0225), mkBarrel(0.0225)];
-      const stock = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.14, 0.075), MAT_BLACK);
-      stock.position.set(0, -0.4, 0);
+      egun.userData.flash = [bar(0.34, 0.045, -0.0225), bar(0.34, 0.045, 0.0225)];
+      const stock = new THREE.Mesh(tboxGeo(0.055, 0.055, 0.1, 0.075, 0.075), MAT_BLACK);
+      stock.position.set(0, -0.16, -0.075);
       egun.add(stock);
     } else if (type === 'heavy') {
-      addBarrel(0.32, 0.07);
-    } else if (type === 'rocketeer') {   // a fat launch tube
-      addBarrel(0.44, 0.12);
+      bar(0.32, 0.07);
     } else {   // gunner, armored, shieldbearer: a pistol
-      addBarrel(0.2, 0.05);
+      bar(0.2, 0.05);
     }
-    const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.16, 0.1), MAT_BLACK);
-    receiver.position.set(0, -0.55, 0);
-    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.06, 0.13), MAT_BLACK);
-    grip.position.set(0, -0.49, 0.08);
+    const receiver = new THREE.Mesh(tboxGeo(0.09, 0.09, 0.16, 0.1, 0.1), MAT_BLACK);
+    receiver.position.set(0, -0.16, 0);
+    const grip = new THREE.Mesh(tboxGeo(0.045, 0.045, 0.07, 0.11, 0.11), MAT_BLACK);
+    grip.position.set(0, -0.17, -0.085);
     egun.add(receiver, grip);
-    armR.add(egun);
+    AR.fore.add(egun);
+  }
+  if (type === 'bomber') {   // a grenade in the throwing hand
+    egun = new THREE.Mesh(tboxGeo(0.14, 0.14, 0.14, 0.14, 0.14), MAT_BLACK);
+    egun.position.set(0, -foreL - 0.16, -0.02);
+    AR.fore.add(egun);
+  }
+  if (type === 'rusher') {   // crystal claws past each open hand
+    for (const fa of [AL.fore, AR.fore]) {
+      for (const off of [-0.026, 0.026]) {
+        const claw = new THREE.Mesh(tboxGeo(0.018, 0.06, 0.22, 0.018, 0.052), EM(C.head));
+        claw.position.set(off, -foreL - 0.17, 0.01);
+        fa.add(claw);
+      }
+    }
+  }
+
+  // ---- type dressing on the chest (rides the hunch and walk exactly) ----
+  let armLock = false, armRLock = false, armLRest = 0, armRRest = 0;
+  if (type === 'shotgunner') {
+    // bandolier: closed loop hugging the torso's own surface — over the
+    // shoulder by the neck, across chest AND back, under the opposite arm
+    const chestSurf = (y) => {
+      const pr = chestProf;
+      if (y <= pr[0].y) return pr[0];
+      for (let i = 1; i < pr.length; i++) if (y <= pr[i].y) {
+        const a = pr[i - 1], b = pr[i], k = (y - a.y) / (b.y - a.y);
+        return { rx: a.rx + (b.rx - a.rx) * k, rz: a.rz + (b.rz - a.rz) * k };
+      }
+      return pr[pr.length - 1];
+    };
+    const ySurf3 = (x, z) => {
+      const pr = chestProf;
+      const e2 = (r) => (x / r.rx) * (x / r.rx) + (z / r.rz) * (z / r.rz);
+      let u = pr[pr.length - 1];
+      if (e2(u) <= 1) return u.y;
+      for (let i = pr.length - 2; i >= 0; i--) {
+        const l = pr[i], eu = e2(u), el = e2(l);
+        if (el <= 1) return u.y + (l.y - u.y) * ((eu - 1) / ((eu - el) || 1e-6));
+        u = l;
+      }
+      return -1e9;
+    };
+    const NS = 44, yTopS = -0.005, yBotS = -th * 0.68, HW = 0.033, TH2 = 0.02;
+    const sashPt = (a, off = 0) => {
+      const aw = Math.abs(Math.atan2(Math.sin(a), Math.cos(a)));
+      let y = yBotS + (yTopS - yBotS) * Math.pow(1 - aw / Math.PI, 1.25);
+      const s = chestSurf(y);
+      const gap = 0.006 + off + jit * 3 * (s.rx + s.rz) * 0.5;
+      const shrink = 1 - 0.3 * Math.pow(Math.max(0, Math.cos(a)), 4);
+      const x = Math.cos(a) * (s.rx + gap) * shrink;
+      const z = Math.sin(a) * (s.rz + gap);
+      if (aw < 1.2) y = Math.max(y, ySurf3(x, z) + 0.006 + off);
+      return [x, y, z];
+    };
+    const IN0 = [], IN1 = [], OUT0 = [], OUT1 = [];
+    for (let i = 0; i < NS; i++) {
+      const a = (i / NS) * Math.PI * 2;
+      const aw = Math.abs(Math.atan2(Math.sin(a), Math.cos(a)));
+      const p = sashPt(a), pa = sashPt(a + 0.09), pb = sashPt(a - 0.09);
+      let tx0 = pa[0] - pb[0], ty0 = pa[1] - pb[1], tz0 = pa[2] - pb[2];
+      const tl = Math.hypot(tx0, ty0, tz0) || 1; tx0 /= tl; ty0 /= tl; tz0 /= tl;
+      const s0 = Math.min(1, Math.max(0, 1 - aw / 1.1));
+      const sB = s0 * s0 * (3 - 2 * s0);
+      const rl = Math.hypot(p[0], p[2]) || 1;
+      let nx0 = (p[0] / rl) * (1 - sB), ny0 = sB, nz0 = (p[2] / rl) * (1 - sB);
+      const nn = Math.hypot(nx0, ny0, nz0) || 1; nx0 /= nn; ny0 /= nn; nz0 /= nn;
+      let wx = ny0 * tz0 - nz0 * ty0, wy = nz0 * tx0 - nx0 * tz0, wz = nx0 * ty0 - ny0 * tx0;
+      const wl = Math.hypot(wx, wy, wz) || 1; wx /= wl; wy /= wl; wz /= wl;
+      const e0 = [p[0] - wx * HW, p[1] - wy * HW, p[2] - wz * HW];
+      const e1 = [p[0] + wx * HW, p[1] + wy * HW, p[2] + wz * HW];
+      if (aw < 1.2) {
+        e0[1] = Math.max(e0[1], ySurf3(e0[0], e0[2]) + 0.006);
+        e1[1] = Math.max(e1[1], ySurf3(e1[0], e1[2]) + 0.006);
+      }
+      IN0.push(e0); IN1.push(e1);
+      OUT0.push([e0[0] + nx0 * TH2, e0[1] + ny0 * TH2, e0[2] + nz0 * TH2]);
+      OUT1.push([e1[0] + nx0 * TH2, e1[1] + ny0 * TH2, e1[2] + nz0 * TH2]);
+    }
+    const sv = IN0.concat(IN1, OUT0, OUT1), sf = [];
+    for (let i = 0; i < NS; i++) {
+      const j2 = (i + 1) % NS;
+      sf.push([2 * NS + i, 2 * NS + j2, 3 * NS + j2, 3 * NS + i]);
+      sf.push([i, j2, 2 * NS + j2, 2 * NS + i]);
+      sf.push([NS + i, NS + j2, 3 * NS + j2, 3 * NS + i]);
+    }
+    collar.add(new THREE.Mesh(facesToGeo(sv, sf, false), MAT_SASH));
+    for (const aa of [0.4 * Math.PI, 0.5 * Math.PI, 0.6 * Math.PI]) {
+      const p = sashPt(aa);
+      const shell = new THREE.Mesh(tboxGeo(0.042, 0.042, 0.1, 0.042, 0.042), MAT_GUNMETAL);
+      shell.position.set(p[0], p[1] + 0.05, p[2] + 0.018);
+      collar.add(shell);
+    }
+  }
+  if (type === 'heavy') {   // armored pauldrons enclose the deltoids
+    for (const sd of [-1, 1]) {
+      const pd = new THREE.Mesh(loftGeo([
+        { y: -0.15, rx: P.armt * 1.18, rz: P.armt * 1.08, jm: 0.4 },
+        { y: 0.05, rx: P.armt * 0.55, rz: P.armt * 0.55, jm: 0.2 },
+      ], 26, jit, seed), EM(C.pelvis));
+      pd.position.set(sd * (P.shld / 2 + P.armt * 0.1), 0.02, 0);
+      collar.add(pd);
+    }
+  }
+  if (type === 'sniper') {   // cloak panel down the back (hood is the head)
+    const cape = new THREE.Mesh(tboxGeo(0.34, 0.44, 0.62, 0.028, 0.028), EM(0x7c0f05));
+    cape.position.set(0, -0.01, -P.chest * 0.58 - 0.052);
+    collar.add(cape);
+  }
+  if (type === 'bomber') {   // backpack + belly harness with spare grenades
+    const pack = new THREE.Mesh(tboxGeo(0.36, 0.34, 0.42, 0.2, 0.18), MAT_BLACK);
+    pack.position.set(0, -th * 0.12, -P.chest * 0.56 - 0.12);
+    collar.add(pack);
+    const NB = 14, yb = -th * 0.62;
+    const bs = chestProf[1];   // belt height sits at the rib/belly ring
+    const bv = [], bf = [];
+    for (const half of [-0.032, 0.032])
+      for (let i = 0; i < NB; i++) {
+        const a = (i / NB) * Math.PI * 2;
+        bv.push([Math.cos(a) * (bs.rx + 0.028), yb + half, Math.sin(a) * (bs.rz + 0.028)]);
+      }
+    for (let i = 0; i < NB; i++) bf.push([i, (i + 1) % NB, NB + (i + 1) % NB, NB + i]);
+    collar.add(new THREE.Mesh(facesToGeo(bv, bf, false), MAT_SASH));
+    for (const ga of [0.42 * Math.PI, 0.58 * Math.PI]) {
+      const gr = new THREE.Mesh(tboxGeo(0.09, 0.07, 0.11, 0.09, 0.07), MAT_BLACK);
+      gr.position.set(Math.cos(ga) * (bs.rx + 0.028), yb + 0.06, Math.sin(ga) * (bs.rz + 0.028) + 0.03);
+      collar.add(gr);
+    }
+  }
+  if (type === 'rocketeer') {   // shoulder-mounted launch tube + spare rockets
+    const tube = new THREE.Mesh(tboxGeo(0.15, 0.13, 0.95, 0.15, 0.13), MAT_GUNMETAL);
+    tube.rotation.x = -Math.PI / 2;
+    tube.position.set(0.24, 0.05, -0.35);
+    const muzzle = new THREE.Mesh(tboxGeo(0.19, 0.19, 0.1, 0.19, 0.19), MAT_BLACK);
+    muzzle.rotation.x = -Math.PI / 2;
+    muzzle.position.set(0.24, 0.05, 0.6);
+    const rear = new THREE.Mesh(tboxGeo(0.11, 0.11, 0.12, 0.11, 0.11), MAT_BLACK);
+    rear.rotation.x = -Math.PI / 2;
+    rear.position.set(0.24, 0.05, -0.47);
+    collar.add(tube, muzzle, rear);
+    for (const bx of [-0.09, 0.07]) {
+      const rk = new THREE.Mesh(tboxGeo(0.1, 0.08, 0.4, 0.1, 0.08), bx < 0 ? MAT_GUNMETAL : MAT_BLACK);
+      rk.position.set(bx, -th * 0.1, -P.chest * 0.5 - 0.09);
+      collar.add(rk);
+    }
+    egun = muzzle;
+    armRLock = true; armRRest = -1.25;
+    armR.rotation.x = -1.25; AR.fore.rotation.x = -0.75;
+  }
+  if (type === 'laser') {   // emitter crystal + twin antenna masts
+    const cy = -0.5, cz = P.chest * 0.5 + 0.2;
+    const low = new THREE.Mesh(tboxGeo(0.04, 0.15, 0.13, 0.04, 0.15), EM(0xff2d1a));
+    low.position.set(0, cy, cz);
+    const up = new THREE.Mesh(tboxGeo(0.15, 0.04, 0.13, 0.15, 0.04), EM(0xff2d1a));
+    up.position.set(0, cy + 0.13, cz);
+    collar.add(low, up);
+    for (const ax of [-0.14, 0.14]) {
+      const mast = new THREE.Mesh(tboxGeo(0.035, 0.028, 0.55, 0.035, 0.028), MAT_GUNMETAL);
+      mast.position.set(ax, 0.18, -P.chest * 0.5 - 0.06);
+      const tip = new THREE.Mesh(tboxGeo(0.05, 0.05, 0.05, 0.05, 0.05), EM(0xff2d1a));
+      tip.position.set(ax, 0.24, -P.chest * 0.5 - 0.06);
+      collar.add(mast, tip);
+    }
+    egun = up;
+    armLock = true; armRLock = true; armLRest = -0.4; armRRest = -0.4;
+    armL.rotation.x = -0.4; AL.fore.rotation.x = -0.5;
+    armR.rotation.x = -0.4; AR.fore.rotation.x = -0.5;
+  }
+  if (type === 'shieldbearer') {
+    // plate on the bracing side, bottom clear of the stride, right edge clear
+    // of the gun arm; the left arm permanently braces it
+    const shield = new THREE.Mesh(new THREE.BoxGeometry(0.85, 1.25, 0.07), MAT_GUNMETAL);
+    shield.position.set(-0.24, 1.125, 0.52);
+    const slit = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.08, 0.02), MAT_RED);
+    slit.position.set(-0.24, 1.54, 0.555);
+    g.add(shield, slit);
+    armLock = true; armLRest = -0.5;
+    armL.rotation.x = -0.5; AL.fore.rotation.x = -0.35;
   }
 
   // fake blob shadow to ground them without real-time shadow maps
@@ -973,21 +1325,12 @@ function buildEnemyMesh(type) {
   );
   blob.rotation.x = -Math.PI / 2;
   blob.position.y = 0.01;
+  g.add(blob);
 
-  g.add(torso, head, hips, legL, legR, armL, armR, blob);
-  if (type === 'bomber') {   // grenadier's backpack
-    const pack = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.42, 0.2), MAT_BLACK);
-    pack.position.set(0, 1.12, -0.26);
-    g.add(pack);
-  }
-  if (type === 'shieldbearer') {   // riot shield held toward the player
-    const shield = new THREE.Mesh(new THREE.BoxGeometry(0.95, 1.5, 0.07), MAT_GUNMETAL);
-    shield.position.set(0, 0.95, 0.44);
-    const slit = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.09, 0.02), MAT_RED);
-    slit.position.set(0, 1.35, 0.49);
-    g.add(shield, slit);
-  }
-  return { g, legL, legR, armL, armR, egun };
+  return { g, legL, legR, armL, armR, egun,
+    shinL: LG.shin, shinR: RG.shin, kneeRest: EP.knee,
+    armLock, armRLock, armLRest, armRRest,
+    egunBaseMat: type === 'laser' ? EM(0xff2d1a) : MAT_BLACK };
 }
 
 // Per-type combat config. drop: chance of a shotgun (shotgunners only — you
@@ -1004,6 +1347,9 @@ const ENEMY_TYPES = {
   bomber: { speed: 1.7, scale: [1.05, 1, 1.05], drop: 0, aimTime: 0.8, cd: [2.4, 1.2], mul: 1, pellets: 1, engage: [11, 5] },
   shieldbearer: { speed: 1.5, scale: [1.08, 1, 1.08], drop: 0, aimTime: 0.7, cd: [1.6, 1.0], mul: 1, pellets: 1, shielded: true },
   rocketeer: { speed: 1.4, scale: [1.05, 1.02, 1.05], drop: 0, aimTime: 1.0, cd: [3.4, 1.4], mul: 1, pellets: 1, engage: [16, 6] },
+  // anchors at range, charges, then sweeps an arena-wide beam — cover won't
+  // help and neither will running: killing him is the only way out
+  laser: { speed: 0.9, scale: [1, 1, 1], drop: 0, aimTime: 2.6, cd: [5.0, 1.5], mul: 1, pellets: 1, engage: [30, 6], laser: true },
 };
 
 function pointInObstacle(x, z, pad) {
@@ -1111,6 +1457,10 @@ function spawnEnemy(type = 'gunner') {
     warnFlash(['SNIPER.']);
     sfx.alert();   // its own stinger — sfx.wave() is the wave VO now
   }
+  if (type === 'laser') {
+    warnFlash(['LASER.']);
+    sfx.alert();
+  }
 }
 
 const ASSEMBLE_T = 0.25;      // seconds (world time) for a spawn to pull together
@@ -1127,6 +1477,7 @@ function removeEnemyShards(e) {
 function killEnemy(i, impulseDir) {
   const e = enemies[i];
   removeEnemyShards(e);   // a mid-assembly kill (menu demo) must not leak shards
+  removeBeam(e);          // shattering the laser cuts his sweep instantly
   if (timeMode === 'toggle' && (game.state === 'play' || game.state === 'intro')) {
     slowBank = Math.min(SLOWMO.cap, slowBank + SLOWMO.bonus);   // kills buy time
   }
@@ -1145,6 +1496,10 @@ function killEnemy(i, impulseDir) {
 
 function enemyFire(e, toPlayer) {
   const spec = ENEMY_TYPES[e.type];
+  if (e.type === 'laser') {   // the charge completes: begin the sweep
+    startBeam(e);
+    return;
+  }
   if (e.type === 'bomber') {   // bombers lob instead of shooting
     spawnGrenade(e);
     return;
@@ -1182,12 +1537,14 @@ function enemyFire(e, toPlayer) {
 // Telegraph flash: shotgunners light up both muzzle tips; other grouped guns
 // flash their first barrel; a bare mesh (bomber's grenade) flashes whole.
 function setEgunFlash(e, mat) {
+  // "off" restores the gun's own base material (the laser's crystal is red)
+  const m = mat === MAT_BLACK ? (e.egunBaseMat || MAT_BLACK) : mat;
   const tips = e.egun.isGroup && e.egun.userData.flash;
   if (tips) {
-    for (const t of tips) t.material = mat;
+    for (const t of tips) t.material = m;
     return;
   }
-  (e.egun.isGroup ? e.egun.children[0] : e.egun).material = mat;
+  (e.egun.isGroup ? e.egun.children[0] : e.egun).material = m;
 }
 
 // Enemies get on the trigger faster as waves progress: already quick at
@@ -1236,6 +1593,8 @@ function updateEnemy(e, sdt) {
   e.fireCd -= sdt;
 
   let moveSpeed = 0;
+
+  if (e.beam) updateBeam(e, sdt);   // the sweep, if one is live
 
   // a burst, once started, always completes — no melee interrupt mid-volley
   if (dist < 1.5 && e.state !== 'melee' && e.state !== 'burst' && e.state !== 'assemble') {
@@ -1314,7 +1673,7 @@ function updateEnemy(e, sdt) {
       const spec = ENEMY_TYPES[e.type];
       const aimT = spec.aimTime * aimSpeedFactor();
       const t = Math.min(e.stateT / aimT, 1);
-      e.armR.rotation.x = -t * (Math.PI / 2 - 0.06);
+      if (!e.armRLock) e.armR.rotation.x = -t * (Math.PI / 2 - 0.06);
       setEgunFlash(e, e.stateT > aimT * 0.7 ? MAT_WHITEFLASH : MAT_BLACK);
       if (e.stateT >= aimT) {
         enemyFire(e, toPlayer);
@@ -1344,9 +1703,9 @@ function updateEnemy(e, sdt) {
       break;
     }
     case 'recover': {
-      // relax whichever arm is out of position back toward rest
-      e.armR.rotation.x = Math.min(0, e.armR.rotation.x + sdt * 4.5);
-      e.armL.rotation.x = Math.min(0, e.armL.rotation.x + sdt * 6);
+      // relax each arm back toward its own rest pose (braced arms have one)
+      if (!e.armRLock) e.armR.rotation.x = Math.min(0, e.armR.rotation.x + sdt * 4.5);
+      e.armL.rotation.x += ((e.armLRest || 0) - e.armL.rotation.x) * Math.min(1, sdt * 6);
       if (e.stateT >= 0.5) { e.state = 'advance'; e.stateT = 0; }
       break;
     }
@@ -1360,20 +1719,72 @@ function updateEnemy(e, sdt) {
     }
   }
 
-  // walk cycle
+  // walk cycle: legs swing at the hip, knees fold on the recovery leg (the
+  // wedge shoes are rigid at 90° to the shin, tuner-approved)
   if (moveSpeed > 0) {
     e.walkPhase += sdt * 9;
     const sw = Math.sin(e.walkPhase) * 0.6;
     e.legL.rotation.x = sw;
     e.legR.rotation.x = -sw;
-    e.armL.rotation.x = -sw * 0.5;
+    if (e.shinL) {
+      e.shinL.rotation.x = e.kneeRest + Math.max(0, -Math.cos(e.walkPhase)) * 0.55;
+      e.shinR.rotation.x = e.kneeRest + Math.max(0, Math.cos(e.walkPhase)) * 0.55;
+    }
+    if (!e.armLock) e.armL.rotation.x = -sw * 0.5;
   } else {
     e.legL.rotation.x *= 0.9;
     e.legR.rotation.x *= 0.9;
+    if (e.shinL) {
+      e.shinL.rotation.x += (e.kneeRest - e.shinL.rotation.x) * 0.1;
+      e.shinR.rotation.x += (e.kneeRest - e.shinR.rotation.x) * 0.1;
+    }
   }
 }
 
 const MAT_WHITEFLASH = new THREE.MeshBasicMaterial({ color: 0xffffff });
+
+// ---------------------------------------------------------------------------
+// The laser's sweeping beam: an arena-length line pivoting slowly around the
+// emitter. It ignores cover, and the sweep spans the whole field — the only
+// way out is to shatter the emitter before the line reaches you.
+// ---------------------------------------------------------------------------
+const BEAM_LEN = 60, BEAM_SWEEP = 2.2, BEAM_TIME = 6.5;
+function startBeam(e) {
+  const base = Math.atan2(player.pos.x - e.pos.x, player.pos.z - e.pos.z);
+  const dir = Math.random() < 0.5 ? 1 : -1;
+  const gGroup = new THREE.Group();
+  const core = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, BEAM_LEN), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+  const glow = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, BEAM_LEN),
+    new THREE.MeshBasicMaterial({ color: 0xff2d1a, transparent: true, opacity: 0.55 }));
+  core.position.z = BEAM_LEN / 2;
+  glow.position.z = BEAM_LEN / 2;
+  gGroup.add(glow, core);
+  gGroup.position.set(e.pos.x, 1.05, e.pos.z);
+  scene.add(gGroup);
+  e.beam = { g: gGroup, angle: base - (BEAM_SWEEP / 2) * dir, dir, t: 0 };
+  sfx.alert();   // the same spine-tap the sniper gets — you have seconds
+}
+function updateBeam(e, sdt) {
+  const b = e.beam;
+  b.t += sdt;
+  b.angle += (BEAM_SWEEP / BEAM_TIME) * b.dir * sdt;
+  b.g.position.set(e.pos.x, 1.05, e.pos.z);
+  b.g.rotation.y = b.angle;
+  // distance from the player to the beam ray, in the ground plane
+  const dx = Math.sin(b.angle), dz = Math.cos(b.angle);
+  const px = player.pos.x - e.pos.x, pz = player.pos.z - e.pos.z;
+  const t = px * dx + pz * dz;
+  if (t > 0 && t < BEAM_LEN) {
+    const d = Math.abs(px * dz - pz * dx);
+    if (d < 0.35 && player.alive) hitPlayer();
+  }
+  if (b.t >= BEAM_TIME) removeBeam(e);
+}
+function removeBeam(e) {
+  if (!e.beam) return;
+  scene.remove(e.beam.g);
+  e.beam = null;
+}
 
 // ---------------------------------------------------------------------------
 // Shooting
@@ -2582,7 +2993,9 @@ function composeWave(n) {
   if (n >= 4) for (let i = 0; i < Math.floor(total / 5); i++) queue.push('shieldbearer');
   if (n >= 5) for (let i = 0; i < Math.floor(total / 5); i++) queue.push('armored');
   if (n >= 6) for (let i = 0; i < Math.floor(total / 6); i++) queue.push('rocketeer');
+  if (n >= 6) for (let i = 0; i < Math.floor(total / 6); i++) queue.push('rusher');
   if (n >= 4) queue.push('sniper');
+  if (n >= 7 && n % 2 === 1) queue.push('laser');
   queue.length = Math.min(queue.length, total);
   while (queue.length < total) queue.push('gunner');
   for (let i = queue.length - 1; i > 0; i--) {   // shuffle
@@ -2924,6 +3337,7 @@ function hitPlayer(ended = false) {
 function clearField() {
   for (let i = enemies.length - 1; i >= 0; i--) {
     removeEnemyShards(enemies[i]);
+    removeBeam(enemies[i]);
     scene.remove(enemies[i].g);
     enemies.splice(i, 1);
   }
