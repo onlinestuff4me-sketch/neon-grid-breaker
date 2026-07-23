@@ -42,7 +42,10 @@ and steer).
 | HUD | Shields · ammo · **ENEMIES** + **GATES** counters · score · FOCUS bar that glows/pulses and reads **FOCUS FULL** when topped up. Boards show `score ✦shards ∩gates`. |
 | Menu | Minimal: three control lines and a recent-runs board with DISTANCE / ENEMIES / GATES toggle chips (one metric at a time, each run ranked against this device's top runs), all below the horizon; the live game world drifts behind the title (attract mode, drones firing). |
 | Ammo | You start with 14 shards, max 30. Empty tank = dry click — go soul hunting. |
-| Enemies | Drones emerge from doors in the floor/walls (or dive from the sky), match your speed ahead of you, and fire. One hit shatters them (**+50**). |
+| Enemies | Drones emerge from doors in the floor/walls (or dive from the sky), match your speed ahead of you, and fire. **Wardens** wear an ice shell (two hits — the shell shatters first). **Turrets** ride the walls of enclosed zones and fire faster. Late-run drones loose **3-bolt fan volleys** — dodge through the gap. |
+| Terrain | **Glass pane walls** with a weave-gap (shoot through for ammo or thread the gap — smashing through costs a shield) and **crystal pylon slaloms**. Density and gap width ramp by zone. |
+| Zone modifiers | Seeded environmental twists announced at the seam: **CROSSWIND** (counter-steer the drift) and **FOG BANK** (visibility closes in). |
+| Near miss | A bolt that grazes past inside 1.1m **refunds focus** — dodging close is how you keep slow-mo flowing. |
 | Telegraph | A wisp — the same glow it fires — charges up inside the crystal ~0.6 s before each bolt, readable even in slow-mo. |
 | Souls rule | **Kill a drone before its first shot and you keep its soul.** Once it has fired, the soul is spent — the crystal visibly goes cold. Slow-mo is how you beat the telegraph. |
 | Bolts | Ethereal comet-wisps with a spiral tail (the true path is straight = fair). Dodge them or shoot them down (**DEFLECT +40**). |
