@@ -102,34 +102,48 @@ function makeFloorTexture() {
   return tex;
 }
 
-// The arena is a city intersection: two crossing streets with crosswalks,
-// sidewalk aprons, and lane dashes — drawn once across the whole floor
+// ---------------------------------------------------------------------------
+// The city. One 40m intersection cell, tiled to the horizon; towers with
+// shopfront ground floors ring the arena and thin out into fogged blocks.
+// ---------------------------------------------------------------------------
+const CITY = {
+  street: 12,      // road width (m)
+  floor1: 4,       // shopfront storey height (m)
+  floorH: 3,       // upper storey height (m)
+  win: 0.62,       // upper window fill 0..1
+  hMin: 9, hMax: 24,
+  density: 0.75,   // odds a distant lot gets a tower
+  fogNear: 55, fogFar: 200,
+  reach: 3,        // distant rings of 40m city cells
+};
+scene.fog = new THREE.Fog(0xe8eaee, CITY.fogNear, CITY.fogFar);
+
 function makeStreetTexture() {
   const c = document.createElement('canvas');
   c.width = c.height = 1024;
   const g = c.getContext('2d');
-  const S = 1024, road = 0.30;                    // road half-width as a fraction
-  g.fillStyle = '#eceef1'; g.fillRect(0, 0, S, S);  // sidewalk / plaza
+  const S = 1024, road = CITY.street / (ARENA_HALF * 2);
+  g.fillStyle = '#eceef1'; g.fillRect(0, 0, S, S);
   g.strokeStyle = 'rgba(22,24,29,0.08)'; g.lineWidth = 2;
-  for (let i = 0; i <= 16; i++) {                 // paving joints
+  for (let i = 0; i <= 16; i++) {
     g.beginPath(); g.moveTo((i / 16) * S, 0); g.lineTo((i / 16) * S, S); g.stroke();
     g.beginPath(); g.moveTo(0, (i / 16) * S); g.lineTo(S, (i / 16) * S); g.stroke();
   }
-  g.fillStyle = '#e2e4e8';                        // the two roads
+  g.fillStyle = '#e2e4e8';
   g.fillRect(S / 2 - S * road / 2, 0, S * road, S);
   g.fillRect(0, S / 2 - S * road / 2, S, S * road);
-  g.strokeStyle = 'rgba(22,24,29,0.16)'; g.lineWidth = 4;   // curb lines
+  g.strokeStyle = 'rgba(22,24,29,0.16)'; g.lineWidth = 4;
   for (const p of [S / 2 - S * road / 2, S / 2 + S * road / 2]) {
     g.beginPath(); g.moveTo(p, 0); g.lineTo(p, S); g.stroke();
     g.beginPath(); g.moveTo(0, p); g.lineTo(S, p); g.stroke();
   }
-  g.strokeStyle = 'rgba(22,24,29,0.28)'; g.lineWidth = 5;   // dashed center lines
+  g.strokeStyle = 'rgba(22,24,29,0.28)'; g.lineWidth = 5;
   g.setLineDash([28, 26]);
   g.beginPath(); g.moveTo(S / 2, 0); g.lineTo(S / 2, S); g.stroke();
   g.beginPath(); g.moveTo(0, S / 2); g.lineTo(S, S / 2); g.stroke();
   g.setLineDash([]);
-  g.fillStyle = 'rgba(255,255,255,0.9)';                     // crosswalk bars
-  const cw = S * road, half = cw / 2, bar = 16;
+  g.fillStyle = 'rgba(255,255,255,0.9)';
+  const cw = S * road, half = cw / 2;
   for (const side of [-1, 1]) {
     const edge = S / 2 + side * (half + 30) - (side < 0 ? 60 : 0);
     for (let i = 0; i < 10; i++) {
@@ -139,29 +153,48 @@ function makeStreetTexture() {
     }
   }
   const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   return tex;
 }
 
-// window-grid facade for the buildings that wall the arena — mostly blank
-// glass, a scatter of lit panes, and the rare red one (someone is watching)
-function makeFacadeTexture(seed) {
+// per-building facade: a shopfront ground floor (floor-to-ceiling glass,
+// mullions, a recessed door) under rows of apartment/office windows sized
+// by the building's real height
+function makeFacadeTexture(seed, h) {
   const c = document.createElement('canvas');
   c.width = 256; c.height = 512;
   const g = c.getContext('2d');
   g.fillStyle = '#f4f5f7'; g.fillRect(0, 0, 256, 512);
-  for (let y = 0; y < 12; y++) for (let x = 0; x < 5; x++) {
+  const shopH = Math.round(512 * (CITY.floor1 / h));
+  // shopfront band
+  g.fillStyle = 'rgba(22,24,29,0.13)';                  // the glass
+  g.fillRect(6, 512 - shopH + 6, 244, shopH - 8);
+  g.fillStyle = '#f4f5f7';
+  for (let i = 1; i < 4; i++) g.fillRect(6 + i * 61, 512 - shopH + 6, 6, shopH - 8);  // mullions
+  const doorX = 20 + Math.floor(rnd01(seed * 3.7) * 3) * 61;
+  g.fillStyle = 'rgba(22,24,29,0.55)';                  // the door pane
+  g.fillRect(doorX, 512 - shopH + 10, 44, shopH - 12);
+  g.fillStyle = 'rgba(22,24,29,0.32)';                  // awning line
+  g.fillRect(0, 512 - shopH - 6, 256, 8);
+  // upper storeys
+  const rows = Math.max(1, Math.round((h - CITY.floor1) / CITY.floorH));
+  const rowH = (512 - shopH - 16) / rows;
+  const wpx = Math.max(10, Math.round(40 * CITY.win));
+  for (let y = 0; y < rows; y++) for (let x = 0; x < 5; x++) {
     const r = rnd01(seed * 31.7 + y * 13.1 + x * 7.3);
-    g.fillStyle = r > 0.94 ? 'rgba(255,45,26,0.75)'
+    g.fillStyle = r > 0.96 ? 'rgba(255,45,26,0.75)'
       : r > 0.62 ? 'rgba(22,24,29,0.20)' : 'rgba(22,24,29,0.10)';
-    g.fillRect(14 + x * 48, 18 + y * 40, 32, 24);
+    g.fillRect(24 + x * 46, 10 + y * rowH, wpx, Math.min(rowH - 10, 26));
   }
-  const tex = new THREE.CanvasTexture(c);
-  return tex;
+  return new THREE.CanvasTexture(c);
 }
 
+const CELL = ARENA_HALF * 2;
+const streetTex = makeStreetTexture();
+streetTex.repeat.set(CITY.reach * 2 + 1, CITY.reach * 2 + 1);
 const floor = new THREE.Mesh(
-  new THREE.PlaneGeometry(ARENA_HALF * 2, ARENA_HALF * 2),
-  new THREE.MeshLambertMaterial({ map: makeStreetTexture() })
+  new THREE.PlaneGeometry(CELL * (CITY.reach * 2 + 1), CELL * (CITY.reach * 2 + 1)),
+  new THREE.MeshLambertMaterial({ map: streetTex })
 );
 floor.rotation.x = -Math.PI / 2;
 scene.add(floor);
@@ -175,42 +208,55 @@ for (let i = 0; i < 4; i++) {
   wall.visible = false;
   scene.add(wall);
 }
-// perimeter blocks: rows of towers of varied height hard against the walls,
-// with gaps left where the streets run out of the arena — an endless city,
-// the avenue continuing past the fight in every direction
-for (let side = 0; side < 4; side++) {
-  const a = (side * Math.PI) / 2;
-  let along = -ARENA_HALF;
-  let bi = 0;
-  while (along < ARENA_HALF - 2) {
-    const w = 5 + rnd01(side * 91.3 + bi * 17.7) * 5;
-    const mid = along + w / 2;
-    if (Math.abs(mid) > 4.2) {   // leave the street mouths open
-      const h = 9 + rnd01(side * 53.9 + bi * 29.3) * 14;
-      const b = new THREE.Mesh(new THREE.BoxGeometry(w - 0.6, h, 6),
-        new THREE.MeshLambertMaterial({ map: makeFacadeTexture(side * 10 + bi) }));
-      b.position.set(
-        Math.sin(a) * (ARENA_HALF + 3.3) + Math.cos(a) * mid,
-        h / 2,
-        Math.cos(a) * (ARENA_HALF + 3.3) - Math.sin(a) * mid);
-      b.rotation.y = a;
+
+// a corner lot of towers for one city cell; the near ring gets full shopfront
+// facades, distant rings get plain fogged silhouettes
+function buildLot(cx, cz, near, si) {
+  const half = CELL / 2, sw = CITY.street / 2 + 1;
+  for (const [qx, qz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+    let bi = 0;
+    for (let k = 0; k < 2; k++) {
+      if (rnd01(si * 7.9 + bi * 3.1 + k * 41.7) > CITY.density) { bi++; continue; }
+      const w = 6 + rnd01(si * 91.3 + bi * 17.7) * 6;
+      const h = CITY.hMin + rnd01(si * 53.9 + bi * 29.3) * (CITY.hMax - CITY.hMin);
+      const px = cx + qx * (sw + 3.5 + w / 2 + k * 8 + rnd01(si + bi * 5.1) * 3);
+      const pz = cz + qz * (sw + 3.5 + w / 2 + (1 - k) * 8 + rnd01(si + bi * 9.7) * 3);
+      const mat = near ? new THREE.MeshLambertMaterial({ map: makeFacadeTexture(si * 10 + bi, h) }) : MAT_WHITE;
+      const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, w * (0.7 + rnd01(bi * 13.3) * 0.6)), mat);
+      b.position.set(px, h / 2, pz);
       scene.add(b);
-      // a second, taller silhouette row behind — depth without draw cost
-      if (rnd01(side * 7.7 + bi * 3.3) > 0.4) {
-        const h2 = h + 6 + rnd01(bi * 47.1) * 10;
-        const b2 = new THREE.Mesh(new THREE.BoxGeometry(w * 0.8, h2, 6), MAT_WHITE);
-        b2.position.set(
-          Math.sin(a) * (ARENA_HALF + 10) + Math.cos(a) * (mid + 2),
-          h2 / 2,
-          Math.cos(a) * (ARENA_HALF + 10) - Math.sin(a) * (mid + 2));
-        b2.rotation.y = a;
-        scene.add(b2);
-      }
+      bi++;
     }
-    along += w;
-    bi++;
   }
 }
+// the arena's own cell gets a tight perimeter ring (its lots would otherwise
+// intrude on the playfield); streets' mouths stay open at every side
+function buildPerimeter() {
+  for (let side = 0; side < 4; side++) {
+    const a = (side * Math.PI) / 2;
+    let along = -ARENA_HALF, bi = 0;
+    while (along < ARENA_HALF - 2) {
+      const w = 5 + rnd01(side * 91.3 + bi * 17.7) * 5;
+      const mid = along + w / 2;
+      if (Math.abs(mid) > CITY.street / 2 + 1.5) {
+        const h = CITY.hMin + rnd01(side * 53.9 + bi * 29.3) * (CITY.hMax - CITY.hMin);
+        const b = new THREE.Mesh(new THREE.BoxGeometry(w - 0.6, h, 7),
+          new THREE.MeshLambertMaterial({ map: makeFacadeTexture(side * 10 + bi, h) }));
+        b.position.set(Math.sin(a) * (ARENA_HALF + 3.6) + Math.cos(a) * mid, h / 2,
+          Math.cos(a) * (ARENA_HALF + 3.6) - Math.sin(a) * mid);
+        b.rotation.y = a;
+        scene.add(b);
+      }
+      along += w; bi++;
+    }
+  }
+}
+buildPerimeter();
+for (let gx = -CITY.reach; gx <= CITY.reach; gx++)
+  for (let gz = -CITY.reach; gz <= CITY.reach; gz++) {
+    if (gx === 0 && gz === 0) continue;
+    buildLot(gx * CELL, gz * CELL, false, gx * 17 + gz * 5 + 60);
+  }
 
 // Cover blocks double as physics obstacles: {min, max} AABBs.
 // Three arena layouts, rotated every 3 waves. [x, z, w, h, d] per block.
@@ -581,6 +627,29 @@ function setWeapon(type) {
 const bullets = [];   // {mesh, trail, pos, vel, prev, fromPlayer, life}
 const bulletGeo = new THREE.SphereGeometry(0.04, 8, 8);
 const bulletMatP = new THREE.MeshBasicMaterial({ color: 0x16181d });
+
+// bullet scars: temporary marks where rounds strike walls and cover
+const markGeo = new THREE.PlaneGeometry(0.15, 0.15);
+const marks = [];
+function addBulletMark(b, at) {
+  const p = (at || b.pos).clone();
+  p.x = Math.max(-ARENA_HALF + 0.04, Math.min(ARENA_HALF - 0.04, p.x));
+  p.z = Math.max(-ARENA_HALF + 0.04, Math.min(ARENA_HALF - 0.04, p.z));
+  const m = new THREE.Mesh(markGeo,
+    new THREE.MeshBasicMaterial({ color: 0x16181d, transparent: true, opacity: 0.38 }));
+  m.position.copy(p).addScaledVector(_v1.copy(b.vel).normalize(), -0.03);
+  m.lookAt(m.position.x - b.vel.x, m.position.y - b.vel.y, m.position.z - b.vel.z);
+  marks.push({ m, t: 0 });
+  scene.add(m);
+  if (marks.length > 70) { scene.remove(marks[0].m); marks[0].m.material.dispose(); marks.shift(); }
+}
+function updateMarks(dt2) {
+  for (let i = marks.length - 1; i >= 0; i--) {
+    const k = marks[i]; k.t += dt2;
+    k.m.material.opacity = 0.38 * Math.max(0, 1 - k.t / 10);
+    if (k.t >= 10) { scene.remove(k.m); k.m.material.dispose(); marks.splice(i, 1); }
+  }
+}
 const bulletMatE = new THREE.MeshBasicMaterial({ color: 0xff2d1a });
 const bulletMatCore = new THREE.MeshBasicMaterial({ color: 0xffffff });
 const bulletMatHalo = new THREE.MeshBasicMaterial({
@@ -1563,6 +1632,123 @@ function spawnEnemy(type = 'gunner') {
   }
 }
 
+// ---------------------------------------------------------------------------
+// RUSH HOUR: the street is full of black silhouettes walking their routes.
+// Some are the system's sleepers. Freeze time and their bodies burn red.
+// ---------------------------------------------------------------------------
+const crowd = [];
+const npcDebris = [];
+const RUSH = { crowd: 24 };
+let rushT = 0, nextSleeperT = 5;
+const MAT_CROWD = new THREE.MeshLambertMaterial({ color: 0x1b1d22 });
+const MAT_REVEAL = new THREE.MeshBasicMaterial({ color: 0xff2d1a });
+
+function spawnNPC(anywhere = false) {
+  const parts = buildEnemyMesh('gunner');
+  const horiz = Math.random() < 0.5;
+  const lane = (Math.random() - 0.5) * (CITY.street - 3);
+  const dir = Math.random() < 0.5 ? 1 : -1;
+  const n = { ...parts, horiz, lane, dir, pos: parts.g.position,
+    walkPhase: Math.random() * 6.28, sleeper: Math.random() < 0.4, revealed: false,
+    speed: 1.0 + Math.random() * 0.6 };
+  const along = anywhere ? (Math.random() * 2 - 1) * (ARENA_HALF - 1) : -dir * (ARENA_HALF - 0.6);
+  if (horiz) n.pos.set(along, 0, lane); else n.pos.set(lane, 0, along);
+  if (Math.hypot(n.pos.x - player.pos.x, n.pos.z - player.pos.z) < 4) n.pos.x += 6;
+  n.g.traverse(o => { if (o.isMesh) { if (!o.userData.m0) o.userData.m0 = o.material; o.material = MAT_CROWD; } });
+  scene.add(n.g);
+  crowd.push(n);
+}
+function clearCrowd() {
+  for (const n of crowd) scene.remove(n.g);
+  crowd.length = 0;
+  for (const d of npcDebris) scene.remove(d.m);
+  npcDebris.length = 0;
+}
+function shatterNPC(n) {
+  scene.remove(n.g);
+  for (let i = 0; i < 12; i++) {
+    const m2 = new THREE.Mesh(shardGeo, MAT_CROWD);
+    m2.position.set(n.pos.x, 0.4 + Math.random() * 1.2, n.pos.z);
+    m2.scale.setScalar(0.5 + Math.random() * 0.5);
+    scene.add(m2);
+    npcDebris.push({ m: m2, vx: (Math.random() - 0.5) * 5, vy: 2 + Math.random() * 3,
+      vz: (Math.random() - 0.5) * 5, t: 0 });
+  }
+  vibrate(10);
+}
+function activateSleeper(n) {
+  // the mask comes off: the crystal body returns, and it joins the fight
+  n.g.traverse(o => { if (o.isMesh && o.userData.m0) o.material = o.userData.m0; });
+  const idx = crowd.indexOf(n);
+  if (idx >= 0) crowd.splice(idx, 1);
+  enemies.push({
+    g: n.g, legL: n.legL, legR: n.legR, armL: n.armL, armR: n.armR, egun: n.egun,
+    shinL: n.shinL, shinR: n.shinR, kneeRest: n.kneeRest,
+    armLock: false, armRLock: false, armLRest: 0, armRRest: 0, egunBaseMat: n.egunBaseMat,
+    type: 'gunner', speed: 2.0, pos: n.g.position, state: 'advance', shards: [],
+    stateT: 0, walkPhase: n.walkPhase, strafe: Math.random() < 0.5 ? 1 : -1, strafeT: 1.5,
+    fireCd: 0.35, engageDist: 26, burstLeft: 0, burstT: 0, alive: true,
+  });
+  spawnNPC();
+}
+function initRush() {
+  game.wave = 1;
+  game.state = 'intro';
+  game.stateT = 0;
+  game.introLen = 1.2;
+  game.spawnQueue = [];
+  setLayout(3);   // the boulevard
+  clearCrowd();
+  rushT = 0; nextSleeperT = 5;
+  for (let i = 0; i < RUSH.crowd; i++) spawnNPC(true);
+  showBanner('RUSH HOUR<small>FREEZE TIME TO SEE WHO THEY REALLY ARE</small>', 3200);
+}
+function updateCrowd(sdt) {
+  const slow = timeScale < 0.55;
+  for (let i = crowd.length - 1; i >= 0; i--) {
+    const n = crowd[i];
+    const vx = n.horiz ? n.dir : 0, vz = n.horiz ? 0 : n.dir;
+    n.pos.x += vx * n.speed * sdt;
+    n.pos.z += vz * n.speed * sdt;
+    n.g.rotation.y = Math.atan2(vx, vz);
+    n.walkPhase += sdt * 7;
+    const sw = Math.sin(n.walkPhase) * 0.55;
+    n.legL.rotation.x = sw; n.legR.rotation.x = -sw;
+    n.shinL.rotation.x = n.kneeRest + Math.max(0, -Math.cos(n.walkPhase)) * 0.5;
+    n.shinR.rotation.x = n.kneeRest + Math.max(0, Math.cos(n.walkPhase)) * 0.5;
+    n.armL.rotation.x = -sw * 0.5;
+    n.armR.rotation.x = sw * 0.5;
+    if (n.sleeper && n.revealed !== slow) {
+      n.revealed = slow;
+      n.g.traverse(o => { if (o.isMesh) o.material = slow ? MAT_REVEAL : MAT_CROWD; });
+    }
+    if (Math.abs(n.horiz ? n.pos.x : n.pos.z) > ARENA_HALF - 0.4) {
+      scene.remove(n.g); crowd.splice(i, 1); spawnNPC();
+    }
+  }
+  while (crowd.length + enemies.length < RUSH.crowd) spawnNPC();
+  for (let i = npcDebris.length - 1; i >= 0; i--) {
+    const d = npcDebris[i]; d.t += sdt;
+    d.vy -= 12 * sdt;
+    d.m.position.x += d.vx * sdt; d.m.position.y += d.vy * sdt; d.m.position.z += d.vz * sdt;
+    d.m.rotation.x += 5 * sdt; d.m.rotation.z += 4 * sdt;
+    if (d.m.position.y < 0 || d.t > 1.2) { scene.remove(d.m); npcDebris.splice(i, 1); }
+  }
+  if (game.state !== 'play') return;
+  rushT += sdt;
+  nextSleeperT -= sdt;
+  if (nextSleeperT <= 0) {
+    nextSleeperT = Math.max(2.2, 6.5 - rushT * 0.06) * (0.7 + Math.random() * 0.6);
+    let best = null, bd = 1e9;
+    for (const n of crowd) {
+      if (!n.sleeper) continue;
+      const d = Math.hypot(n.pos.x - player.pos.x, n.pos.z - player.pos.z);
+      if (d > 5 && d < 24 && d < bd) { bd = d; best = n; }
+    }
+    if (best) { activateSleeper(best); sfx.alert(); }
+  }
+}
+
 const ASSEMBLE_T = 0.25;      // seconds (world time) for a spawn to pull together
 const ASSEMBLE_REVEAL = 0.95; // fraction of T when the body appears under the
                               // shards, which then shrink into its surface —
@@ -1960,6 +2146,7 @@ function updateBullets(sdt) {
 
     if (b.life <= 0 || b.pos.y <= 0.02 ||
         Math.abs(b.pos.x) > ARENA_HALF || Math.abs(b.pos.z) > ARENA_HALF) {
+      if (Math.abs(b.pos.x) > ARENA_HALF || Math.abs(b.pos.z) > ARENA_HALF) addBulletMark(b);
       killBullet(i, b.pos.y <= 0.05 ? b.pos : null);
       continue;
     }
@@ -1969,12 +2156,31 @@ function updateBullets(sdt) {
       const t = segAABB(b.prev, b.pos, o);
       if (t >= 0) {
         killBullet(i, _v2.lerpVectors(b.prev, b.pos, t));
+        addBulletMark(b, _v2);
         hit = true;
         break;
       }
     }
     if (hit) continue;
 
+    if (b.fromPlayer && game.mode === 'rush') {
+      let hitC = false;
+      for (let ci = crowd.length - 1; ci >= 0; ci--) {
+        const n = crowd[ci];
+        _v2.set(n.pos.x, 0.45, n.pos.z); _v3.set(n.pos.x, 1.5, n.pos.z);
+        if (segSegDistSq(b.prev, b.pos, _v2, _v3) < 0.3 * 0.3) {
+          // a civilian: shatters black — and the system docks your frozen time
+          shatterNPC(n);
+          crowd.splice(ci, 1);
+          spawnNPC();
+          if (timeMode === 'toggle') slowBank = Math.max(0, slowBank - 2);
+          killBullet(i, b.pos);
+          hitC = true;
+          break;
+        }
+      }
+      if (hitC) continue;
+    }
     if (b.fromPlayer) {
       let consumed = false;
       for (let j = enemies.length - 1; j >= 0; j--) {
@@ -2177,10 +2383,16 @@ function onPointerDown(ev) {
       }
       if (ev.target.closest('#scores') || ev.target.closest('.rules')) return;   // reading
     }
+    if (game.state === 'menu' && ev.target && ev.target.closest && ev.target.closest('#rushlink')) {
+      game.mode = 'rush';
+      advanceFromOverlay();
+      return;
+    }
     // on the main menu only TAP TO BEGIN starts a run — a stray tap right
     // after closing settings must not launch you into a wave
     if (game.state === 'menu' &&
         !(ev.target && ev.target.closest && ev.target.closest('.go'))) return;
+    if (game.state === 'menu') game.mode = 'wave';
     advanceFromOverlay();
     return;   // this pointer is never registered, so its release is inert
   }
@@ -3010,6 +3222,7 @@ const game = {
   wave: 1,
   kills: 0,
   spawnQueue: [],
+  mode: 'wave',
   spawnTimer: 0,
   stateT: 0,
   waveBearing: 0,
@@ -3435,6 +3648,7 @@ function hitPlayer(ended = false) {
 }
 
 function clearField() {
+  clearCrowd();
   for (let i = enemies.length - 1; i >= 0; i--) {
     removeEnemyShards(enemies[i]);
     removeBeam(enemies[i]);
@@ -3490,8 +3704,7 @@ function advanceFromOverlay() {
     runStartAt = Date.now();
     runPlayT = 0;
     setWeapon('pistol');
-    startWave(1);
-    showGuide();
+    if (game.mode === 'rush') initRush(); else { startWave(1); showGuide(); }
   } else {   // retry current wave
     clearField();
     player.alive = true;
@@ -3505,7 +3718,7 @@ function advanceFromOverlay() {
     stickUI(false);
     sprintTo = null;
     setWeapon('pistol');
-    startWave(game.wave);
+    if (game.mode === 'rush') initRush(); else startWave(game.wave);
   }
 }
 
@@ -3681,8 +3894,10 @@ function frame(now) {
     }
     for (const e of enemies) updateEnemy(e, sdt);
     updateBullets(sdt);
+    if (game.mode === 'rush') updateCrowd(sdt);
+    updateMarks(sdt);
 
-    if (game.state === 'play' && game.spawnQueue.length === 0 && enemies.length === 0 &&
+    if (game.mode !== 'rush' && game.state === 'play' && game.spawnQueue.length === 0 && enemies.length === 0 &&
         performance.now() >= killFlashUntil) {   // let the final kill's word land first
       game.state = 'clear';
       game.stateT = 0;
@@ -3701,6 +3916,8 @@ function frame(now) {
   } else if (game.state === 'dead') {
     for (const e of enemies) updateEnemy(e, sdt);
     updateBullets(sdt);
+    if (game.mode === 'rush') updateCrowd(sdt);
+    updateMarks(sdt);
   } else if (game.state === 'menu') {
     // the arena fights itself behind the title: enemies stalk and shoot at a
     // ghost target, and every few seconds one of them shatters
@@ -3723,6 +3940,8 @@ function frame(now) {
     }
     for (const e of enemies) updateEnemy(e, sdt);
     updateBullets(sdt);
+    if (game.mode === 'rush') updateCrowd(sdt);
+    updateMarks(sdt);
   }
   updateDebris(sdt);
   updateRipples(sdt);
