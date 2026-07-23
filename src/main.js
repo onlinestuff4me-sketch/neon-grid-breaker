@@ -255,7 +255,7 @@ buildPerimeter();
 for (let gx = -CITY.reach; gx <= CITY.reach; gx++)
   for (let gz = -CITY.reach; gz <= CITY.reach; gz++) {
     if (gx === 0 && gz === 0) continue;
-    buildLot(gx * CELL, gz * CELL, false, gx * 17 + gz * 5 + 60);
+    buildLot(gx * CELL, gz * CELL, false, 60);   // one seed: the city repeats every block
   }
 
 // Cover blocks double as physics obstacles: {min, max} AABBs.
@@ -524,11 +524,27 @@ const player = {
   alive: true,
 };
 
+// Endless streets: the city is periodic per 40m block, so when the player
+// crosses a block boundary we quietly shift the whole fight back one block.
+function shiftWorld(ax, d) {
+  player.pos[ax] += d;
+  for (const e of enemies) { e.pos[ax] += d; if (e.beam) e.beam.g.position[ax] += d; }
+  for (const n of crowd) n.pos[ax] += d;
+  for (const b of bullets) { b.pos[ax] += d; b.prev[ax] += d; }
+  for (const p2 of pickups) p2.g.position[ax] += d;
+  for (const k of marks) k.m.position[ax] += d;
+  for (const d2 of npcDebris) d2.m.position[ax] += d;
+  for (const g2 of grenades) { g2.pos[ax] += d; if (g2.mesh && g2.mesh.position !== g2.pos) g2.mesh.position[ax] += d; if (g2.ring && g2.ring.position !== g2.pos) g2.ring.position[ax] += d; }
+  for (const m2 of missiles) { m2.pos[ax] += d; if (m2.mesh && m2.mesh.position !== m2.pos) m2.mesh.position[ax] += d; }
+}
+function recenterWorld() {
+  for (const ax of ['x', 'z']) {
+    if (Math.abs(player.pos[ax]) > CELL / 2) shiftWorld(ax, -Math.sign(player.pos[ax]) * CELL);
+  }
+}
 function resolvePlayerCollisions() {
   const p = player.pos;
-  const lim = ARENA_HALF - 0.6;
-  p.x = Math.min(Math.max(p.x, -lim), lim);
-  p.z = Math.min(Math.max(p.z, -lim), lim);
+  // no walls: the player may walk forever — the world recenters around them
   for (const o of obstacles) {
     const ex = PLAYER_RADIUS;
     if (p.x > o.min.x - ex && p.x < o.max.x + ex && p.z > o.min.z - ex && p.z < o.max.z + ex) {
@@ -633,8 +649,6 @@ const markGeo = new THREE.PlaneGeometry(0.15, 0.15);
 const marks = [];
 function addBulletMark(b, at) {
   const p = (at || b.pos).clone();
-  p.x = Math.max(-ARENA_HALF + 0.04, Math.min(ARENA_HALF - 0.04, p.x));
-  p.z = Math.max(-ARENA_HALF + 0.04, Math.min(ARENA_HALF - 0.04, p.z));
   const m = new THREE.Mesh(markGeo,
     new THREE.MeshBasicMaterial({ color: 0x16181d, transparent: true, opacity: 0.38 }));
   m.position.copy(p).addScaledVector(_v1.copy(b.vel).normalize(), -0.03);
@@ -949,7 +963,7 @@ function updateMissiles(sdt) {
     // detonate on player proximity, terrain, or cover
     const pd = Math.hypot(player.pos.x - m.pos.x, player.pos.z - m.pos.z);
     if ((pd < 0.6 && Math.abs(m.pos.y - 1.1) < 1.2) || m.pos.y <= 0.1 ||
-        Math.abs(m.pos.x) > ARENA_HALF || Math.abs(m.pos.z) > ARENA_HALF) {
+        Math.abs(m.pos.x) > CELL || Math.abs(m.pos.z) > CELL) {
       explodeMissile(i);
       continue;
     }
@@ -1655,6 +1669,7 @@ function spawnNPC(anywhere = false) {
   if (horiz) n.pos.set(along, 0, lane); else n.pos.set(lane, 0, along);
   if (Math.hypot(n.pos.x - player.pos.x, n.pos.z - player.pos.z) < 4) n.pos.x += 6;
   n.g.traverse(o => { if (o.isMesh) { if (!o.userData.m0) o.userData.m0 = o.material; o.material = MAT_CROWD; } });
+  if (n.egun) n.egun.visible = false;   // civilians are unarmed — until they aren't
   scene.add(n.g);
   crowd.push(n);
 }
@@ -1679,6 +1694,7 @@ function shatterNPC(n) {
 function activateSleeper(n) {
   // the mask comes off: the crystal body returns, and it joins the fight
   n.g.traverse(o => { if (o.isMesh && o.userData.m0) o.material = o.userData.m0; });
+  if (n.egun) n.egun.visible = true;   // the gun appears with the red
   const idx = crowd.indexOf(n);
   if (idx >= 0) crowd.splice(idx, 1);
   enemies.push({
@@ -1701,6 +1717,12 @@ function initRush() {
   clearCrowd();
   rushT = 0; nextSleeperT = 5;
   for (let i = 0; i < RUSH.crowd; i++) spawnNPC(true);
+  el.pausebtn.style.display = 'block';
+  el.ammo.style.display = '';
+  setTimeLocked(false);
+  slowBank = SLOWMO.base;
+  updateSlowMeter();
+  updateModeUI();   // shows the time button + meter in button mode
   showBanner('RUSH HOUR<small>FREEZE TIME TO SEE WHO THEY REALLY ARE</small>', 3200);
 }
 function updateCrowd(sdt) {
@@ -2145,8 +2167,7 @@ function updateBullets(sdt) {
     }
 
     if (b.life <= 0 || b.pos.y <= 0.02 ||
-        Math.abs(b.pos.x) > ARENA_HALF || Math.abs(b.pos.z) > ARENA_HALF) {
-      if (Math.abs(b.pos.x) > ARENA_HALF || Math.abs(b.pos.z) > ARENA_HALF) addBulletMark(b);
+        Math.abs(b.pos.x) > CELL || Math.abs(b.pos.z) > CELL) {
       killBullet(i, b.pos.y <= 0.05 ? b.pos : null);
       continue;
     }
@@ -3592,6 +3613,7 @@ function startWave(n, quiet = false) {   // quiet: the clear card already announ
   setLayout(newArena);
   if (arenaChanged) {
     resolvePlayerCollisions();   // in case a new block landed on the player
+    recenterWorld();
     for (let i = pickups.length - 1; i >= 0; i--) removePickup(i);
   }
   if (!quiet) {
@@ -3800,6 +3822,7 @@ function frame(now) {
     player.pos.x += player.vel.x * dt;
     player.pos.z += player.vel.z * dt;
     resolvePlayerCollisions();
+    recenterWorld();
     // a sprint grinding against a wall gives up instead of pinning you there
     if (sprintTo) {
       const moved = Math.hypot(player.pos.x - preX, player.pos.z - preZ);
