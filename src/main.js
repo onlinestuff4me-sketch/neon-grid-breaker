@@ -102,19 +102,114 @@ function makeFloorTexture() {
   return tex;
 }
 
+// The arena is a city intersection: two crossing streets with crosswalks,
+// sidewalk aprons, and lane dashes — drawn once across the whole floor
+function makeStreetTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 1024;
+  const g = c.getContext('2d');
+  const S = 1024, road = 0.30;                    // road half-width as a fraction
+  g.fillStyle = '#eceef1'; g.fillRect(0, 0, S, S);  // sidewalk / plaza
+  g.strokeStyle = 'rgba(22,24,29,0.08)'; g.lineWidth = 2;
+  for (let i = 0; i <= 16; i++) {                 // paving joints
+    g.beginPath(); g.moveTo((i / 16) * S, 0); g.lineTo((i / 16) * S, S); g.stroke();
+    g.beginPath(); g.moveTo(0, (i / 16) * S); g.lineTo(S, (i / 16) * S); g.stroke();
+  }
+  g.fillStyle = '#e2e4e8';                        // the two roads
+  g.fillRect(S / 2 - S * road / 2, 0, S * road, S);
+  g.fillRect(0, S / 2 - S * road / 2, S, S * road);
+  g.strokeStyle = 'rgba(22,24,29,0.16)'; g.lineWidth = 4;   // curb lines
+  for (const p of [S / 2 - S * road / 2, S / 2 + S * road / 2]) {
+    g.beginPath(); g.moveTo(p, 0); g.lineTo(p, S); g.stroke();
+    g.beginPath(); g.moveTo(0, p); g.lineTo(S, p); g.stroke();
+  }
+  g.strokeStyle = 'rgba(22,24,29,0.28)'; g.lineWidth = 5;   // dashed center lines
+  g.setLineDash([28, 26]);
+  g.beginPath(); g.moveTo(S / 2, 0); g.lineTo(S / 2, S); g.stroke();
+  g.beginPath(); g.moveTo(0, S / 2); g.lineTo(S, S / 2); g.stroke();
+  g.setLineDash([]);
+  g.fillStyle = 'rgba(255,255,255,0.9)';                     // crosswalk bars
+  const cw = S * road, half = cw / 2, bar = 16;
+  for (const side of [-1, 1]) {
+    const edge = S / 2 + side * (half + 30) - (side < 0 ? 60 : 0);
+    for (let i = 0; i < 10; i++) {
+      const o = S / 2 - half + 8 + i * (cw / 10);
+      g.fillRect(o, edge, cw / 10 - 8, 60);
+      g.fillRect(edge, o, 60, cw / 10 - 8);
+    }
+  }
+  const tex = new THREE.CanvasTexture(c);
+  return tex;
+}
+
+// window-grid facade for the buildings that wall the arena — mostly blank
+// glass, a scatter of lit panes, and the rare red one (someone is watching)
+function makeFacadeTexture(seed) {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 512;
+  const g = c.getContext('2d');
+  g.fillStyle = '#f4f5f7'; g.fillRect(0, 0, 256, 512);
+  for (let y = 0; y < 12; y++) for (let x = 0; x < 5; x++) {
+    const r = rnd01(seed * 31.7 + y * 13.1 + x * 7.3);
+    g.fillStyle = r > 0.94 ? 'rgba(255,45,26,0.75)'
+      : r > 0.62 ? 'rgba(22,24,29,0.20)' : 'rgba(22,24,29,0.10)';
+    g.fillRect(14 + x * 48, 18 + y * 40, 32, 24);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  return tex;
+}
+
 const floor = new THREE.Mesh(
   new THREE.PlaneGeometry(ARENA_HALF * 2, ARENA_HALF * 2),
-  new THREE.MeshLambertMaterial({ map: makeFloorTexture() })
+  new THREE.MeshLambertMaterial({ map: makeStreetTexture() })
 );
 floor.rotation.x = -Math.PI / 2;
 scene.add(floor);
 
+// invisible physics walls; the VISIBLE boundary is the city itself
 for (let i = 0; i < 4; i++) {
   const wall = new THREE.Mesh(new THREE.BoxGeometry(ARENA_HALF * 2 + 1, 5, 0.5), MAT_WHITE);
   const a = (i * Math.PI) / 2;
   wall.position.set(Math.sin(a) * (ARENA_HALF + 0.25), 2.5, Math.cos(a) * (ARENA_HALF + 0.25));
   wall.rotation.y = a;
+  wall.visible = false;
   scene.add(wall);
+}
+// perimeter blocks: rows of towers of varied height hard against the walls,
+// with gaps left where the streets run out of the arena — an endless city,
+// the avenue continuing past the fight in every direction
+for (let side = 0; side < 4; side++) {
+  const a = (side * Math.PI) / 2;
+  let along = -ARENA_HALF;
+  let bi = 0;
+  while (along < ARENA_HALF - 2) {
+    const w = 5 + rnd01(side * 91.3 + bi * 17.7) * 5;
+    const mid = along + w / 2;
+    if (Math.abs(mid) > 4.2) {   // leave the street mouths open
+      const h = 9 + rnd01(side * 53.9 + bi * 29.3) * 14;
+      const b = new THREE.Mesh(new THREE.BoxGeometry(w - 0.6, h, 6),
+        new THREE.MeshLambertMaterial({ map: makeFacadeTexture(side * 10 + bi) }));
+      b.position.set(
+        Math.sin(a) * (ARENA_HALF + 3.3) + Math.cos(a) * mid,
+        h / 2,
+        Math.cos(a) * (ARENA_HALF + 3.3) - Math.sin(a) * mid);
+      b.rotation.y = a;
+      scene.add(b);
+      // a second, taller silhouette row behind — depth without draw cost
+      if (rnd01(side * 7.7 + bi * 3.3) > 0.4) {
+        const h2 = h + 6 + rnd01(bi * 47.1) * 10;
+        const b2 = new THREE.Mesh(new THREE.BoxGeometry(w * 0.8, h2, 6), MAT_WHITE);
+        b2.position.set(
+          Math.sin(a) * (ARENA_HALF + 10) + Math.cos(a) * (mid + 2),
+          h2 / 2,
+          Math.cos(a) * (ARENA_HALF + 10) - Math.sin(a) * (mid + 2));
+        b2.rotation.y = a;
+        scene.add(b2);
+      }
+    }
+    along += w;
+    bi++;
+  }
 }
 
 // Cover blocks double as physics obstacles: {min, max} AABBs.
@@ -134,6 +229,11 @@ const LAYOUTS = [
     [-4.5, 2, 1.4, 2.8, 9.0], [4.5, -2, 1.4, 2.8, 9.0], [0, -9, 5.0, 2.2, 1.4],
     [0, 7, 5.0, 2.2, 1.4], [11, 9, 2.2, 3.0, 2.2], [-11, -9, 2.2, 3.0, 2.2],
     [12, -7, 1.5, 2.4, 1.5], [-12, 7, 1.5, 2.4, 1.5],
+  ],
+  [ // the boulevard: abandoned cars along the lanes, kiosks on the corners
+    [-3.6, -9, 2.0, 1.4, 4.4], [3.6, -14, 2.0, 1.4, 4.4], [-3.6, 6, 2.0, 1.4, 4.4],
+    [3.6, 12, 2.0, 1.4, 4.4], [-10, -3.6, 4.4, 1.4, 2.0], [12, 3.6, 4.4, 1.4, 2.0],
+    [-9, 9, 2.4, 2.8, 2.4], [9, -8, 2.4, 2.8, 2.4],
   ],
 ];
 
