@@ -50,6 +50,8 @@ export const TUNING = {
     focusDrain: 1.0,    // tank drained per real second while slowed
     focusRegen: 0.5,    // tank refilled per real second at full speed
     reengageAt: 0.8,    // empty tank must refill to here before slow-mo works again
+    nearMissRadius: 1.1,// bolts passing this close (without hitting) refund focus
+    nearMissRefund: 0.5,// focus seconds back per graze — close dodges PAY
   },
 
   // --- Tap vs hold discrimination (input feel) --------------------------------------
@@ -75,6 +77,23 @@ export const TUNING = {
     gravity: -9.81,     // world gravity (shots are ballistic-compensated at aim)
   },
 
+  // --- Track obstacles (terrain you weave through or shoot through) ------------------
+  obstacles: {
+    paneH: 3.2,         // glass wall height
+    paneThick: 0.09,
+    pylonR: 0.5,        // crystal slalom column radius
+    pylonH: 4.6,
+    crashShields: 1,    // shields lost smashing through glass or a pylon
+    shatterCols: 4,     // pane fracture grid (real rigid shards)
+    shatterRows: 5,
+  },
+
+  // --- Zone modifiers (seeded environmental twists) -----------------------------------
+  modifiers: {
+    windStrength: 1.4,  // m/s of lateral drift you must counter-steer
+    fogFar: 34,         // visibility inside a fog bank (normal is track.fogFar)
+  },
+
   // --- Enemies (crystal drones out of doors) ----------------------------------------
   enemies: {
     size: 0.5,          // octahedron radius (hitbox derives from this)
@@ -87,6 +106,8 @@ export const TUNING = {
     diveTime: 0.7,      // game-seconds for an "from above" dive-in
     telegraph: 2.0,     // energy builds inside the crystal this long, then fires
     triggerAhead: 26,   // door starts opening when you're this close
+    wardenShellR: 0.78, // warden's ice shell (one extra hit to crack)
+    fanSpread: 1.35,    // lateral offset of the outer bolts in a fan volley
   },
 
   // --- Ethereal bolts ------------------------------------------------------------------
@@ -134,6 +155,12 @@ export const TUNING = {
     fireInterval:   { from: 2.4, to: 1.2, at: 18 },
     engageTime:     { from: 5,   to: 8,   at: 15 }, // how long a drone harasses you
     tunnelChance:   { from: 0.15,to: 0.45,at: 10 }, // zones get more claustrophobic
+    obstacleChance: { from: 0.2, to: 0.85,at: 14 }, // zones carrying terrain
+    paneGap:        { from: 2.7, to: 1.5, at: 16 }, // weave-gap width in glass walls
+    wardenChance:   { from: 0,   to: 0.35,at: 14 }, // shelled two-hit enemies
+    turretChance:   { from: 0,   to: 0.4, at: 12 }, // wall-riders (enclosed zones)
+    fanChance:      { from: 0,   to: 0.55,at: 18 }, // drones firing 3-bolt spreads
+    modifierChance: { from: 0,   to: 0.6, at: 14 }, // crosswind / fog zones
   },
 
   // --- Weekly level ------------------------------------------------------------------------------

@@ -28,7 +28,7 @@ const weeklyTag = () => `timeshard/v${TUNING.weekly.generatorVersion}`;
 // ---------------------------------------------------------------------------
 // Collision groups
 // ---------------------------------------------------------------------------
-const G_SHOT = 1, G_DRONE = 2, G_WORLD = 4, G_SHARD = 8;
+const G_SHOT = 1, G_DRONE = 2, G_WORLD = 4, G_SHARD = 8, G_OBST = 16;
 
 // ---------------------------------------------------------------------------
 // Renderer / scene
@@ -271,6 +271,22 @@ const pylonMat = new THREE.MeshStandardMaterial({
   color: 0x9fd8e8, metalness: 0.4, roughness: 0.25, envMapIntensity: 1.2,
   emissive: PALETTE.iceEdge, emissiveIntensity: 0.08, flatShading: true,
 });
+const paneMat = new THREE.MeshPhysicalMaterial({
+  color: 0x7fe9ff, metalness: 0.1, roughness: 0.06,
+  transparent: true, opacity: 0.3, side: THREE.DoubleSide,
+  envMapIntensity: 1.8, depthWrite: false,
+  emissive: 0x0d3340, emissiveIntensity: 0.5,
+});
+const paneEdgeMat = new THREE.LineBasicMaterial({ color: PALETTE.iceEdge, transparent: true, opacity: 0.9 });
+const shellMat = new THREE.MeshStandardMaterial({
+  color: 0xbfeeff, metalness: 0.1, roughness: 0.05, envMapIntensity: 1.8,
+  transparent: true, opacity: 0.4, flatShading: true,
+  emissive: PALETTE.iceEdge, emissiveIntensity: 0.25,
+});
+const turretMat = new THREE.MeshStandardMaterial({
+  color: 0xdff6ff, metalness: 0.5, roughness: 0.2, envMapIntensity: 1.6,
+  emissive: 0xff2fd6, emissiveIntensity: 0.15, flatShading: true,
+});
 
 function makeGlowTexture(inner, outer) {
   const cv = document.createElement('canvas');
@@ -350,6 +366,9 @@ const S = {
   targetSpeed: TUNING.speed.base, // speed eases toward this — no sudden jumps
   gateGraceT: 0,         // countdown before enemies may appear again
   gateT: -1,             // seconds since last gate pass (-1 = idle)
+  wind: 0,               // current zone crosswind (m/s, signed)
+  fogFarT: TUNING.track.fogFar, // fog distance target (fog-bank zones shrink it)
+  fogFar: TUNING.track.fogFar,
   timeScale: 1,
   focus: TUNING.time.focusMax,
   focusOk: true,
@@ -364,6 +383,8 @@ const S = {
 
 let trackGen = new TrackGen(weeklySeed(weeklyTag()));
 const zones = [];        // {spec, startZ, endZ, meshes[]}
+const panes = [];        // glass walls: shoot them or weave the gap
+const pylons = [];       // crystal slalom columns
 const gates = [];        // speed-tier gateways: {z, pos, passed}
 const pendingEvents = []; // spawn events waiting for their trigger distance
 const drones = [];
@@ -375,7 +396,7 @@ const audio = new TimeshardAudio();
 let nextZoneZ = -8;
 
 // Debug/replay hook (also used by the Playwright verification script).
-window.__timeshard = { S, drones, bolts, souls, shots, zones, gates, camera, audio };
+window.__timeshard = { S, drones, bolts, souls, shots, zones, gates, panes, pylons, camera, audio };
 
 // ---------------------------------------------------------------------------
 // Zone environment building + streaming
@@ -493,6 +514,10 @@ function streamZones() {
     for (const sl of spec.souls) {
       spawnSoul(new THREE.Vector3(sl.x, sl.y, startZ - sl.z), true);
     }
+    for (const o of spec.obstacles ?? []) {
+      if (o.type === 'panewall') spawnPaneWall(o, startZ, spec.halfWidth);
+      else if (o.type === 'pylons') spawnPylons(o, startZ, spec.halfWidth);
+    }
     nextZoneZ -= spec.length;
   }
 
@@ -509,10 +534,22 @@ function streamZones() {
   // current zone drives speed and steering clamp
   const cur = zones.find((z) => S.camZ <= z.startZ && S.camZ > z.endZ);
   if (cur) {
+    if (cur.spec.index !== S.zoneIdx) enterZone(cur.spec);
     S.zoneIdx = cur.spec.index;
     updateSpeed();
     const targetHalf = cur.spec.halfWidth;
     S.trackHalf += (targetHalf - S.trackHalf) * Math.min(1, 2.5 * (1 / 60));
+  }
+}
+
+// Zone modifiers: crosswind pushes you off-line; fog banks eat your sight.
+function enterZone(spec) {
+  const m = spec.modifier;
+  S.wind = m && m.kind === 'wind' ? m.dir * m.strength : 0;
+  S.fogFarT = m && m.kind === 'fog' ? TUNING.modifiers.fogFar : TUNING.track.fogFar;
+  if (S.mode === 'playing' && m) {
+    if (m.kind === 'wind') showMsg(m.dir > 0 ? 'CROSSWIND ⟶' : '⟵ CROSSWIND', 'neon-ice');
+    else showMsg('FOG BANK', 'neon-ice');
   }
 }
 
@@ -553,6 +590,171 @@ function passGates() {
       }
     }
     if (g.z > S.camZ + TUNING.track.cleanupBehind) gates.splice(i, 1);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Track obstacles: glass pane walls (weave the gap or shoot through — smash
+// into one and it costs a shield) and crystal pylon slaloms. All destruction
+// is real rigid-body shatter.
+// ---------------------------------------------------------------------------
+function spawnPaneSegment(x0, x1, worldZ) {
+  const O = TUNING.obstacles;
+  const w = x1 - x0;
+  if (w < 0.3) return;
+  const cx = (x0 + x1) / 2;
+  const geo = new THREE.BoxGeometry(w, O.paneH, O.paneThick);
+  const mesh = new THREE.Mesh(geo, paneMat);
+  mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo), paneEdgeMat));
+  mesh.position.set(cx, O.paneH / 2, worldZ);
+  scene.add(mesh);
+  const body = new CANNON.Body({
+    type: CANNON.Body.STATIC,
+    shape: new CANNON.Box(new CANNON.Vec3(w / 2, O.paneH / 2, O.paneThick / 2)),
+    position: new CANNON.Vec3(cx, O.paneH / 2, worldZ),
+    collisionFilterGroup: G_OBST,
+    collisionFilterMask: G_SHOT,
+  });
+  world.addBody(body);
+  const pane = { mesh, geo, body, x0, x1, w, z: worldZ, broken: false };
+  body.ts = { pane };
+  panes.push(pane);
+}
+
+function spawnPaneWall(o, startZ, halfWidth) {
+  const z = startZ - o.z;
+  spawnPaneSegment(-halfWidth, o.gapX - o.gapW / 2, z);
+  spawnPaneSegment(o.gapX + o.gapW / 2, halfWidth, z);
+}
+
+function shatterPane(pane, impact, vel) {
+  if (pane.broken) return;
+  pane.broken = true;
+  scene.remove(pane.mesh);
+  pane.geo.dispose();
+  queueRemove(pane.body);
+  const O = TUNING.obstacles;
+  const cw = pane.w / O.shatterCols, ch = O.paneH / O.shatterRows;
+  for (let r = 0; r < O.shatterRows; r++) {
+    for (let c = 0; c < O.shatterCols; c++) {
+      const px = pane.x0 + cw * (c + 0.5) + (Math.random() - 0.5) * cw * 0.5;
+      const py = ch * (r + 0.5) + (Math.random() - 0.5) * ch * 0.5;
+      const pos = new THREE.Vector3(px, py, pane.z);
+      const dir = pos.clone().sub(impact);
+      const dist = Math.max(0.15, dir.length());
+      dir.normalize();
+      const power = 5 / (1 + dist * 1.5);
+      spawnShard(pos, cw * 0.6, ch * 0.6, new THREE.Vector3(
+        dir.x * power + vel.x * 0.3, dir.y * power + 0.6, dir.z * power + vel.z * 0.35));
+    }
+  }
+  spawnSpark(impact, 2.6, PALETTE.iceEdge);
+  audio.shatter(1.2);
+}
+
+function spawnPylons(o, startZ, halfWidth) {
+  const O = TUNING.obstacles;
+  for (const it of o.items) {
+    const geo = new THREE.CylinderGeometry(O.pylonR * 0.7, O.pylonR, O.pylonH, 6);
+    const mesh = new THREE.Mesh(geo, pylonMat);
+    const x = THREE.MathUtils.clamp(it.x, -halfWidth + 0.8, halfWidth - 0.8);
+    mesh.position.set(x, O.pylonH / 2, startZ - it.z);
+    scene.add(mesh);
+    const body = new CANNON.Body({
+      type: CANNON.Body.STATIC,
+      shape: new CANNON.Box(new CANNON.Vec3(O.pylonR, O.pylonH / 2, O.pylonR)),
+      position: new CANNON.Vec3(x, O.pylonH / 2, startZ - it.z),
+      collisionFilterGroup: G_OBST,
+      collisionFilterMask: G_SHOT,
+    });
+    world.addBody(body);
+    const pylon = { mesh, geo, body, x, z: startZ - it.z, broken: false };
+    body.ts = { pylon };
+    pylons.push(pylon);
+  }
+}
+
+function shatterPylon(pylon, impact, vel) {
+  if (pylon.broken) return;
+  pylon.broken = true;
+  scene.remove(pylon.mesh);
+  pylon.geo.dispose();
+  queueRemove(pylon.body);
+  const O = TUNING.obstacles;
+  for (let i = 0; i < 12; i++) {
+    const pos = new THREE.Vector3(
+      pylon.x + (Math.random() - 0.5) * O.pylonR * 1.6,
+      Math.random() * O.pylonH,
+      pylon.z + (Math.random() - 0.5) * O.pylonR);
+    const dir = pos.clone().sub(impact);
+    const dist = Math.max(0.15, dir.length());
+    dir.normalize();
+    const power = 4.5 / (1 + dist * 1.2);
+    const sz = 0.12 + Math.random() * 0.2;
+    spawnShard(pos, sz, sz * 1.5, new THREE.Vector3(
+      dir.x * power + vel.x * 0.3, dir.y * power + 0.7, dir.z * power + vel.z * 0.35));
+  }
+  spawnSpark(impact, 2.6, PALETTE.iceEdge);
+  audio.shatter(1.1);
+}
+
+// Smashing through terrain face-first: it breaks, and so does a shield.
+const PLAYER_HALF = 0.45;
+function checkTerrainCrash(dt) {
+  if (S.invulnT > 0) return;
+  const reach = 0.5 + S.speed * dt;
+  for (const p of panes) {
+    if (p.broken || p.z < S.camZ - reach || p.z > S.camZ + 0.4) continue;
+    if (S.camX + PLAYER_HALF > p.x0 && S.camX - PLAYER_HALF < p.x1) {
+      const impact = new THREE.Vector3(S.camX, TUNING.track.eyeHeight, p.z);
+      shatterPane(p, impact, new THREE.Vector3(0, 0, -S.speed));
+      terrainHit();
+      return;
+    }
+  }
+  const O = TUNING.obstacles;
+  for (const p of pylons) {
+    if (p.broken || p.z < S.camZ - reach || p.z > S.camZ + 0.4) continue;
+    if (Math.abs(S.camX - p.x) < O.pylonR + PLAYER_HALF - 0.1) {
+      const impact = new THREE.Vector3(p.x, TUNING.track.eyeHeight, p.z);
+      shatterPylon(p, impact, new THREE.Vector3(0, 0, -S.speed));
+      terrainHit();
+      return;
+    }
+  }
+}
+
+function terrainHit() {
+  S.shields -= TUNING.obstacles.crashShields;
+  S.invulnT = TUNING.player.invuln;
+  audio.hurt();
+  S.shakeT = 0.45;
+  flash('rgba(180,235,255,0.4)', 380);
+  updateHUD();
+  if (S.shields <= 0) {
+    S.mode = 'dead';
+    S.deadTimer = 1.0;
+    clearPointers();
+  } else {
+    showMsg('SMASHED THROUGH', 'neon-pink');
+  }
+}
+
+function cleanupObstacles() {
+  const behind = S.camZ + TUNING.track.cleanupBehind;
+  for (let i = panes.length - 1; i >= 0; i--) {
+    if (panes[i].z > behind) {
+      const p = panes[i];
+      if (!p.broken) { scene.remove(p.mesh); p.geo.dispose(); queueRemove(p.body); }
+      panes.splice(i, 1);
+    }
+  }
+  for (let i = pylons.length - 1; i >= 0; i--) {
+    if (pylons[i].z > behind) {
+      const p = pylons[i];
+      if (!p.broken) { scene.remove(p.mesh); p.geo.dispose(); queueRemove(p.body); }
+      pylons.splice(i, 1);
+    }
   }
 }
 
@@ -637,6 +839,19 @@ function spawnDroneFromEvent(e) {
   mesh.add(core);
   const halo = sprite(glowIce, 0xffffff, 2.2, 0.75);
   mesh.add(halo);
+  // wardens wear an ice shell — one extra hit to crack it open
+  let shell = null;
+  if (e.kind === 'warden') {
+    shell = new THREE.Mesh(new THREE.OctahedronGeometry(E.wardenShellR), shellMat);
+    shell.scale.set(1, 1.3, 1);
+    mesh.add(shell);
+  }
+  if (e.kind === 'turret') {
+    // wall-riders read as machinery, not crystal fauna
+    mesh.geometry = new THREE.BoxGeometry(0.7, 0.7, 0.7);
+    mesh.material = turretMat;
+    mesh.scale.set(1, 1, 1);
+  }
   scene.add(mesh);
 
   const hb = E.size + E.hitboxPad;
@@ -672,7 +887,11 @@ function spawnDroneFromEvent(e) {
   body.position.set(start.x, start.y, start.z);
 
   const drone = {
-    mesh, core, halo, body, door, streak,
+    mesh, core, halo, shell, body, door, streak,
+    kind: e.kind ?? 'drone',
+    fan: !!e.fan,
+    hp: e.kind === 'warden' ? 2 : 1,
+    side: e.entrance === 'wallL' ? -1 : 1,
     state: door ? 'door' : 'dive',
     t: 0,
     start: start.clone(),
@@ -779,15 +998,20 @@ function updateDrones(dtGame) {
         spawnSpark(d.mesh.position, 2.2, PALETTE.iceEdge);
       }
     } else if (d.state === 'attack') {
-      // hover ahead of you, strafing, matching your speed
+      // hover ahead of you, strafing, matching your speed — except turrets,
+      // which stay pinned to their wall and slide along it
       const half = Math.max(1, S.trackHalf - 0.9);
-      const x = THREE.MathUtils.clamp(
-        d.hoverX + Math.sin(S.gameTime * 0.9 + d.strafePhase) * 0.8, -half, half);
-      const y = d.hoverY + Math.sin(S.gameTime * 1.4 + d.strafePhase * 1.7) * 0.25;
+      const x = d.kind === 'turret'
+        ? d.side * (S.trackHalf - 0.45)
+        : THREE.MathUtils.clamp(
+            d.hoverX + Math.sin(S.gameTime * 0.9 + d.strafePhase) * 0.8, -half, half);
+      const y = d.kind === 'turret'
+        ? d.hoverY
+        : d.hoverY + Math.sin(S.gameTime * 1.4 + d.strafePhase * 1.7) * 0.25;
       d.mesh.position.x += (x - d.mesh.position.x) * Math.min(1, 3 * dtGame);
       d.mesh.position.y += (y - d.mesh.position.y) * Math.min(1, 3 * dtGame);
       d.mesh.position.z += (hoverZ - d.mesh.position.z) * Math.min(1, 4 * dtGame);
-      d.mesh.rotation.y += dtGame * 1.2;
+      d.mesh.rotation.y += dtGame * (d.kind === 'turret' ? 0.4 : 1.2);
 
       // fire cycle: the wisp charges up inside the crystal — a shot being born
       d.nextFire -= dtGame;
@@ -804,7 +1028,13 @@ function updateDrones(dtGame) {
       // menu (attract mode) drones fire too — bolts just sail past the camera;
       // without this the telegraph wisp sticks at full swell forever
       if (d.nextFire <= 0 && (S.mode === 'playing' || S.mode === 'menu')) {
-        fireBolt(d);
+        if (d.fan) {
+          // 3-bolt fan: dodge through the gap between them
+          const sp = E.fanSpread;
+          fireBolt(d, -sp); fireBolt(d, 0); fireBolt(d, sp);
+        } else {
+          fireBolt(d);
+        }
         // a shard can never fire faster than it charges
         d.nextFire = Math.max(d.fireEvery, E.telegraph);
         d.chargeSounded = false;
@@ -813,7 +1043,8 @@ function updateDrones(dtGame) {
       d.engageLeft -= dtGame;
       if (d.engageLeft <= 0) { d.state = 'retreat'; d.t = 0; }
     } else if (d.state === 'retreat') {
-      d.mesh.position.y += 6 * dtGame; // peels off upward, falls behind
+      // drones peel off upward; turrets just power down and fall behind
+      if (d.kind !== 'turret') d.mesh.position.y += 6 * dtGame;
       d.mesh.rotation.y += dtGame * 3;
     }
 
@@ -883,7 +1114,7 @@ function shatterDrone(drone, impact, shotVel) {
 // core trailing a comet tail that spirals visually while the true path
 // stays straight (fair to dodge). No solid pink dots here.
 // ---------------------------------------------------------------------------
-function fireBolt(drone) {
+function fireBolt(drone, targetOffsetX = 0) {
   if (bolts.length >= TUNING.bolts.maxLive) return;
   const B = TUNING.bolts;
   const from = drone.mesh.position.clone();
@@ -909,7 +1140,7 @@ function fireBolt(drone) {
   // aimLead < 1 aims slightly behind the perfect intercept (dodgeable), and
   // jitter keeps volleys from being a single fair-but-cruel line
   const target = new THREE.Vector3(
-    px + (Math.random() - 0.5) * B.aimJitter * 2,
+    px + targetOffsetX + (Math.random() - 0.5) * B.aimJitter * 2,
     py + (Math.random() - 0.5) * B.aimJitter,
     pz - v * t * B.aimLead
   );
@@ -950,6 +1181,7 @@ function removeBolt(i, sparkColor = null) {
 }
 
 const _perp1 = new THREE.Vector3(), _perp2 = new THREE.Vector3(), _dirN = new THREE.Vector3();
+let lastGrazeMsg = -9;
 function updateBolts(dtGame) {
   const B = TUNING.bolts;
   const playerPos = new THREE.Vector3(S.camX, TUNING.track.eyeHeight, S.camZ);
@@ -980,6 +1212,20 @@ function updateBolts(dtGame) {
       removeBolt(i, PALETTE.wispHalo);
       playerHit();
       continue;
+    }
+    // near miss: a bolt crossing your plane inside the graze radius (without
+    // hitting) refunds focus — dodging CLOSE is how you keep slow-mo flowing
+    if (S.mode === 'playing' && !b.grazed && b.pos.z > S.camZ) {
+      b.grazed = true;
+      const d2 = b.pos.distanceTo(playerPos);
+      if (d2 < TUNING.time.nearMissRadius) {
+        S.focus = Math.min(TUNING.time.focusMax, S.focus + TUNING.time.nearMissRefund);
+        spawnSpark(b.pos, 1.4, 0xffffff);
+        if (S.time - lastGrazeMsg > 1.4) {
+          lastGrazeMsg = S.time;
+          showMsg('CLOSE — +FOCUS', 'neon-ice');
+        }
+      }
     }
     if (b.pos.z > S.camZ + 2.5 || b.pos.distanceTo(playerPos) > 90) removeBolt(i);
   }
@@ -1145,7 +1391,7 @@ function spawnShot(pos, vel) {
     velocity: new CANNON.Vec3(vel.x, vel.y, vel.z),
     material: matShot,
     collisionFilterGroup: G_SHOT,
-    collisionFilterMask: G_DRONE | G_WORLD,
+    collisionFilterMask: G_DRONE | G_WORLD | G_OBST,
   });
   body.ts = { shot: true, prevVel: new CANNON.Vec3(vel.x, vel.y, vel.z) };
   body.addEventListener('collide', onShotCollide);
@@ -1160,14 +1406,50 @@ function disposeShot(s) {
 
 function onShotCollide(e) {
   const self = e.target, other = e.body;
-  if (!other.ts || !other.ts.drone) return;
-  const drone = other.ts.drone;
-  if (!drone.alive || drone.state === 'door') return; // can't shoot through a shut door
+  if (!other.ts) return;
+  const drone = other.ts ? other.ts.drone : null;
   const cp = new CANNON.Vec3();
   (e.contact.bi === self ? e.contact.bi : e.contact.bj).position.vadd(
     e.contact.bi === self ? e.contact.ri : e.contact.rj, cp);
+  const impact = new THREE.Vector3(cp.x, cp.y, cp.z);
   const pv = self.ts.prevVel;
-  shatterDrone(drone, new THREE.Vector3(cp.x, cp.y, cp.z), new THREE.Vector3(pv.x, pv.y, pv.z));
+  const shotVel = new THREE.Vector3(pv.x, pv.y, pv.z);
+
+  if (other.ts && other.ts.pane) {
+    shatterPane(other.ts.pane, impact, shotVel);
+    self.velocity.set(pv.x * 0.85, pv.y * 0.85, pv.z * 0.85);
+    return;
+  }
+  if (other.ts && other.ts.pylon) {
+    shatterPylon(other.ts.pylon, impact, shotVel);
+    self.velocity.set(pv.x * 0.8, pv.y * 0.8, pv.z * 0.8);
+    return;
+  }
+  if (!drone || !drone.alive || drone.state === 'door') return;
+
+  // a warden's shell soaks the first hit — and shatters, physically
+  if (drone.hp > 1) {
+    drone.hp -= 1;
+    if (drone.shell) {
+      drone.mesh.remove(drone.shell);
+      drone.shell.geometry.dispose();
+      drone.shell = null;
+      const c = drone.mesh.position;
+      for (let i = 0; i < 8; i++) {
+        const off = new THREE.Vector3(
+          (Math.random() - 0.5), (Math.random() - 0.5) * 1.4, (Math.random() - 0.5))
+          .normalize().multiplyScalar(TUNING.enemies.wardenShellR);
+        const sz = 0.08 + Math.random() * 0.12;
+        spawnShard(c.clone().add(off), sz, sz * 1.3,
+          off.clone().multiplyScalar(4).add(new THREE.Vector3(0, 1, 0)));
+      }
+      spawnSpark(impact, 2.2, 0xffffff);
+      audio.shatter(0.7);
+    }
+    self.velocity.set(pv.x * 0.7, pv.y * 0.7, pv.z * 0.7);
+    return;
+  }
+  shatterDrone(drone, impact, shotVel);
   self.velocity.set(pv.x * 0.8, pv.y * 0.8, pv.z * 0.8); // punch through
 }
 
@@ -1501,6 +1783,10 @@ function clearWorldObjects() {
   shards.length = 0;
   for (const st of streaks) { scene.remove(st.mesh); st.mesh.material.dispose(); }
   streaks.length = 0;
+  for (const pn of panes) if (!pn.broken) { scene.remove(pn.mesh); pn.geo.dispose(); queueRemove(pn.body); }
+  panes.length = 0;
+  for (const py of pylons) if (!py.broken) { scene.remove(py.mesh); py.geo.dispose(); queueRemove(py.body); }
+  pylons.length = 0;
   for (const z of zones) {
     for (const m of z.meshes) {
       scene.remove(m);
@@ -1520,6 +1806,7 @@ function startRun() {
     score: 0, distance: 0, camZ: 0, camX: 0, steerX: 0,
     trackHalf: ZONES.open.halfWidth, zoneIdx: 0, speed: TUNING.speed.base,
     targetSpeed: TUNING.speed.base, gateGraceT: 0, gateT: -1,
+    wind: 0, fogFarT: TUNING.track.fogFar, fogFar: TUNING.track.fogFar,
     timeScale: 1, focus: TUNING.time.focusMax, focusOk: true, holdActive: false,
     gameTime: 0, shakeT: 0, invulnT: 0, deadTimer: 0,
     stats: { shots: 0, kills: 0, deflects: 0, souls: 0, gates: 0 },
@@ -1709,12 +1996,15 @@ function tick(tNow) {
     const glide = S.mode === 'dead' ? Math.max(0, S.deadTimer) : 1;
     S.camZ -= S.speed * dtGame * glide;
     if (S.mode === 'playing') S.distance += S.speed * dtGame;
+    if (S.mode === 'playing' && S.wind) S.steerX += S.wind * dtGame; // crosswind
     const clampX = Math.max(0.4, S.trackHalf - TUNING.steer.clampPad);
     S.steerX = THREE.MathUtils.clamp(S.steerX, -clampX, clampX);
     S.camX += (S.steerX - S.camX) * Math.min(1, TUNING.steer.lerp * dt);
     streamZones();
     triggerPendingEvents();
     passGates();
+    if (S.mode === 'playing') checkTerrainCrash(dtGame);
+    cleanupObstacles();
   } else if (S.mode === 'menu') {
     // attract mode: drift down the track behind the title, drones and all
     S.camZ -= 3 * dt;
@@ -1775,6 +2065,15 @@ function tick(tNow) {
   floorMesh.position.z = S.camZ - 120;
   floorMesh.position.x = S.camX * 0.4;
   for (const m of gridMats) m.uniforms.uCam.value.copy(camera.position);
+
+  // fog banks close in and lift smoothly
+  S.fogFar += (S.fogFarT - S.fogFar) * Math.min(1, 1.5 * dt);
+  scene.fog.far = S.fogFar;
+  scene.fog.near = S.fogFar * 0.22;
+  for (const m of gridMats) {
+    m.uniforms.uFogFar.value = S.fogFar;
+    m.uniforms.uFogNear.value = S.fogFar * 0.22;
+  }
 
   applyFlowLook(S.timeScale);
 
