@@ -221,42 +221,29 @@ function buildLot(cx, cz, near, si) {
       const h = CITY.hMin + rnd01(si * 53.9 + bi * 29.3) * (CITY.hMax - CITY.hMin);
       const px = cx + qx * (sw + 3.5 + w / 2 + k * 8 + rnd01(si + bi * 5.1) * 3);
       const pz = cz + qz * (sw + 3.5 + w / 2 + (1 - k) * 8 + rnd01(si + bi * 9.7) * 3);
+      const dep = w * (0.7 + rnd01(bi * 13.3) * 0.6);
       const mat = near ? new THREE.MeshLambertMaterial({ map: makeFacadeTexture(si * 10 + bi, h) }) : MAT_WHITE;
-      const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, w * (0.7 + rnd01(bi * 13.3) * 0.6)), mat);
+      const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, dep), mat);
       b.position.set(px, h / 2, pz);
       scene.add(b);
+      // towers in the playable ring are SOLID — you fight on the streets now
+      if (Math.abs(cx) <= CELL && Math.abs(cz) <= CELL) {
+        towerObstacles.push({
+          min: new THREE.Vector3(px - w / 2, 0, pz - dep / 2),
+          max: new THREE.Vector3(px + w / 2, h, pz + dep / 2),
+        });
+      }
       bi++;
     }
   }
 }
-// the arena's own cell gets a tight perimeter ring (its lots would otherwise
-// intrude on the playfield); streets' mouths stay open at every side
-function buildPerimeter() {
-  for (let side = 0; side < 4; side++) {
-    const a = (side * Math.PI) / 2;
-    let along = -ARENA_HALF, bi = 0;
-    while (along < ARENA_HALF - 2) {
-      const w = 5 + rnd01(side * 91.3 + bi * 17.7) * 5;
-      const mid = along + w / 2;
-      if (Math.abs(mid) > CITY.street / 2 + 1.5) {
-        const h = CITY.hMin + rnd01(side * 53.9 + bi * 29.3) * (CITY.hMax - CITY.hMin);
-        const b = new THREE.Mesh(new THREE.BoxGeometry(w - 0.6, h, 7),
-          new THREE.MeshLambertMaterial({ map: makeFacadeTexture(side * 10 + bi, h) }));
-        b.position.set(Math.sin(a) * (ARENA_HALF + 3.6) + Math.cos(a) * mid, h / 2,
-          Math.cos(a) * (ARENA_HALF + 3.6) - Math.sin(a) * mid);
-        b.rotation.y = a;
-        scene.add(b);
-      }
-      along += w; bi++;
-    }
-  }
-}
-buildPerimeter();
+// EVERY block is identical — same seed, same lots, the center included —
+// so the endless-street recenter is pixel-invisible. Playable-ring towers
+// carry collision; the fight happens on the avenues between them.
+const towerObstacles = [];
 for (let gx = -CITY.reach; gx <= CITY.reach; gx++)
-  for (let gz = -CITY.reach; gz <= CITY.reach; gz++) {
-    if (gx === 0 && gz === 0) continue;
-    buildLot(gx * CELL, gz * CELL, false, 60);   // one seed: the city repeats every block
-  }
+  for (let gz = -CITY.reach; gz <= CITY.reach; gz++)
+    buildLot(gx * CELL, gz * CELL, Math.abs(gx) <= 1 && Math.abs(gz) <= 1, 60);
 
 // Cover blocks double as physics obstacles: {min, max} AABBs.
 // Three arena layouts, rotated every 3 waves. [x, z, w, h, d] per block.
@@ -303,6 +290,7 @@ function setLayout(idx) {
       max: new THREE.Vector3(x + w / 2, h, z + d / 2),
     });
   }
+  for (const t of towerObstacles) obstacles.push(t);
 }
 setLayout(0);
 
