@@ -682,7 +682,7 @@ function spawnBullet(pos, dir, fromPlayer, opt = 0, pierce = 0) {
   scene.add(trail);
   const speed = fromPlayer
     ? (opt || PLAYER_BULLET_SPEED)
-    : Math.min(ENEMY_BULLET_SPEED + (game.wave - 1) * 0.5, 16) * (opt || 1);
+    : enemyBulletSpeed() * (opt || 1);
   bullets.push({
     mesh, trail,
     pos: pos.clone(), prev: pos.clone(),
@@ -1539,18 +1539,18 @@ function spawnEnemy(type = 'gunner') {
   let x = 0, z = 0, placed = false;
   for (let tries = 0; tries < 24 && !placed; tries++) {
     const a = game.waveBearing + (Math.random() - 0.5) * 1.1;   // ±32°
-    const d = type === 'sniper' ? 16 + Math.random() * 4 : 12 + Math.random() * 7;
+    const d = type === 'sniper' ? 17 + Math.random() * 6 : 13 + Math.random() * 8;
     x = player.pos.x + Math.sin(a) * d;
     z = player.pos.z + Math.cos(a) * d;
-    const lim = ARENA_HALF - 2;
+    const lim = CELL - 2;   // anywhere in the streets — towers reject below
     if (Math.abs(x) > lim || Math.abs(z) > lim) continue;
     if (pointInObstacle(x, z, 0.8)) continue;
     placed = true;
   }
-  if (!placed) {   // fallback: arena rim, away from the player
+  if (!placed) {   // fallback: up the street from the player; collisions sort it
     const a = game.waveBearing + (Math.random() - 0.5) * 1.5;
-    const r = ARENA_HALF - 2.5;
-    x = Math.sin(a) * r; z = Math.cos(a) * r;
+    x = player.pos.x + Math.sin(a) * 14;
+    z = player.pos.z + Math.cos(a) * 14;
   }
   parts.g.position.set(x, 0, z);
   scene.add(parts.g);
@@ -1624,14 +1624,17 @@ function spawnEnemy(type = 'gunner') {
     burstT: 0,
     alive: true,
   });
-  if (type === 'sniper') {
-    warnFlash(['SNIPER.']);
+  // snipers and lasers announce every entrance; everyone else gets a warning
+  // flash the first time the run meets them — new waves, new threats
+  const seen = game.seenTypes || (game.seenTypes = {});
+  if (type === 'sniper' || type === 'laser') {
+    warnFlash([type.toUpperCase() + '.']);
     sfx.alert();   // its own stinger — sfx.wave() is the wave VO now
-  }
-  if (type === 'laser') {
-    warnFlash(['LASER.']);
+  } else if (!seen[type] && type !== 'gunner' && game.state !== 'menu') {
+    warnFlash([type.toUpperCase() + '.']);
     sfx.alert();
   }
+  seen[type] = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -1813,7 +1816,7 @@ function enemyFire(e, toPlayer) {
   );
   // ballistic compensation: aim above the torso by the gravity drop over the
   // flight, so the round arrives at chest height instead of plowing the dirt
-  const speed = Math.min(ENEMY_BULLET_SPEED + (game.wave - 1) * 0.5, 16) * (spec.mul || 1);
+  const speed = enemyBulletSpeed() * (spec.mul || 1);
   const tFly = origin.distanceTo(target) / speed;
   target.y += 0.5 * BULLET_GRAVITY * tFly * tFly;
   const baseDir = target.sub(origin).normalize();
@@ -1843,17 +1846,33 @@ function setEgunFlash(e, mat) {
   (e.egun.isGroup ? e.egun.children[0] : e.egun).material = m;
 }
 
-// Enemies get on the trigger faster as waves progress: already quick at
-// wave 1 (x0.8), down to x0.5 telegraphs and cooldowns by wave ~7.
+// One dial for the whole difficulty curve: 0 on wave 1, 1 by wave 8.
+// Rush hour has no waves, so it ramps on the run clock instead (~3 minutes
+// to full heat).
+function diffT() {
+  const w = game.mode === 'rush' ? 1 + rushT / 25 : game.wave;
+  return Math.min((w - 1) / 7, 1);
+}
+
+// Enemy rounds open slow enough to sidestep at a walk (wave 1: ~55% speed),
+// reach full pace by wave 8, then keep creeping (+2%/wave, capped at +35%).
+function enemyBulletSpeed() {
+  const w = game.mode === 'rush' ? 1 + rushT / 25 : game.wave;
+  const late = Math.max(0, w - 8) * 0.02;
+  return ENEMY_BULLET_SPEED * Math.min(0.55 + 0.45 * diffT() + late, 1.35);
+}
+
+// Telegraphs and cooldowns ride the same dial: leisurely on the opening
+// waves (x1.15), tightening to ~x0.5 by wave 8.
 function aimSpeedFactor() {
-  return Math.max(0.5, 0.8 - (game.wave - 1) * 0.05);
+  return 1.15 - 0.63 * diffT();
 }
 
 // Same slab push-out the player uses: an enemy can never end a frame inside
 // a wall block, no matter what the steering did.
 function resolveEnemyCollisions(e) {
   const r = 0.5;
-  const lim = ARENA_HALF - 1;
+  const lim = CELL;   // free-roam: recentering keeps the fight near origin
   e.pos.x = Math.min(Math.max(e.pos.x, -lim), lim);
   e.pos.z = Math.min(Math.max(e.pos.z, -lim), lim);
   for (const o of obstacles) {
@@ -3267,6 +3286,7 @@ function loadRuns() {
 }
 
 function recordRun() {
+  if (game.mode === 'rush') return;   // TOP RUNS is the wave-mode board
   const runs = loadRuns();
   const e = runs.find((r) => r.id === runStartAt);
   if (e) {   // retries extend the same run instead of adding a new row
@@ -3321,24 +3341,47 @@ function renderScores() {
 
 // Mix of enemy types for wave n: shotgunners + bombers from wave 3, heavies,
 // shield-bearers + one sniper from 4, armored (headshot-only) from 5.
+// Each wave is a street encounter: a quota big enough to roam through, and
+// exactly one new enemy type debuting per wave so the game keeps introducing
+// itself. The debut headlines its wave and is the first thing you meet.
+const TYPE_INTRO = {
+  gunner: 1, rusher: 2, shotgunner: 3, heavy: 4, shieldbearer: 5,
+  sniper: 6, bomber: 7, armored: 8, rocketeer: 9, laser: 10,
+};
+const TYPE_SHARE = {   // veteran fill: floor(total/share) of each, capped
+  rusher: [5, 3], shotgunner: [4, 4], heavy: [5, 3], shieldbearer: [6, 2],
+  sniper: [7, 2], bomber: [6, 2], armored: [6, 2], rocketeer: [8, 2],
+};
 function composeWave(n) {
-  const total = Math.min(1 + n, 12);
-  const queue = [];
-  if (n >= 3) for (let i = 0; i < Math.floor(total / 3); i++) queue.push('shotgunner');
-  if (n >= 3) for (let i = 0; i < Math.floor(total / 4); i++) queue.push('bomber');
-  if (n >= 4) for (let i = 0; i < Math.floor(total / 4); i++) queue.push('heavy');
-  if (n >= 4) for (let i = 0; i < Math.floor(total / 5); i++) queue.push('shieldbearer');
-  if (n >= 5) for (let i = 0; i < Math.floor(total / 5); i++) queue.push('armored');
-  if (n >= 6) for (let i = 0; i < Math.floor(total / 6); i++) queue.push('rocketeer');
-  if (n >= 6) for (let i = 0; i < Math.floor(total / 6); i++) queue.push('rusher');
-  if (n >= 4) queue.push('sniper');
-  if (n >= 7 && n % 2 === 1) queue.push('laser');
-  queue.length = Math.min(queue.length, total);
+  const total = Math.min(4 + 2 * n, 26);
+  const specials = [];
+  for (const t in TYPE_SHARE) {
+    if (n < TYPE_INTRO[t]) continue;
+    const [share, cap] = TYPE_SHARE[t];
+    const count = TYPE_INTRO[t] === n
+      ? Math.max(2, Math.round(total / 4))   // the debut headlines its wave
+      : Math.min(cap, Math.floor(total / share));
+    for (let i = 0; i < count; i++) specials.push(t);
+  }
+  for (let i = specials.length - 1; i > 0; i--) {   // shuffle before truncating
+    const j = Math.floor(Math.random() * (i + 1));
+    [specials[i], specials[j]] = [specials[j], specials[i]];
+  }
+  // gunners stay the backbone: specials never crowd past ~60% of the wave
+  specials.length = Math.min(specials.length, Math.floor(total * 0.6));
+  const queue = specials;
   while (queue.length < total) queue.push('gunner');
   for (let i = queue.length - 1; i > 0; i--) {   // shuffle
     const j = Math.floor(Math.random() * (i + 1));
     [queue[i], queue[j]] = [queue[j], queue[i]];
   }
+  const debut = Object.keys(TYPE_INTRO).find((t) => TYPE_INTRO[t] === n);
+  if (debut && debut !== 'gunner') {
+    const i = queue.indexOf(debut);
+    if (i > 0) { queue.splice(i, 1); queue.unshift(debut); }
+  }
+  // one laser anchors every other wave from its debut on
+  if (n >= 10 && n % 2 === 0) queue.unshift('laser');
   return queue;
 }
 
@@ -3441,6 +3484,7 @@ const el = {
   enm: document.getElementById('enm'),
   menurow: document.getElementById('menurow'),
   moderow: document.getElementById('moderow'),
+  rushlink: document.getElementById('rushlink'),
 };
 renderScores();
 
@@ -3505,6 +3549,7 @@ function showMenu() {
   el.overlay.querySelector('.rules').style.display = 'none';
   el.menurow.style.display = 'flex';
   el.moderow.style.display = 'flex';
+  el.rushlink.style.display = '';
   renderScores();
   updateSndBtn();
   el.menubtn.style.display = 'none';
@@ -3627,12 +3672,13 @@ function startWave(n, quiet = false) {   // quiet: the clear card already announ
   el.pausebtn.style.display = 'block';
   el.ammo.style.display = '';
   setTimeLocked(false);   // each wave starts at full speed in button mode
-  if (n === 1) slowBank = SLOWMO.base;   // new run: fresh tank; waves carry over
+  // new run: fresh tank; later waves carry surplus over but never start dry
+  slowBank = n === 1 ? SLOWMO.base : Math.max(slowBank, SLOWMO.base);
   updateSlowMeter();
   updateModeUI();
 }
 
-function maxAlive() { return Math.min(2 + Math.floor(game.wave / 2), 5); }
+function maxAlive() { return Math.min(3 + Math.floor((game.wave - 1) / 2), 7); }
 
 let deathAt = 0;
 
@@ -3650,6 +3696,8 @@ function hitPlayer(ended = false) {
   el.ammo.style.display = 'none';   // the overlay's stats line lands there
   setTimeLocked(false);
   el.timebtn.style.display = 'none';
+  el.slowmeter.style.display = 'none';   // the meter goes with its button
+  el.rushlink.style.display = 'none';    // retry retries THIS mode only
   if (!ended) {   // a chosen exit skips the death drama
     el.redflash.style.opacity = 1;
     sfx.die();
@@ -3660,13 +3708,16 @@ function hitPlayer(ended = false) {
     el.overlay.querySelector('h1').innerHTML = ended ? 'RUN<br><em>ENDED</em>' : 'YOU<br><em>DIED</em>';
     el.overlay.querySelector('.sub').textContent = ended ? 'YOU CALLED IT' : 'ONE HIT IS ALL IT TAKES';
     const r = el.overlay.querySelector('.rules');
-    r.innerHTML = `<div class="stats">${game.wave} ${game.wave === 1 ? 'WAVE' : 'WAVES'} · ` +
-      `${game.kills} SHATTERED · BEST ${bestWave} ${bestWave === 1 ? 'WAVE' : 'WAVES'}</div>`;
+    r.innerHTML = game.mode === 'rush'
+      ? `<div class="stats">RUSH HOUR · ${game.kills} SHATTERED · ${Math.round(runPlayT)}S</div>`
+      : `<div class="stats">${game.wave} ${game.wave === 1 ? 'WAVE' : 'WAVES'} · ` +
+        `${game.kills} SHATTERED · BEST ${bestWave} ${bestWave === 1 ? 'WAVE' : 'WAVES'}</div>`;
     r.style.display = 'flex';
     el.scores.style.display = 'none';
     el.menurow.style.display = 'none';
     el.moderow.style.display = 'none';   // keep the stats line's row clear
-    el.overlay.querySelector('.go').textContent = 'TAP TO RETRY WAVE';
+    el.overlay.querySelector('.go').textContent =
+      game.mode === 'rush' ? 'TAP TO RETRY RUSH HOUR' : 'TAP TO RETRY WAVE';
     el.menubtn.style.display = 'inline-block';
     el.overlay.classList.remove('hidden');
   }, ended ? 400 : 900);
@@ -3726,6 +3777,7 @@ function advanceFromOverlay() {
     player.yaw = 0; player.pitch = 0; player.roll = 0;
     player.iframes = 1;
     game.kills = 0;
+    game.seenTypes = {};   // fresh run: every type announces itself again
     runStartAt = Date.now();
     runPlayT = 0;
     setWeapon('pistol');
@@ -3768,7 +3820,9 @@ function frame(now) {
   // button mode: the bank drains in real time while locked; empty = snap back
   if (timeMode === 'toggle' && playing) {
     if (timeLocked) {
-      slowBank -= dt * SLOWMO.drain;
+      // the tank drains slower early on — nearly double the frozen seconds
+      // on the opening waves, full price once the run heats up
+      slowBank -= dt * SLOWMO.drain * (0.55 + 0.45 * diffT());
       if (slowBank <= 0) {
         slowBank = 0;
         setTimeLocked(false);   // time rushes back — resume SFX fires as usual
@@ -3914,8 +3968,15 @@ function frame(now) {
     if (game.state === 'play' && game.spawnQueue.length > 0 && enemies.length < maxAlive()) {
       game.spawnTimer -= sdt;
       if (game.spawnTimer <= 0) {
-        spawnEnemy(game.spawnQueue.shift());
-        game.spawnTimer = 0.8 + Math.random() * 0.6;
+        // a group steps out together — from an alley mouth or across the
+        // street, usually somewhere ahead of where you're walking/looking
+        game.waveBearing = player.yaw + Math.PI + (Math.random() - 0.5) *
+          (Math.random() < 0.15 ? Math.PI * 2 : 2.2);
+        let g = Math.min(
+          1 + (Math.random() < 0.7 ? 1 : 0) + (Math.random() < 0.3 ? 1 : 0),
+          game.spawnQueue.length, maxAlive() - enemies.length);
+        while (g-- > 0) spawnEnemy(game.spawnQueue.shift());
+        game.spawnTimer = 2.4 + Math.random() * 1.6;
       }
     }
     for (const e of enemies) updateEnemy(e, sdt);
@@ -3976,7 +4037,11 @@ function frame(now) {
   updatePickups(dt, sdt);
 
   // --- HUD
-  el.score.textContent = `WAVE ${game.wave}  ·  ${game.kills}`;
+  const left = game.spawnQueue.length + enemies.length;
+  el.score.textContent = game.mode === 'rush'
+    ? `RUSH  ·  ${game.kills}`
+    : `WAVE ${game.wave}  ·  ${game.kills}` +
+      (game.state === 'play' && left > 0 ? `  ·  ${left} LEFT` : '');
   el.tint.style.opacity = playing ? (1 - timeScale / TIME_FULL) : 0;
   document.body.classList.toggle('slowmo', playing && timeScale < 0.55);
   document.body.classList.toggle('inmenu', game.state === 'menu');
