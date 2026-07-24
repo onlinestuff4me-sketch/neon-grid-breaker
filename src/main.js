@@ -107,7 +107,7 @@ function makeFloorTexture() {
 // shopfront ground floors ring the arena and thin out into fogged blocks.
 // ---------------------------------------------------------------------------
 const CITY = {
-  street: 9,       // road width (m) — narrow: the city presses in on the fight
+  street: 7.5,     // road width (m) — narrow: the city presses in on the fight
   floor1: 4,       // shopfront storey height (m)
   floorH: 3,       // upper storey height (m)
   win: 0.62,       // upper window fill 0..1
@@ -199,44 +199,118 @@ const floor = new THREE.Mesh(
 floor.rotation.x = -Math.PI / 2;
 scene.add(floor);
 
-// a corner lot of towers for one city cell; the near ring gets full shopfront
-// facades, distant rings get plain fogged silhouettes
-function buildLot(cx, cz, near, si) {
-  const half = CELL / 2, sw = CITY.street / 2 + 1;
-  for (const [qx, qz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
-    let bi = 0;
-    for (let k = 0; k < 2; k++) {
-      if (rnd01(si * 7.9 + bi * 3.1 + k * 41.7) > CITY.density) { bi++; continue; }
-      const w = 6 + rnd01(si * 91.3 + bi * 17.7) * 6;
-      const h = CITY.hMin + rnd01(si * 53.9 + bi * 29.3) * (CITY.hMax - CITY.hMin);
-      const px = cx + qx * (sw + 2.0 + w / 2 + k * 8 + rnd01(si + bi * 5.1) * 3);
-      const pz = cz + qz * (sw + 2.0 + w / 2 + (1 - k) * 8 + rnd01(si + bi * 9.7) * 3);
-      const dep = w * (0.7 + rnd01(bi * 13.3) * 0.6);
-      const mat = near ? new THREE.MeshLambertMaterial({ map: makeFacadeTexture(si * 10 + bi, h) }) : MAT_WHITE;
-      const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, dep), mat);
-      b.position.set(px, h / 2, pz);
-      scene.add(b);
-      // towers in the playable ring are SOLID — you fight on the streets now
-      if (Math.abs(cx) <= CELL && Math.abs(cz) <= CELL) {
-        towerObstacles.push({
-          min: new THREE.Vector3(px - w / 2, 0, pz - dep / 2),
-          max: new THREE.Vector3(px + w / 2, h, pz + dep / 2),
-        });
+// The city as street canyons: each block quadrant is walled off from the
+// avenues by a packed row of buildings (rare slim gaps read as alley
+// pockets), with a solid core plugging the block interior. Every cell is
+// deterministic from one seed and identical to every other cell, so the
+// endless-street recenter stays pixel-invisible — and no two buildings ever
+// overlap, so walls can't z-fight (the old flickering-window bug).
+const STREET_FACE = CITY.street / 2 + 2.2;   // building faces this far off the road axis
+
+// facade pool: a dozen shared textures reused across every row building —
+// per-building canvases would eat GPU memory at this density
+const facadePool = [];
+function facadeMat(v, h) {
+  const bucket = h < 13 ? 0 : h < 19 ? 1 : 2;
+  const idx = bucket * 4 + (v % 4);
+  if (!facadePool[idx]) {
+    facadePool[idx] = new THREE.MeshLambertMaterial({
+      map: makeFacadeTexture(idx * 7.3 + 2, [11, 16, 22][bucket]),
+    });
+  }
+  return facadePool[idx];
+}
+
+// merge helper: the whole city renders as a handful of meshes (one per
+// facade variant plus one slab of plain concrete) instead of ~900 draw calls
+function mergedCityMesh(boxes, mat) {
+  const pos = [], norm = [], uv = [], idx = [];
+  let vo = 0;
+  for (const [px, py, pz, w, h, d] of boxes) {
+    const g = new THREE.BoxGeometry(w, h, d);
+    const pa = g.attributes.position.array, na = g.attributes.normal.array, ua = g.attributes.uv.array;
+    for (let i = 0; i < pa.length; i += 3) {
+      pos.push(pa[i] + px, pa[i + 1] + py, pa[i + 2] + pz);
+      norm.push(na[i], na[i + 1], na[i + 2]);
+    }
+    for (let i = 0; i < ua.length; i++) uv.push(ua[i]);
+    const ia = g.index.array;
+    for (let i = 0; i < ia.length; i++) idx.push(ia[i] + vo);
+    vo += pa.length / 3;
+    g.dispose();
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(norm, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  const m = new THREE.Mesh(g, mat);
+  scene.add(m);
+  return m;
+}
+
+const towerObstacles = [];
+{
+  const si = 60;                       // the one seed the whole city grows from
+  const half = CELL / 2, face = STREET_FACE;
+  const buckets = new Map();           // material -> merged box list
+  const put = (mat, px, pz, w, h, d, solid) => {
+    if (!buckets.has(mat)) buckets.set(mat, []);
+    buckets.get(mat).push([px, h / 2, pz, w, h, d]);
+    if (solid) {
+      towerObstacles.push({
+        min: new THREE.Vector3(px - w / 2, 0, pz - d / 2),
+        max: new THREE.Vector3(px + w / 2, h, pz + d / 2),
+      });
+    }
+  };
+  const buildCell = (cx, cz, ring) => {
+    const solid = ring <= 1;   // physics only where anyone can actually reach
+    for (const [qi, [qx, qz]] of [[-1, -1], [1, -1], [-1, 1], [1, 1]].entries()) {
+      let bi = qi * 37;
+      if (ring <= 2) {
+        // two packed street walls per quadrant, one along each avenue. The
+        // corner belongs to the first wall's corner building; the second
+        // wall starts past its back face so the two can NEVER interpenetrate
+        let corner = face;
+        for (const axis of [0, 1]) {
+          let cur = axis === 0 ? face : corner;
+          while (cur < half - 4) {
+            const w = 5 + rnd01(si * 3.1 + bi * 7.7) * 6;      // along-street
+            if (cur + w > half - 1.0) break;
+            const dep = 5 + rnd01(si * 5.3 + bi * 11.9) * 5;   // into the block
+            if (axis === 0 && cur === face) corner = face + dep + 0.35;
+            const h = CITY.hMin + rnd01(si * 53.9 + bi * 29.3) * (CITY.hMax - CITY.hMin);
+            const v = Math.floor(rnd01(si * 2.9 + bi * 4.7) * 4);
+            if (axis === 0) put(facadeMat(v, h), cx + qx * (face + dep / 2), cz + qz * (cur + w / 2), dep, h, w, solid);
+            else put(facadeMat(v, h), cx + qx * (cur + w / 2), cz + qz * (face + dep / 2), w, h, dep, solid);
+            cur += w + (rnd01(si * 1.7 + bi * 13.3) < 0.18 ? 1.8 : 0.35);   // rare alley pocket
+            bi++;
+          }
+        }
+        // the core plugs the block interior out to the cell boundary, where
+        // it ABUTS (never overlaps) the neighbor cell's core
+        const c0 = face + 10.3, c1 = half;
+        const ch = CITY.hMin + rnd01(si * 77.7 + bi * 3.3) * (CITY.hMax - CITY.hMin);
+        put(MAT_WHITE, cx + qx * ((c0 + c1) / 2), cz + qz * ((c0 + c1) / 2), c1 - c0, ch, c1 - c0, solid);
+      } else {
+        // far ring: two chunky slabs per quadrant — silhouette in the fog
+        for (const axis of [0, 1]) {
+          const h = CITY.hMin + rnd01(si * 9.1 + qi * 3.7 + axis * 5.9) * (CITY.hMax - CITY.hMin);
+          if (axis === 0) put(MAT_WHITE, cx + qx * (face + 4.5), cz + qz * ((face + half) / 2), 9, h, half - face, false);
+          else put(MAT_WHITE, cx + qx * ((face + half) / 2), cz + qz * (face + 4.5), half - face, h, 9, false);
+        }
       }
-      bi++;
+    }
+  };
+  for (let gx = -CITY.reach; gx <= CITY.reach; gx++) {
+    for (let gz = -CITY.reach; gz <= CITY.reach; gz++) {
+      buildCell(gx * CELL, gz * CELL, Math.max(Math.abs(gx), Math.abs(gz)));
     }
   }
+  for (const [mat, boxes] of buckets) mergedCityMesh(boxes, mat);
 }
-// EVERY block is identical — same seed, same lots, the center included —
-// so the endless-street recenter is pixel-invisible. Playable-ring towers
-// carry collision; the fight happens on the avenues between them.
-const towerObstacles = [];
-for (let gx = -CITY.reach; gx <= CITY.reach; gx++)
-  for (let gz = -CITY.reach; gz <= CITY.reach; gz++)
-    buildLot(gx * CELL, gz * CELL, Math.abs(gx) <= 1 && Math.abs(gz) <= 1, 60);
 
-// Cover blocks double as physics obstacles: {min, max} AABBs.
-// Three arena layouts, rotated every 3 waves. [x, z, w, h, d] per block.
 // The streets ARE the arena: the only solid things in the world are the
 // city towers, and they never change or move — no more cover blocks popping
 // in and out between waves.
@@ -1489,22 +1563,37 @@ function spawnEnemy(type = 'gunner') {
   parts.g.scale.set(...spec.scale);
   // the wave attacks from one flank: spawn in an arc around the wave bearing
   // so the fight stays in front of you instead of whipping side to side
-  let x = 0, z = 0, placed = false;
-  for (let tries = 0; tries < 24 && !placed; tries++) {
+  // valid ground = ON a street (never a block-interior pocket the player
+  // can't reach), inside the live world, and clear of buildings
+  const cellLocal = (v) => v - Math.round(v / CELL) * CELL;
+  const validGround = (px, pz) =>
+    Math.abs(px) < CELL - 2 && Math.abs(pz) < CELL - 2 &&
+    (Math.abs(cellLocal(px)) < STREET_FACE - 0.7 || Math.abs(cellLocal(pz)) < STREET_FACE - 0.7) &&
+    !pointInObstacle(px, pz, 0.8);
+  let x = 0, z = 0, placed = false, fbX = 0, fbZ = 0, fbOk = false;
+  for (let tries = 0; tries < 30 && !placed; tries++) {
     const a = game.waveBearing + (Math.random() - 0.5) * 1.1;   // ±32°
     const d = type === 'sniper' ? 17 + Math.random() * 6 : 13 + Math.random() * 8;
     x = player.pos.x + Math.sin(a) * d;
     z = player.pos.z + Math.cos(a) * d;
-    const lim = CELL - 2;   // anywhere in the streets — towers reject below
-    if (Math.abs(x) > lim || Math.abs(z) > lim) continue;
-    if (pointInObstacle(x, z, 0.8)) continue;
-    placed = true;
+    if (!validGround(x, z)) continue;
+    // prefer stepping out of cover: a spot you CAN'T see right now, so they
+    // round the corner toward you instead of popping in mid-street
+    if (!hasLineOfSight(_v2.set(x, 1.4, z), _v3.set(player.pos.x, EYE_HEIGHT, player.pos.z))) {
+      placed = true;
+      break;
+    }
+    if (!fbOk) { fbOk = true; fbX = x; fbZ = z; }
   }
-  if (!placed) {   // fallback: up the street from the player; collisions sort it
-    const a = game.waveBearing + (Math.random() - 0.5) * 1.5;
-    x = player.pos.x + Math.sin(a) * 14;
-    z = player.pos.z + Math.cos(a) * 14;
+  if (!placed && fbOk) { x = fbX; z = fbZ; placed = true; }   // visible beats invalid
+  for (let tries = 0; tries < 40 && !placed; tries++) {   // any street nearby
+    const a = Math.random() * Math.PI * 2;
+    const d = 10 + Math.random() * 10;
+    x = player.pos.x + Math.sin(a) * d;
+    z = player.pos.z + Math.cos(a) * d;
+    placed = validGround(x, z);
   }
+  if (!placed) { x = player.pos.x * 0.5; z = player.pos.z * 0.5; }   // mid-avenue, last resort
   parts.g.position.set(x, 0, z);
   scene.add(parts.g);
   // materialize: red shards fly in from thin air and assemble into the body —
@@ -1569,7 +1658,7 @@ function spawnEnemy(type = 'gunner') {
     walkPhase: Math.random() * Math.PI * 2,
     strafe: Math.random() < 0.5 ? 1 : -1,
     strafeT: 1 + Math.random() * 2,
-    fireCd: ((type === 'sniper' ? 1.2 : 0.15) + Math.random() * 0.35) * aimSpeedFactor(),
+    fireCd: ((type === 'sniper' ? 1.2 : 0.3) + Math.random() * 1.1) * aimSpeedFactor(),
     engageDist: spec.engage
       ? spec.engage[0] + Math.random() * spec.engage[1]
       : 19 + Math.random() * 6,           // guns come up early — pressure from range
@@ -1606,7 +1695,7 @@ function spawnNPC(anywhere = false) {
   // pedestrians keep to the sidewalks: the band between the curb and the
   // shopfronts, on either side of the road
   const side = Math.random() < 0.5 ? -1 : 1;
-  const lane = side * (CITY.street / 2 + 1.2 + Math.random() * 1.4);
+  const lane = side * (CITY.street / 2 + 0.8 + Math.random() * 0.8);
   const dir = Math.random() < 0.5 ? 1 : -1;
   const n = { ...parts, horiz, lane, dir, pos: parts.g.position,
     walkPhase: Math.random() * 6.28, sleeper: Math.random() < 0.55, revealed: false,
@@ -1755,6 +1844,11 @@ function killEnemy(i, impulseDir) {
   scene.remove(e.g);
   enemies.splice(i, 1);
   game.kills++;
+  // the flow: a kill pulls the next spawn forward, so the street never
+  // stays empty for long
+  if (game.mode !== 'rush' && game.state === 'play') {
+    game.spawnTimer = Math.min(game.spawnTimer, 0.5 + Math.random() * 0.9);
+  }
   killWord();
   sfx.shatter();
   vibrate(30);
@@ -1948,7 +2042,15 @@ function updateEnemy(e, sdt) {
           (!ENEMY_TYPES[e.type].shielded || Math.cos(e.g.rotation.y - wantYaw) > 0.8) &&
           performance.now() >= game.noFireBefore &&
           hasLineOfSight(_v2.set(e.pos.x, 1.35, e.pos.z), _v3.set(player.pos.x, EYE_HEIGHT - 0.3, player.pos.z))) {
-        e.state = 'aim'; e.stateT = 0;
+        // take turns on the trigger: only a couple of guns telegraph at once,
+        // so fire arrives as a steady stream you can dodge, never a volley
+        let aiming = 0;
+        for (const o of enemies) if (o.state === 'aim' || o.state === 'burst') aiming++;
+        if (aiming >= 2 + Math.floor(game.wave / 4)) {
+          e.fireCd = 0.25 + Math.random() * 0.45;   // wait for a lane
+        } else {
+          e.state = 'aim'; e.stateT = 0;
+        }
       }
       break;
     }
@@ -2104,9 +2206,12 @@ function removeBeam(e) {
 // Shooting
 // ---------------------------------------------------------------------------
 const _dir = new THREE.Vector3();
+// tap buffering: a tap that lands during the fire cooldown is BANKED for a
+// beat instead of dropped, so rapid tapping fires at the weapon's full rate
+let pendingFireUntil = 0;
 function playerFire() {
   if (!player.alive || game.state !== 'play') return;
-  if (player.fireCd > 0) return;
+  if (player.fireCd > 0) { pendingFireUntil = performance.now() + 300; return; }
   const spec = WEAPONS[player.weapon];
   player.fireCd = spec.cd;
   camera.getWorldDirection(_dir);
@@ -2289,7 +2394,7 @@ const MOVE_SPEED = 5.5;         // m/s at full stick (real time)
 const SPRINT_SPEED = 9;         // m/s while auto-sprinting to a pickup
 const MOVE_EASE = 10;           // velocity smoothing rate — the "weight"
 const LOOK_SENS = 2.6;          // radians per screen-width of look drag
-const TAP_MS = 280, TAP_PX = 18;  // thresholds on NET displacement — real
+const TAP_MS = 380, TAP_PX = 18;  // thresholds on NET displacement — real
                                   // thumbs jitter, so never sum path length
 const PICKUP_TAP_PX = 120;      // generous screen-px hit radius for tapping a
                                 // drop — near-misses should grab, not fire
@@ -2474,6 +2579,15 @@ function onPointerMove(ev) {
   const p = input.pointers.get(ev.pointerId);
   if (!p) return;
   ev.preventDefault();
+  // a stale entry (mobile browsers sometimes lose a pointerup at the screen
+  // edge) makes the NEXT touch look like a huge instant swipe — the camera
+  // "jumps". Any implausible single-event hop is a re-plant, not a move:
+  // carry the anchors along with it so nothing is applied.
+  if (Math.hypot(ev.clientX - p.x, ev.clientY - p.y) > 140) {
+    p.ox += ev.clientX - p.x; p.oy += ev.clientY - p.y;
+    p.sx += ev.clientX - p.x; p.sy += ev.clientY - p.y;
+    p.x = ev.clientX; p.y = ev.clientY;
+  }
   const dx = ev.clientX - p.x, dy = ev.clientY - p.y;
   p.x = ev.clientX; p.y = ev.clientY;
   if (!p.role && Math.hypot(p.x - p.sx, p.y - p.sy) > TAP_PX) {
@@ -3862,6 +3976,11 @@ function frame(now) {
   player.fireCd -= dt;
   player.iframes -= dt;
   input.lookIdle += dt;
+  if (pendingFireUntil > performance.now() && player.fireCd <= 0 &&
+      player.alive && game.state === 'play') {
+    pendingFireUntil = 0;
+    playerFire();   // the banked tap fires the instant the cooldown clears
+  }
 
   // movement: stick deflection (or an active sprint) sets a target velocity,
   // and the body eases toward it — smooth in, smooth out
@@ -3983,16 +4102,16 @@ function frame(now) {
     if (game.state === 'play' && game.spawnQueue.length > 0 && enemies.length < maxAlive()) {
       game.spawnTimer -= sdt;
       if (game.spawnTimer <= 0) {
-        // a group steps out together — from an alley mouth or across the
-        // street, usually somewhere ahead of where you're walking/looking
+        // one at a time: a figure stepping out of an alley or around the far
+        // corner, usually somewhere ahead of where you're walking/looking.
+        // The emptier the street, the sooner the next one appears — a steady
+        // flow, not volleys — and a nearly-spent wave trickles its last few.
         game.waveBearing = player.yaw + Math.PI + (Math.random() - 0.5) *
-          (Math.random() < 0.15 ? Math.PI * 2 : 2.2);
-        let g = Math.min(
-          1 + (Math.random() < 0.8 ? 1 : 0) + (Math.random() < 0.45 ? 1 : 0) +
-            (Math.random() < 0.2 ? 1 : 0),
-          game.spawnQueue.length, maxAlive() - enemies.length);
-        while (g-- > 0) spawnEnemy(game.spawnQueue.shift());
-        game.spawnTimer = 2.4 + Math.random() * 1.6;
+          (Math.random() < 0.2 ? Math.PI * 2 : 2.4);
+        spawnEnemy(game.spawnQueue.shift());
+        const fill = enemies.length / maxAlive();
+        game.spawnTimer = (0.7 + 2.6 * fill) * (0.85 + Math.random() * 0.3) +
+          (game.spawnQueue.length <= 2 ? 1.6 : 0);
       }
     }
     for (const e of enemies) updateEnemy(e, sdt);
