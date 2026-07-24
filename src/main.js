@@ -122,20 +122,43 @@ function makeStreetTexture() {
   const c = document.createElement('canvas');
   c.width = c.height = 1024;
   const g = c.getContext('2d');
-  const S = 1024, road = CITY.street / (ARENA_HALF * 2);
-  g.fillStyle = '#eceef1'; g.fillRect(0, 0, S, S);
-  g.strokeStyle = 'rgba(22,24,29,0.08)'; g.lineWidth = 2;
+  const S = 1024, ppm = S / (ARENA_HALF * 2);       // pixels per metre
+  const rHalf = (CITY.street / 2) * ppm;            // road half-width
+  const walk = 2.2 * ppm;                           // curb -> building face
+  // block interior: plain pale slab with a faint coarse grid
+  g.fillStyle = '#eef0f2'; g.fillRect(0, 0, S, S);
+  g.strokeStyle = 'rgba(22,24,29,0.06)'; g.lineWidth = 2;
   for (let i = 0; i <= 16; i++) {
     g.beginPath(); g.moveTo((i / 16) * S, 0); g.lineTo((i / 16) * S, S); g.stroke();
     g.beginPath(); g.moveTo(0, (i / 16) * S); g.lineTo(S, (i / 16) * S); g.stroke();
   }
-  g.fillStyle = '#e2e4e8';
-  g.fillRect(S / 2 - S * road / 2, 0, S * road, S);
-  g.fillRect(0, S / 2 - S * road / 2, S, S * road);
-  g.strokeStyle = 'rgba(22,24,29,0.16)'; g.lineWidth = 4;
-  for (const p of [S / 2 - S * road / 2, S / 2 + S * road / 2]) {
-    g.beginPath(); g.moveTo(p, 0); g.lineTo(p, S); g.stroke();
-    g.beginPath(); g.moveTo(0, p); g.lineTo(S, p); g.stroke();
+  // sidewalks: a real paved band on BOTH sides of every road, running from
+  // the curb to the building faces, with transverse expansion joints
+  g.fillStyle = '#e7e9ed';
+  g.fillRect(S / 2 - rHalf - walk, 0, walk, S);
+  g.fillRect(S / 2 + rHalf, 0, walk, S);
+  g.fillRect(0, S / 2 - rHalf - walk, S, walk);
+  g.fillRect(0, S / 2 + rHalf, S, walk);
+  g.strokeStyle = 'rgba(22,24,29,0.10)'; g.lineWidth = 2;
+  const joint = 2 * ppm;                            // a slab every 2m
+  for (let p = 0; p < S; p += joint) {
+    for (const x0 of [S / 2 - rHalf - walk, S / 2 + rHalf]) {
+      g.beginPath(); g.moveTo(x0, p); g.lineTo(x0 + walk, p); g.stroke();
+      g.beginPath(); g.moveTo(p, x0); g.lineTo(p, x0 + walk); g.stroke();
+    }
+  }
+  // roads over the top (the intersection reads as road, not sidewalk)
+  g.fillStyle = '#dfe1e5';
+  g.fillRect(S / 2 - rHalf, 0, rHalf * 2, S);
+  g.fillRect(0, S / 2 - rHalf, S, rHalf * 2);
+  // curbs: a strong line where road meets sidewalk, a faint one at the
+  // building line
+  for (const [off, a] of [[rHalf, 0.22], [rHalf + walk, 0.08]]) {
+    g.strokeStyle = `rgba(22,24,29,${a})`; g.lineWidth = 4;
+    for (const p of [S / 2 - off, S / 2 + off]) {
+      g.beginPath(); g.moveTo(p, 0); g.lineTo(p, S); g.stroke();
+      g.beginPath(); g.moveTo(0, p); g.lineTo(S, p); g.stroke();
+    }
   }
   g.strokeStyle = 'rgba(22,24,29,0.28)'; g.lineWidth = 5;
   g.setLineDash([28, 26]);
@@ -143,11 +166,11 @@ function makeStreetTexture() {
   g.beginPath(); g.moveTo(0, S / 2); g.lineTo(S, S / 2); g.stroke();
   g.setLineDash([]);
   g.fillStyle = 'rgba(255,255,255,0.9)';
-  const cw = S * road, half = cw / 2;
+  const cw = rHalf * 2;
   for (const side of [-1, 1]) {
-    const edge = S / 2 + side * (half + 30) - (side < 0 ? 60 : 0);
+    const edge = S / 2 + side * (rHalf + 30) - (side < 0 ? 60 : 0);
     for (let i = 0; i < 10; i++) {
-      const o = S / 2 - half + 8 + i * (cw / 10);
+      const o = S / 2 - rHalf + 8 + i * (cw / 10);
       g.fillRect(o, edge, cw / 10 - 8, 60);
       g.fillRect(edge, o, 60, cw / 10 - 8);
     }
@@ -211,11 +234,11 @@ const STREET_FACE = CITY.street / 2 + 2.2;   // building faces this far off the 
 // per-building canvases would eat GPU memory at this density
 const facadePool = [];
 function facadeMat(v, h) {
-  const bucket = h < 13 ? 0 : h < 19 ? 1 : 2;
+  const bucket = h < 13 ? 0 : h < 19 ? 1 : h < 27 ? 2 : 3;
   const idx = bucket * 4 + (v % 4);
   if (!facadePool[idx]) {
     facadePool[idx] = new THREE.MeshLambertMaterial({
-      map: makeFacadeTexture(idx * 7.3 + 2, [11, 16, 22][bucket]),
+      map: makeFacadeTexture(idx * 7.3 + 2, [11, 16, 22, 36][bucket]),
     });
   }
   return facadePool[idx];
@@ -280,7 +303,8 @@ const towerObstacles = [];
             if (cur + w > half - 1.0) break;
             const dep = 5 + rnd01(si * 5.3 + bi * 11.9) * 5;   // into the block
             if (axis === 0 && cur === face) corner = face + dep + 0.35;
-            const h = CITY.hMin + rnd01(si * 53.9 + bi * 29.3) * (CITY.hMax - CITY.hMin);
+            let h = CITY.hMin + rnd01(si * 53.9 + bi * 29.3) * (CITY.hMax - CITY.hMin);
+            if (rnd01(si * 21.1 + bi * 6.9) > 0.8) h *= 1.7;   // the odd high-rise
             const v = Math.floor(rnd01(si * 2.9 + bi * 4.7) * 4);
             if (axis === 0) put(facadeMat(v, h), cx + qx * (face + dep / 2), cz + qz * (cur + w / 2), dep, h, w, solid);
             else put(facadeMat(v, h), cx + qx * (cur + w / 2), cz + qz * (face + dep / 2), w, h, dep, solid);
@@ -291,12 +315,14 @@ const towerObstacles = [];
         // the core plugs the block interior out to the cell boundary, where
         // it ABUTS (never overlaps) the neighbor cell's core
         const c0 = face + 10.3, c1 = half;
-        const ch = CITY.hMin + rnd01(si * 77.7 + bi * 3.3) * (CITY.hMax - CITY.hMin);
+        let ch = CITY.hMin + rnd01(si * 77.7 + bi * 3.3) * (CITY.hMax - CITY.hMin);
+        if (rnd01(si * 15.7 + bi * 2.1) > 0.7) ch *= 1.7;   // block-core towers
         put(MAT_WHITE, cx + qx * ((c0 + c1) / 2), cz + qz * ((c0 + c1) / 2), c1 - c0, ch, c1 - c0, solid);
       } else {
         // far ring: two chunky slabs per quadrant — silhouette in the fog
         for (const axis of [0, 1]) {
-          const h = CITY.hMin + rnd01(si * 9.1 + qi * 3.7 + axis * 5.9) * (CITY.hMax - CITY.hMin);
+          let h = CITY.hMin + rnd01(si * 9.1 + qi * 3.7 + axis * 5.9) * (CITY.hMax - CITY.hMin);
+          if (rnd01(si * 4.3 + qi * 9.1 + axis * 2.7) > 0.7) h *= 1.7;   // skyline spikes
           if (axis === 0) put(MAT_WHITE, cx + qx * (face + 4.5), cz + qz * ((face + half) / 2), 9, h, half - face, false);
           else put(MAT_WHITE, cx + qx * ((face + half) / 2), cz + qz * (face + 4.5), half - face, h, 9, false);
         }
