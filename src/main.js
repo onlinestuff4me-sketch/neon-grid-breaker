@@ -107,12 +107,12 @@ function makeFloorTexture() {
 // shopfront ground floors ring the arena and thin out into fogged blocks.
 // ---------------------------------------------------------------------------
 const CITY = {
-  street: 12,      // road width (m)
+  street: 9,       // road width (m) — narrow: the city presses in on the fight
   floor1: 4,       // shopfront storey height (m)
   floorH: 3,       // upper storey height (m)
   win: 0.62,       // upper window fill 0..1
   hMin: 9, hMax: 24,
-  density: 0.75,   // odds a distant lot gets a tower
+  density: 0.92,   // odds a lot gets a tower — dense, few empty gaps
   fogNear: 55, fogFar: 200,
   reach: 3,        // distant rings of 40m city cells
 };
@@ -199,16 +199,6 @@ const floor = new THREE.Mesh(
 floor.rotation.x = -Math.PI / 2;
 scene.add(floor);
 
-// invisible physics walls; the VISIBLE boundary is the city itself
-for (let i = 0; i < 4; i++) {
-  const wall = new THREE.Mesh(new THREE.BoxGeometry(ARENA_HALF * 2 + 1, 5, 0.5), MAT_WHITE);
-  const a = (i * Math.PI) / 2;
-  wall.position.set(Math.sin(a) * (ARENA_HALF + 0.25), 2.5, Math.cos(a) * (ARENA_HALF + 0.25));
-  wall.rotation.y = a;
-  wall.visible = false;
-  scene.add(wall);
-}
-
 // a corner lot of towers for one city cell; the near ring gets full shopfront
 // facades, distant rings get plain fogged silhouettes
 function buildLot(cx, cz, near, si) {
@@ -219,8 +209,8 @@ function buildLot(cx, cz, near, si) {
       if (rnd01(si * 7.9 + bi * 3.1 + k * 41.7) > CITY.density) { bi++; continue; }
       const w = 6 + rnd01(si * 91.3 + bi * 17.7) * 6;
       const h = CITY.hMin + rnd01(si * 53.9 + bi * 29.3) * (CITY.hMax - CITY.hMin);
-      const px = cx + qx * (sw + 3.5 + w / 2 + k * 8 + rnd01(si + bi * 5.1) * 3);
-      const pz = cz + qz * (sw + 3.5 + w / 2 + (1 - k) * 8 + rnd01(si + bi * 9.7) * 3);
+      const px = cx + qx * (sw + 2.0 + w / 2 + k * 8 + rnd01(si + bi * 5.1) * 3);
+      const pz = cz + qz * (sw + 2.0 + w / 2 + (1 - k) * 8 + rnd01(si + bi * 9.7) * 3);
       const dep = w * (0.7 + rnd01(bi * 13.3) * 0.6);
       const mat = near ? new THREE.MeshLambertMaterial({ map: makeFacadeTexture(si * 10 + bi, h) }) : MAT_WHITE;
       const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, dep), mat);
@@ -247,52 +237,15 @@ for (let gx = -CITY.reach; gx <= CITY.reach; gx++)
 
 // Cover blocks double as physics obstacles: {min, max} AABBs.
 // Three arena layouts, rotated every 3 waves. [x, z, w, h, d] per block.
-const LAYOUTS = [
-  [ // scattered cover
-    [-7, -6, 3.2, 2.6, 1.4], [8, -8, 1.6, 3.4, 1.6], [6, 5, 4.0, 2.2, 1.4],
-    [-9, 7, 1.6, 3.8, 1.6], [0, -13, 5.0, 2.0, 1.4], [-2, 12, 1.6, 3.0, 1.6],
-    [13, -1, 1.4, 2.8, 3.6], [-14, -2, 1.4, 2.4, 3.6],
-  ],
-  [ // pillar court
-    [-6, -6, 1.7, 3.4, 1.7], [6, -6, 1.7, 3.4, 1.7], [-6, 5, 1.7, 3.4, 1.7],
-    [6, 5, 1.7, 3.4, 1.7], [0, -1, 4.5, 2.4, 2.0], [0, -15, 6.0, 2.0, 1.4],
-    [13, 2, 1.4, 2.6, 4.0], [-13, 2, 1.4, 2.6, 4.0],
-  ],
-  [ // corridors
-    [-4.5, 2, 1.4, 2.8, 9.0], [4.5, -2, 1.4, 2.8, 9.0], [0, -9, 5.0, 2.2, 1.4],
-    [0, 7, 5.0, 2.2, 1.4], [11, 9, 2.2, 3.0, 2.2], [-11, -9, 2.2, 3.0, 2.2],
-    [12, -7, 1.5, 2.4, 1.5], [-12, 7, 1.5, 2.4, 1.5],
-  ],
-  [ // the boulevard: abandoned cars along the lanes, kiosks on the corners
-    [-3.6, -9, 2.0, 1.4, 4.4], [3.6, -14, 2.0, 1.4, 4.4], [-3.6, 6, 2.0, 1.4, 4.4],
-    [3.6, 12, 2.0, 1.4, 4.4], [-10, -3.6, 4.4, 1.4, 2.0], [12, 3.6, 4.4, 1.4, 2.0],
-    [-9, 9, 2.4, 2.8, 2.4], [9, -8, 2.4, 2.8, 2.4],
-  ],
-];
-
+// The streets ARE the arena: the only solid things in the world are the
+// city towers, and they never change or move — no more cover blocks popping
+// in and out between waves.
 const obstacles = [];
-const obstacleMeshes = [];
-let currentLayout = -1;
-
-function setLayout(idx) {
-  if (idx === currentLayout) return;
-  currentLayout = idx;
-  for (const m of obstacleMeshes) scene.remove(m);
-  obstacleMeshes.length = 0;
+function setLayout() {
   obstacles.length = 0;
-  for (const [x, z, w, h, d] of LAYOUTS[idx]) {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), MAT_WHITE);
-    m.position.set(x, h / 2, z);
-    scene.add(m);
-    obstacleMeshes.push(m);
-    obstacles.push({
-      min: new THREE.Vector3(x - w / 2, 0, z - d / 2),
-      max: new THREE.Vector3(x + w / 2, h, z + d / 2),
-    });
-  }
   for (const t of towerObstacles) obstacles.push(t);
 }
-setLayout(0);
+setLayout();
 
 // ---------------------------------------------------------------------------
 // Small math helpers
@@ -1631,8 +1584,7 @@ function spawnEnemy(type = 'gunner') {
     warnFlash([type.toUpperCase() + '.']);
     sfx.alert();   // its own stinger — sfx.wave() is the wave VO now
   } else if (!seen[type] && type !== 'gunner' && game.state !== 'menu') {
-    warnFlash([type.toUpperCase() + '.']);
-    sfx.alert();
+    warnFlash([type.toUpperCase() + '.']);   // silent card: the name is enough
   }
   seen[type] = true;
 }
@@ -1643,7 +1595,7 @@ function spawnEnemy(type = 'gunner') {
 // ---------------------------------------------------------------------------
 const crowd = [];
 const npcDebris = [];
-const RUSH = { crowd: 24 };
+const RUSH = { crowd: 30 };
 let rushT = 0, nextSleeperT = 5;
 const MAT_CROWD = new THREE.MeshLambertMaterial({ color: 0x1b1d22 });
 const MAT_REVEAL = new THREE.MeshBasicMaterial({ color: 0xff2d1a });
@@ -1651,10 +1603,13 @@ const MAT_REVEAL = new THREE.MeshBasicMaterial({ color: 0xff2d1a });
 function spawnNPC(anywhere = false) {
   const parts = buildEnemyMesh('gunner');
   const horiz = Math.random() < 0.5;
-  const lane = (Math.random() - 0.5) * (CITY.street - 3);
+  // pedestrians keep to the sidewalks: the band between the curb and the
+  // shopfronts, on either side of the road
+  const side = Math.random() < 0.5 ? -1 : 1;
+  const lane = side * (CITY.street / 2 + 1.2 + Math.random() * 1.4);
   const dir = Math.random() < 0.5 ? 1 : -1;
   const n = { ...parts, horiz, lane, dir, pos: parts.g.position,
-    walkPhase: Math.random() * 6.28, sleeper: Math.random() < 0.4, revealed: false,
+    walkPhase: Math.random() * 6.28, sleeper: Math.random() < 0.55, revealed: false,
     speed: 1.0 + Math.random() * 0.6 };
   const along = anywhere ? (Math.random() * 2 - 1) * (ARENA_HALF - 1) : -dir * (ARENA_HALF - 0.6);
   if (horiz) n.pos.set(along, 0, lane); else n.pos.set(lane, 0, along);
@@ -1704,7 +1659,6 @@ function initRush() {
   game.stateT = 0;
   game.introLen = 1.2;
   game.spawnQueue = [];
-  setLayout(3);   // the boulevard
   clearCrowd();
   rushT = 0; nextSleeperT = 5;
   for (let i = 0; i < RUSH.crowd; i++) spawnNPC(true);
@@ -1751,14 +1705,27 @@ function updateCrowd(sdt) {
   rushT += sdt;
   nextSleeperT -= sdt;
   if (nextSleeperT <= 0) {
-    nextSleeperT = Math.max(2.2, 6.5 - rushT * 0.06) * (0.7 + Math.random() * 0.6);
+    // clusters, not a metronome: a knot of sleepers near you turns at once,
+    // then the street goes quiet long enough to deal with them before the
+    // next knot wakes further on
+    nextSleeperT = Math.max(4, 10 - rushT * 0.045) * (0.8 + Math.random() * 0.5);
+    const want = 1 + (rushT > 30 ? 1 : 0) + (rushT > 90 ? 1 : 0);
     let best = null, bd = 1e9;
     for (const n of crowd) {
       if (!n.sleeper) continue;
       const d = Math.hypot(n.pos.x - player.pos.x, n.pos.z - player.pos.z);
-      if (d > 5 && d < 24 && d < bd) { bd = d; best = n; }
+      if (d > 5 && d < 26 && d < bd) { bd = d; best = n; }
     }
-    if (best) { activateSleeper(best); sfx.alert(); }
+    if (best) {
+      const cluster = [best];
+      for (const n of crowd) {
+        if (cluster.length >= want) break;
+        if (n === best || !n.sleeper) continue;
+        if (Math.hypot(n.pos.x - best.pos.x, n.pos.z - best.pos.z) < 9) cluster.push(n);
+      }
+      for (const n of cluster) activateSleeper(n);
+      sfx.alert();
+    }
   }
 }
 
@@ -1814,11 +1781,6 @@ function enemyFire(e, toPlayer) {
     EYE_HEIGHT - 0.25 + (Math.random() - 0.5) * 0.24,
     player.pos.z + (Math.random() - 0.5) * 0.24
   );
-  // ballistic compensation: aim above the torso by the gravity drop over the
-  // flight, so the round arrives at chest height instead of plowing the dirt
-  const speed = enemyBulletSpeed() * (spec.mul || 1);
-  const tFly = origin.distanceTo(target) / speed;
-  target.y += 0.5 * BULLET_GRAVITY * tFly * tFly;
   const baseDir = target.sub(origin).normalize();
   for (let p = 0; p < (spec.pellets || 1); p++) {
     const d = baseDir.clone();
@@ -1911,10 +1873,13 @@ function updateEnemy(e, sdt) {
 
   if (e.beam) updateBeam(e, sdt);   // the sweep, if one is live
 
-  // a burst, once started, always completes — no melee interrupt mid-volley
-  if (dist < 1.5 && e.state !== 'melee' && e.state !== 'burst' && e.state !== 'assemble') {
+  // a burst, once started, always completes — no melee interrupt mid-volley.
+  // Rushers never use this: their whole attack is the telegraphed lunge.
+  if (dist < 1.5 && e.type !== 'rusher' &&
+      e.state !== 'melee' && e.state !== 'burst' && e.state !== 'assemble') {
     e.state = 'melee'; e.stateT = 0;
   }
+  if (e.lungeCd) e.lungeCd -= sdt;
 
   switch (e.state) {
     case 'assemble': {
@@ -1975,6 +1940,10 @@ function updateEnemy(e, sdt) {
       e.pos.z += dir.z * moveSpeed * sdt;
       resolveEnemyCollisions(e);   // hard guarantee: steering can fail, this can't
 
+      if (e.type === 'rusher' && dist < 3.4 && (e.lungeCd || 0) <= 0) {
+        e.state = 'windup'; e.stateT = 0;
+        break;
+      }
       if (e.type !== 'rusher' && dist < e.engageDist && e.fireCd <= 0 &&
           (!ENEMY_TYPES[e.type].shielded || Math.cos(e.g.rotation.y - wantYaw) > 0.8) &&
           performance.now() >= game.noFireBefore &&
@@ -2030,6 +1999,36 @@ function updateEnemy(e, sdt) {
         if (dist < 1.8) hitPlayer();
         e.state = 'recover'; e.stateT = 0;
       }
+      break;
+    }
+    case 'windup': {
+      // the rusher's tell: he plants, coils, and the claw reaches back.
+      // In slow motion it reads like a sentence; at full speed it's a beat.
+      const t = Math.min(e.stateT / 0.55, 1);
+      e.armR.rotation.x = t * 1.5;
+      if (e.stateT >= 0.55) {
+        e.state = 'lunge'; e.stateT = 0;
+        e.lungeYaw = wantYaw;                 // committed: he flies where you WERE
+        e.lungeDx = toPlayer.x; e.lungeDz = toPlayer.z;
+      }
+      break;
+    }
+    case 'lunge': {
+      e.g.rotation.y = e.lungeYaw;
+      e.armR.rotation.x = 1.5 - Math.min(e.stateT / 0.14, 1) * 3.8;   // the swipe
+      e.pos.x += e.lungeDx * 10.5 * sdt;
+      e.pos.z += e.lungeDz * 10.5 * sdt;
+      resolveEnemyCollisions(e);
+      if (dist < 1.35 || e.stateT >= 0.34) {
+        if (dist < 1.35) hitPlayer();
+        e.state = 'lungerest'; e.stateT = 0; e.lungeCd = 1.5;
+      }
+      break;
+    }
+    case 'lungerest': {
+      // overextended: claws down, wide open — the free-kill window
+      e.armR.rotation.x += (0 - e.armR.rotation.x) * Math.min(1, sdt * 5);
+      if (e.stateT >= 0.6) { e.state = 'advance'; e.stateT = 0; }
       break;
     }
   }
@@ -2142,7 +2141,9 @@ function updateBullets(sdt) {
   for (let i = bullets.length - 1; i >= 0; i--) {
     const b = bullets[i];
     b.prev.copy(b.pos);
-    b.vel.y -= BULLET_GRAVITY * sdt;
+    // your rounds arc a touch on long shots; incoming fire flies dead
+    // straight — slow enough to read, honest enough to feel like bullets
+    if (b.fromPlayer) b.vel.y -= BULLET_GRAVITY * sdt;
     b.pos.addScaledVector(b.vel, sdt);
     b.life -= sdt;
     b.mesh.position.copy(b.pos);
@@ -2569,6 +2570,21 @@ window.addEventListener('pointermove', onPointerMove, { passive: false });
 window.addEventListener('pointerup', onPointerUp, { passive: false });
 window.addEventListener('pointercancel', onPointerCancel, { passive: false });
 window.addEventListener('contextmenu', (e) => e.preventDefault());
+
+// iOS Safari sometimes swallows the pointerup when a thumb slides off the
+// screen edge (walking backwards drags it into the home-indicator zone),
+// leaving the stick pinned. The touch layer is the ground truth: whenever it
+// says no fingers remain, drop every tracked pointer.
+function dropAllPointers() {
+  if (input.pointers.size === 0) return;
+  input.pointers.clear();
+  input.stickX = input.stickY = 0;
+  input.holding = false;
+  stickUI(false);
+}
+window.addEventListener('touchend', (ev) => { if (ev.touches.length === 0) dropAllPointers(); }, { passive: true });
+window.addEventListener('touchcancel', (ev) => { if (ev.touches.length === 0) dropAllPointers(); }, { passive: true });
+window.addEventListener('blur', dropAllPointers);
 
 // Belt-and-braces audio unlock: browsers differ on which gesture type is
 // allowed to start audio (touchend vs click vs pointerdown), so hook them
@@ -3339,8 +3355,6 @@ function renderScores() {
     `</div>${rows}`;
 }
 
-// Mix of enemy types for wave n: shotgunners + bombers from wave 3, heavies,
-// shield-bearers + one sniper from 4, armored (headshot-only) from 5.
 // Each wave is a street encounter: a quota big enough to roam through, and
 // exactly one new enemy type debuting per wave so the game keeps introducing
 // itself. The debut headlines its wave and is the first thing you meet.
@@ -3348,34 +3362,40 @@ const TYPE_INTRO = {
   gunner: 1, rusher: 2, shotgunner: 3, heavy: 4, shieldbearer: 5,
   sniper: 6, bomber: 7, armored: 8, rocketeer: 9, laser: 10,
 };
-const TYPE_SHARE = {   // veteran fill: floor(total/share) of each, capped
-  rusher: [5, 3], shotgunner: [4, 4], heavy: [5, 3], shieldbearer: [6, 2],
+const TYPE_SHARE = {   // veteran shooter fill: floor(total/share), capped
+  shotgunner: [4, 4], heavy: [5, 3], shieldbearer: [6, 2],
   sniper: [7, 2], bomber: [6, 2], armored: [6, 2], rocketeer: [8, 2],
 };
 function composeWave(n) {
   const total = Math.min(4 + 2 * n, 26);
+  const debut = Object.keys(TYPE_INTRO).find((t) => TYPE_INTRO[t] === n);
+  const queue = [];
+  // the horde core: rushers scale up fast once they debut — this is a game
+  // about managing the melee crush while gunfire crosses the street
+  const rushers = n >= TYPE_INTRO.rusher ? Math.min(Math.round(total * 0.4), 2 + n) : 0;
+  for (let i = 0; i < rushers; i++) queue.push('rusher');
+  // the debuting type gets a real showing
+  if (debut && debut !== 'gunner' && debut !== 'rusher' && debut !== 'laser') {
+    for (let i = 0; i < Math.max(2, Math.round(total / 5)); i++) queue.push(debut);
+  }
+  // veteran shooters fill in, capped so gunners keep at least ~25% of the wave
   const specials = [];
   for (const t in TYPE_SHARE) {
-    if (n < TYPE_INTRO[t]) continue;
+    if (n <= TYPE_INTRO[t]) continue;
     const [share, cap] = TYPE_SHARE[t];
-    const count = TYPE_INTRO[t] === n
-      ? Math.max(2, Math.round(total / 4))   // the debut headlines its wave
-      : Math.min(cap, Math.floor(total / share));
-    for (let i = 0; i < count; i++) specials.push(t);
+    for (let i = 0; i < Math.min(cap, Math.floor(total / share)); i++) specials.push(t);
   }
   for (let i = specials.length - 1; i > 0; i--) {   // shuffle before truncating
     const j = Math.floor(Math.random() * (i + 1));
     [specials[i], specials[j]] = [specials[j], specials[i]];
   }
-  // gunners stay the backbone: specials never crowd past ~60% of the wave
-  specials.length = Math.min(specials.length, Math.floor(total * 0.6));
-  const queue = specials;
+  const room = Math.max(0, total - queue.length - Math.ceil(total * 0.25));
+  queue.push(...specials.slice(0, room));
   while (queue.length < total) queue.push('gunner');
   for (let i = queue.length - 1; i > 0; i--) {   // shuffle
     const j = Math.floor(Math.random() * (i + 1));
     [queue[i], queue[j]] = [queue[j], queue[i]];
   }
-  const debut = Object.keys(TYPE_INTRO).find((t) => TYPE_INTRO[t] === n);
   if (debut && debut !== 'gunner') {
     const i = queue.indexOf(debut);
     if (i > 0) { queue.splice(i, 1); queue.unshift(debut); }
@@ -3656,16 +3676,8 @@ function startWave(n, quiet = false) {   // quiet: the clear card already announ
     bestWave = n;
     try { localStorage.setItem('timeshard_best', String(n)); } catch { /* private mode */ }
   }
-  const newArena = Math.floor((n - 1) / 3) % LAYOUTS.length;
-  const arenaChanged = newArena !== currentLayout;
-  setLayout(newArena);
-  if (arenaChanged) {
-    resolvePlayerCollisions();   // in case a new block landed on the player
-    recenterWorld();
-    for (let i = pickups.length - 1; i >= 0; i--) removePickup(i);
-  }
   if (!quiet) {
-    showBanner(`WAVE ${n}<small>${arenaChanged && n > 1 ? 'NEW ARENA' : 'THEY ARE COMING'}</small>`, 1500);
+    showBanner(`WAVE ${n}<small>THEY ARE COMING</small>`, 1500);
     if (n > 1) sfx.wave();   // wave 1 is the onboarding — it starts silent
   }
   sfx.newWave();
@@ -3678,7 +3690,7 @@ function startWave(n, quiet = false) {   // quiet: the clear card already announ
   updateModeUI();
 }
 
-function maxAlive() { return Math.min(3 + Math.floor((game.wave - 1) / 2), 7); }
+function maxAlive() { return Math.min(4 + Math.floor(game.wave / 2), 9); }
 
 let deathAt = 0;
 
@@ -3821,8 +3833,11 @@ function frame(now) {
   if (timeMode === 'toggle' && playing) {
     if (timeLocked) {
       // the tank drains slower early on — nearly double the frozen seconds
-      // on the opening waves, full price once the run heats up
-      slowBank -= dt * SLOWMO.drain * (0.55 + 0.45 * diffT());
+      // on the opening waves, full price once the run heats up. Rush hour is
+      // built AROUND frozen time (it's how you see the sleepers), so its
+      // tank is cheap for the whole run.
+      slowBank -= dt * SLOWMO.drain *
+        (game.mode === 'rush' ? 0.4 : 0.55 + 0.45 * diffT());
       if (slowBank <= 0) {
         slowBank = 0;
         setTimeLocked(false);   // time rushes back — resume SFX fires as usual
@@ -3973,7 +3988,8 @@ function frame(now) {
         game.waveBearing = player.yaw + Math.PI + (Math.random() - 0.5) *
           (Math.random() < 0.15 ? Math.PI * 2 : 2.2);
         let g = Math.min(
-          1 + (Math.random() < 0.7 ? 1 : 0) + (Math.random() < 0.3 ? 1 : 0),
+          1 + (Math.random() < 0.8 ? 1 : 0) + (Math.random() < 0.45 ? 1 : 0) +
+            (Math.random() < 0.2 ? 1 : 0),
           game.spawnQueue.length, maxAlive() - enemies.length);
         while (g-- > 0) spawnEnemy(game.spawnQueue.shift());
         game.spawnTimer = 2.4 + Math.random() * 1.6;
@@ -3992,8 +4008,7 @@ function frame(now) {
       vibrate(20);
       // one readable card for the whole break — the next wave starts quietly
       const next = game.wave + 1;
-      const nextArena = Math.floor((next - 1) / 3) % LAYOUTS.length !== currentLayout;
-      showBanner(`WAVE ${game.wave} CLEARED<small>NEXT: WAVE ${next}${nextArena ? ' · NEW ARENA' : ''}</small>`, 3300);
+      showBanner(`WAVE ${game.wave} CLEARED<small>NEXT: WAVE ${next}</small>`, 3300);
       sfx.wave();   // the wave VO lands with this card
     }
   } else if (game.state === 'clear') {
