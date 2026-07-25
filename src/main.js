@@ -437,10 +437,10 @@ const towerObstacles = [];
               // back wing: a lower annex fused flush to the building's rear,
               // so interior masses read as parts of buildings, never as
               // stray blocks floating in the courtyard
-              if (rnd01(si * 6.1 + bi * 3.9) < 0.7) {
-                const ad = 4 + rnd01(si * 8.9 + bi * 5.3) * 6;
+              if (rnd01(si * 6.1 + bi * 3.9) < 0.85) {
+                const ad = 5 + rnd01(si * 8.9 + bi * 5.3) * 8;
                 const ah = Math.max(6, h * (0.5 + rnd01(si * 12.7 + bi * 7.1) * 0.35));
-                const aw = w * (0.55 + rnd01(si * 3.3 + bi * 9.7) * 0.35);
+                const aw = w * (0.6 + rnd01(si * 3.3 + bi * 9.7) * 0.3);
                 const o = (w - aw) * rnd01(si * 7.7 + bi * 1.9);
                 const b0 = axis === 0 ? face + dep : cur + o;
                 const b1 = Math.min(axis === 0 ? face + dep + ad : cur + o + aw, half);
@@ -454,13 +454,6 @@ const towerObstacles = [];
             cur += w + (rnd01(si * 1.7 + bi * 13.3) < 0.18 ? 1.8 : 0.35);   // rare alley pocket
             bi++;
           }
-        }
-        // mid-block filler where four blocks meet — faced like everything
-        // else, so it reads as one more building deep in the block
-        let ch = CITY.hMin + rnd01(si * 77.7 + bi * 3.3) * (CITY.hMax - CITY.hMin);
-        if (rnd01(si * 15.7 + bi * 2.1) > 0.7) ch *= 1.7;
-        if (isFree(face + 10.3, half, face + 10.3, half)) {
-          putL(facadeMat(Math.floor(rnd01(si * 5.5 + bi) * 4), ch), face + 10.3, half, face + 10.3, half, ch);
         }
       } else {
         // far ring: two chunky slabs per quadrant — silhouette in the fog
@@ -4280,7 +4273,23 @@ function frame(now) {
         // flow, not volleys — and a nearly-spent wave trickles its last few.
         game.waveBearing = player.yaw + Math.PI + (Math.random() - 0.5) *
           (Math.random() < 0.2 ? Math.PI * 2 : 2.4);
-        spawnEnemy(game.spawnQueue.shift());
+        const next = game.spawnQueue.shift();
+        spawnEnemy(next);
+        if (next === 'rusher') {
+          // rushers hunt in packs of 3-4: pull the rest of the pack from
+          // anywhere in the wave and send them out the same alley together
+          let extra = Math.min(2 + (Math.random() < 0.5 ? 1 : 0),
+            maxAlive() - enemies.length);
+          for (let i = 0; i < game.spawnQueue.length && extra > 0;) {
+            if (game.spawnQueue[i] === 'rusher') {
+              game.spawnQueue.splice(i, 1);
+              spawnEnemy('rusher');
+              extra--;
+            } else i++;
+          }
+        }
+        // the fuller the street (a fresh pack fills it fast), the longer
+        // until the next arrival
         const fill = enemies.length / maxAlive();
         game.spawnTimer = (0.7 + 2.6 * fill) * (0.85 + Math.random() * 0.3) +
           (game.spawnQueue.length <= 2 ? 1.6 : 0);
@@ -4346,8 +4355,9 @@ function frame(now) {
   const left = game.spawnQueue.length + enemies.length;
   el.score.textContent = game.mode === 'rush'
     ? `RUSH  ·  ${game.kills}`
-    : `WAVE ${game.wave}  ·  ${game.kills}` +
-      (game.state === 'play' && left > 0 ? `  ·  ${left} LEFT` : '');
+    : game.state === 'play' && left > 0
+      ? `WAVE ${game.wave}  ·  ${left} ${left === 1 ? 'ENEMY' : 'ENEMIES'} LEFT`
+      : `WAVE ${game.wave}  ·  ${game.kills}`;
   el.tint.style.opacity = playing ? (1 - timeScale / TIME_FULL) : 0;
   document.body.classList.toggle('slowmo', playing && timeScale < 0.55);
   document.body.classList.toggle('inmenu', game.state === 'menu');
