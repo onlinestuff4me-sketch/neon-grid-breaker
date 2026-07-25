@@ -403,9 +403,22 @@ const towerObstacles = [];
     for (const [qi, [qx, qz]] of [[-1, -1], [1, -1], [-1, 1], [1, 1]].entries()) {
       let bi = qi * 37;
       if (ring <= 2) {
+        // exact occupancy in quadrant-local coords (u along x, v along z):
+        // nothing is ever allowed to interpenetrate anything else
+        const placed = [];
+        const isFree = (u0, u1, v0, v1) => {
+          for (const [a0, a1, b0, b1] of placed) {
+            if (u0 < a1 - 0.05 && u1 > a0 + 0.05 && v0 < b1 - 0.05 && v1 > b0 + 0.05) return false;
+          }
+          return true;
+        };
+        const putL = (mat, u0, u1, v0, v1, h) => {
+          placed.push([u0, u1, v0, v1]);
+          put(mat, cx + qx * ((u0 + u1) / 2), cz + qz * ((v0 + v1) / 2), u1 - u0, h, v1 - v0, solid);
+        };
         // two packed street walls per quadrant, one along each avenue. The
         // corner belongs to the first wall's corner building; the second
-        // wall starts past its back face so the two can NEVER interpenetrate
+        // wall starts past its back face.
         let corner = face;
         for (const axis of [0, 1]) {
           let cur = axis === 0 ? face : corner;
@@ -417,18 +430,38 @@ const towerObstacles = [];
             let h = CITY.hMin + rnd01(si * 53.9 + bi * 29.3) * (CITY.hMax - CITY.hMin);
             if (rnd01(si * 21.1 + bi * 6.9) > 0.8) h *= 1.7;   // the odd high-rise
             const v = Math.floor(rnd01(si * 2.9 + bi * 4.7) * 4);
-            if (axis === 0) put(facadeMat(v, h), cx + qx * (face + dep / 2), cz + qz * (cur + w / 2), dep, h, w, solid);
-            else put(facadeMat(v, h), cx + qx * (cur + w / 2), cz + qz * (face + dep / 2), w, h, dep, solid);
+            const u0 = axis === 0 ? face : cur, u1 = axis === 0 ? face + dep : cur + w;
+            const v0 = axis === 0 ? cur : face, v1 = axis === 0 ? cur + w : face + dep;
+            if (isFree(u0, u1, v0, v1)) {
+              putL(facadeMat(v, h), u0, u1, v0, v1, h);
+              // back wing: a lower annex fused flush to the building's rear,
+              // so interior masses read as parts of buildings, never as
+              // stray blocks floating in the courtyard
+              if (rnd01(si * 6.1 + bi * 3.9) < 0.7) {
+                const ad = 4 + rnd01(si * 8.9 + bi * 5.3) * 6;
+                const ah = Math.max(6, h * (0.5 + rnd01(si * 12.7 + bi * 7.1) * 0.35));
+                const aw = w * (0.55 + rnd01(si * 3.3 + bi * 9.7) * 0.35);
+                const o = (w - aw) * rnd01(si * 7.7 + bi * 1.9);
+                const b0 = axis === 0 ? face + dep : cur + o;
+                const b1 = Math.min(axis === 0 ? face + dep + ad : cur + o + aw, half);
+                const c0 = axis === 0 ? cur + o : face + dep;
+                const c1 = Math.min(axis === 0 ? cur + o + aw : face + dep + ad, half);
+                if (b1 - b0 > 1.5 && c1 - c0 > 1.5 && isFree(b0, b1, c0, c1)) {
+                  putL(facadeMat(v, ah), b0, b1, c0, c1, ah);
+                }
+              }
+            }
             cur += w + (rnd01(si * 1.7 + bi * 13.3) < 0.18 ? 1.8 : 0.35);   // rare alley pocket
             bi++;
           }
         }
-        // the core plugs the block interior out to the cell boundary, where
-        // it ABUTS (never overlaps) the neighbor cell's core
-        const c0 = face + 10.3, c1 = half;
+        // mid-block filler where four blocks meet — faced like everything
+        // else, so it reads as one more building deep in the block
         let ch = CITY.hMin + rnd01(si * 77.7 + bi * 3.3) * (CITY.hMax - CITY.hMin);
-        if (rnd01(si * 15.7 + bi * 2.1) > 0.7) ch *= 1.7;   // block-core towers
-        put(MAT_WHITE, cx + qx * ((c0 + c1) / 2), cz + qz * ((c0 + c1) / 2), c1 - c0, ch, c1 - c0, solid);
+        if (rnd01(si * 15.7 + bi * 2.1) > 0.7) ch *= 1.7;
+        if (isFree(face + 10.3, half, face + 10.3, half)) {
+          putL(facadeMat(Math.floor(rnd01(si * 5.5 + bi) * 4), ch), face + 10.3, half, face + 10.3, half, ch);
+        }
       } else {
         // far ring: two chunky slabs per quadrant — silhouette in the fog
         for (const axis of [0, 1]) {
@@ -3618,7 +3651,7 @@ const TYPE_SHARE = {   // veteran shooter fill: floor(total/share), capped
   sniper: [7, 2], bomber: [6, 2], armored: [6, 2], rocketeer: [8, 2],
 };
 function composeWave(n) {
-  const total = Math.min(4 + 2 * n, 26);
+  const total = Math.min(6 + 2 * n, 30);
   const debut = Object.keys(TYPE_INTRO).find((t) => TYPE_INTRO[t] === n);
   const queue = [];
   // the horde core: rushers scale up fast once they debut — this is a game
@@ -3941,7 +3974,9 @@ function startWave(n, quiet = false) {   // quiet: the clear card already announ
   updateModeUI();
 }
 
-function maxAlive() { return Math.min(4 + Math.floor(game.wave / 2), 9); }
+// how many are ON the street — the aim-token cap keeps most of them
+// stalking rather than shooting, so density can run higher than pressure
+function maxAlive() { return Math.min(6 + Math.floor(game.wave / 2), 10); }
 
 let deathAt = 0;
 
