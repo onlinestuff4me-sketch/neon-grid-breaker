@@ -126,20 +126,20 @@ function makeStreetTexture() {
   const rHalf = (CITY.street / 2) * ppm;            // road half-width
   const walk = 2.2 * ppm;                           // curb -> building face
   // block interior: plain pale slab with a faint coarse grid
-  g.fillStyle = '#eef0f2'; g.fillRect(0, 0, S, S);
-  g.strokeStyle = 'rgba(22,24,29,0.06)'; g.lineWidth = 2;
+  g.fillStyle = '#edeff2'; g.fillRect(0, 0, S, S);
+  g.strokeStyle = 'rgba(22,24,29,0.07)'; g.lineWidth = 2;
   for (let i = 0; i <= 16; i++) {
     g.beginPath(); g.moveTo((i / 16) * S, 0); g.lineTo((i / 16) * S, S); g.stroke();
     g.beginPath(); g.moveTo(0, (i / 16) * S); g.lineTo(S, (i / 16) * S); g.stroke();
   }
   // sidewalks: a real paved band on BOTH sides of every road, running from
   // the curb to the building faces, with transverse expansion joints
-  g.fillStyle = '#e7e9ed';
+  g.fillStyle = '#e2e4e9';
   g.fillRect(S / 2 - rHalf - walk, 0, walk, S);
   g.fillRect(S / 2 + rHalf, 0, walk, S);
   g.fillRect(0, S / 2 - rHalf - walk, S, walk);
   g.fillRect(0, S / 2 + rHalf, S, walk);
-  g.strokeStyle = 'rgba(22,24,29,0.10)'; g.lineWidth = 2;
+  g.strokeStyle = 'rgba(22,24,29,0.16)'; g.lineWidth = 2;
   const joint = 2 * ppm;                            // a slab every 2m
   for (let p = 0; p < S; p += joint) {
     for (const x0 of [S / 2 - rHalf - walk, S / 2 + rHalf]) {
@@ -148,19 +148,19 @@ function makeStreetTexture() {
     }
   }
   // roads over the top (the intersection reads as road, not sidewalk)
-  g.fillStyle = '#dfe1e5';
+  g.fillStyle = '#d2d5da';
   g.fillRect(S / 2 - rHalf, 0, rHalf * 2, S);
   g.fillRect(0, S / 2 - rHalf, S, rHalf * 2);
   // curbs: a strong line where road meets sidewalk, a faint one at the
   // building line
-  for (const [off, a] of [[rHalf, 0.22], [rHalf + walk, 0.08]]) {
+  for (const [off, a] of [[rHalf, 0.35], [rHalf + walk, 0.13]]) {
     g.strokeStyle = `rgba(22,24,29,${a})`; g.lineWidth = 4;
     for (const p of [S / 2 - off, S / 2 + off]) {
       g.beginPath(); g.moveTo(p, 0); g.lineTo(p, S); g.stroke();
       g.beginPath(); g.moveTo(0, p); g.lineTo(S, p); g.stroke();
     }
   }
-  g.strokeStyle = 'rgba(22,24,29,0.28)'; g.lineWidth = 5;
+  g.strokeStyle = 'rgba(22,24,29,0.4)'; g.lineWidth = 5;
   g.setLineDash([28, 26]);
   g.beginPath(); g.moveTo(S / 2, 0); g.lineTo(S / 2, S); g.stroke();
   g.beginPath(); g.moveTo(0, S / 2); g.lineTo(S, S / 2); g.stroke();
@@ -188,36 +188,37 @@ function makeStreetTexture() {
 //   3 arched civic   — arcades of round-top windows over an arched base
 function makeFacadeTexture(seed, h, style = 0) {
   const c = document.createElement('canvas');
-  c.width = 256; c.height = 512;
+  c.width = 512; c.height = 1024;
   const g = c.getContext('2d');
+  g.scale(2, 2);   // draw in 256x512 coordinates at double resolution
   const ink = (a) => `rgba(22,24,29,${a})`;
-  const RED = 'rgba(255,45,26,0.75)';
-  const base = ['#f4f5f7', '#f1f3f5', '#eef0f3', '#f5f5f6'][style];
+  const RED = 'rgba(255,45,26,0.8)';
+  const base = ['#f3f4f6', '#edeff2', '#e9ecef', '#f1f0ec'][style];
   g.fillStyle = base;
   g.fillRect(0, 0, 256, 512);
   const shopH = Math.round(512 * (CITY.floor1 / h));
   const rr = (k) => rnd01(seed * 31.7 + k);
   // cornice + parapet cap
-  g.fillStyle = ink(style === 2 ? 0.08 : 0.2); g.fillRect(0, 0, 256, 8);
-  g.fillStyle = ink(0.1); g.fillRect(0, 9, 256, 3);
+  g.fillStyle = ink(style === 2 ? 0.14 : 0.3); g.fillRect(0, 0, 256, 8);
+  g.fillStyle = ink(0.16); g.fillRect(0, 9, 256, 3);
   const bodyY = 16, bodyH = 512 - shopH - bodyY - 6;
   const rows = Math.max(1, Math.round((h - CITY.floor1) / CITY.floorH));
   const rowH = bodyH / rows;
 
   if (style === 0) {
     // prewar masonry: 4 bays x paired windows, sills, faint pier shading
-    g.fillStyle = ink(0.035);
+    g.fillStyle = ink(0.07);
     for (let b = 1; b < 4; b++) g.fillRect(4 + b * 62 - 5, bodyY, 5, bodyH);
     for (let y = 0; y < rows; y++) {
       const wy = bodyY + y * rowH + rowH * 0.2, wh = Math.min(rowH * 0.6, 30);
       for (let b = 0; b < 4; b++) {
         for (let i = 0; i < 2; i++) {
           const r = rr(y * 13.1 + b * 7.3 + i * 3.7);
-          g.fillStyle = r > 0.965 ? RED : ink(r > 0.6 ? 0.2 : 0.11);
+          g.fillStyle = r > 0.965 ? RED : ink(r > 0.6 ? 0.38 : 0.24);
           g.fillRect(12 + b * 62 + i * 25, wy, 19, wh);
         }
       }
-      g.fillStyle = ink(0.09);
+      g.fillStyle = ink(0.17);
       g.fillRect(8, wy + wh + 2, 240, 2);   // continuous sill line
     }
   } else if (style === 1) {
@@ -227,7 +228,7 @@ function makeFacadeTexture(seed, h, style = 0) {
       for (let b = 0; b < 3; b++) {
         const wx = 20 + b * 78;
         const r = rr(y * 11.3 + b * 5.1);
-        g.fillStyle = r > 0.97 ? RED : ink(r > 0.55 ? 0.18 : 0.1);
+        g.fillStyle = r > 0.97 ? RED : ink(r > 0.55 ? 0.34 : 0.22);
         if (y === 0 && rows > 2) {
           const rad = 27;
           g.beginPath();
@@ -240,19 +241,19 @@ function makeFacadeTexture(seed, h, style = 0) {
         g.fillStyle = base;                 // sash mullions inside the bay
         g.fillRect(wx + 16, wy, 3, wh); g.fillRect(wx + 35, wy, 3, wh);
       }
-      g.fillStyle = ink(0.07);
+      g.fillStyle = ink(0.13);
       g.fillRect(6, bodyY + (y + 1) * rowH - 2, 244, 2);   // spandrel line
     }
-    g.fillStyle = ink(0.13);                // pilasters over everything
+    g.fillStyle = ink(0.24);                // pilasters over everything
     for (let b = 0; b <= 3; b++) g.fillRect(6 + b * 78, bodyY - 2, 8, bodyH + 4);
   } else if (style === 2) {
     // glass tower: one dark sheet, panes picked out, light mullion grid
-    g.fillStyle = ink(0.15); g.fillRect(4, bodyY, 248, bodyH);
+    g.fillStyle = ink(0.3); g.fillRect(4, bodyY, 248, bodyH);
     for (let y = 0; y < rows; y++) {
       for (let x = 0; x < 8; x++) {
         const r = rr(y * 17.3 + x * 9.1);
         if (r > 0.78) {
-          g.fillStyle = r > 0.99 ? RED : ink(r > 0.9 ? 0.28 : 0.07);
+          g.fillStyle = r > 0.99 ? RED : ink(r > 0.9 ? 0.48 : 0.16);
           g.fillRect(4 + x * 31, bodyY + y * rowH, 31, rowH);
         }
       }
@@ -268,27 +269,27 @@ function makeFacadeTexture(seed, h, style = 0) {
       for (let x = 0; x < 4; x++) {
         const wx = 18 + x * 58;
         const r = rr(y * 7.7 + x * 3.1);
-        g.fillStyle = r > 0.97 ? RED : ink(r > 0.6 ? 0.19 : 0.11);
+        g.fillStyle = r > 0.97 ? RED : ink(r > 0.6 ? 0.36 : 0.23);
         g.beginPath();
         g.moveTo(wx, wy + wh); g.lineTo(wx, wy + rad);
         g.arc(wx + rad, wy + rad, rad, Math.PI, 0);
         g.lineTo(wx + rad * 2, wy + wh); g.closePath(); g.fill();
-        g.fillStyle = ink(0.06);            // arch surround
+        g.fillStyle = ink(0.12);            // arch surround
         g.fillRect(wx - 4, wy + wh + 1, rad * 2 + 8, 2);
       }
-      g.fillStyle = ink(0.08);
+      g.fillStyle = ink(0.15);
       g.fillRect(8, bodyY + (y + 1) * rowH - 2, 240, 2);
     }
   }
 
   // ground floor, per style: shopfront / glass lobby / arched arcade
   const gy = 512 - shopH;
-  g.fillStyle = ink(0.32); g.fillRect(0, gy - 6, 256, 8);   // string course
+  g.fillStyle = ink(0.45); g.fillRect(0, gy - 6, 256, 8);   // string course
   if (style === 3) {
     // arcade: three tall arched openings, the middle one is the door
     for (let i = 0; i < 3; i++) {
       const ax = 20 + i * 78, aw = 62, rad = aw / 2;
-      g.fillStyle = ink(i === 1 ? 0.5 : 0.16);
+      g.fillStyle = ink(i === 1 ? 0.65 : 0.3);
       g.beginPath();
       g.moveTo(ax, 512); g.lineTo(ax, gy + 12 + rad);
       g.arc(ax + rad, gy + 12 + rad, rad, Math.PI, 0);
@@ -296,21 +297,29 @@ function makeFacadeTexture(seed, h, style = 0) {
     }
   } else if (style === 2) {
     // lobby: full-height glass, wide panels, one darker entry panel
-    g.fillStyle = ink(0.18); g.fillRect(4, gy + 4, 248, shopH - 6);
+    g.fillStyle = ink(0.34); g.fillRect(4, gy + 4, 248, shopH - 6);
     g.fillStyle = base;
     for (let i = 1; i < 5; i++) g.fillRect(4 + i * 50, gy + 4, 3, shopH - 6);
-    g.fillStyle = ink(0.5);
+    g.fillStyle = ink(0.68);
     g.fillRect(4 + 2 * 50 + 6, gy + 8, 40, shopH - 10);
   } else {
     // shopfront: floor-to-ceiling glass, mullions, a recessed door
-    g.fillStyle = ink(0.13); g.fillRect(6, gy + 6, 244, shopH - 8);
+    g.fillStyle = ink(0.28); g.fillRect(6, gy + 6, 244, shopH - 8);
     g.fillStyle = base;
     for (let i = 1; i < 4; i++) g.fillRect(6 + i * 61, gy + 6, 6, shopH - 8);
     const doorX = 20 + Math.floor(rnd01(seed * 3.7) * 3) * 61;
-    g.fillStyle = ink(0.55);
+    g.fillStyle = ink(0.7);
     g.fillRect(doorX, gy + 10, 44, shopH - 12);
   }
-  return new THREE.CanvasTexture(c);
+  const ao = g.createLinearGradient(0, 0, 0, 512);
+  ao.addColorStop(0, 'rgba(22,24,29,0.08)');
+  ao.addColorStop(0.22, 'rgba(22,24,29,0)');
+  ao.addColorStop(0.92, 'rgba(22,24,29,0)');
+  ao.addColorStop(1, 'rgba(22,24,29,0.07)');
+  g.fillStyle = ao; g.fillRect(0, 0, 256, 512);
+  const tex = new THREE.CanvasTexture(c);
+  tex.anisotropy = 4;
+  return tex;
 }
 
 const CELL = ARENA_HALF * 2;
