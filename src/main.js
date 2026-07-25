@@ -1750,7 +1750,7 @@ function spawnEnemy(type = 'gunner') {
       const px = cgx * C + (Math.random() - 0.5) * 1.6;
       const pz = cgz * C + (Math.random() - 0.5) * 1.6;
       const d = Math.hypot(px - player.pos.x, pz - player.pos.z);
-      if (d < 7 || d > 34) continue;
+      if (d < 12 || d > 34) continue;   // never right on top of a corner you're at
       if (pz < player.pos.z + 2 && Math.random() < 0.8) continue;   // mostly ahead
       if (!hasLineOfSight(_v2.set(px, 1.4, pz), _v3.set(player.pos.x, EYE_HEIGHT, player.pos.z))) {
         x = px; z = pz; placed = true;
@@ -2253,10 +2253,15 @@ function updateEnemy(e, sdt) {
         e.state = 'windup'; e.stateT = 0;
         break;
       }
+      // visibility grace: stepping out of cover doesn't mean instant fire —
+      // you get a beat to SEE him before his telegraph may even begin
+      const los = hasLineOfSight(_v2.set(e.pos.x, 1.35, e.pos.z),
+        _v3.set(player.pos.x, EYE_HEIGHT - 0.3, player.pos.z));
+      e.seenT = los ? (e.seenT || 0) + sdt : 0;
       if (e.type !== 'rusher' && dist < e.engageDist && e.fireCd <= 0 &&
           (!ENEMY_TYPES[e.type].shielded || Math.cos(e.g.rotation.y - wantYaw) > 0.8) &&
           performance.now() >= game.noFireBefore &&
-          hasLineOfSight(_v2.set(e.pos.x, 1.35, e.pos.z), _v3.set(player.pos.x, EYE_HEIGHT - 0.3, player.pos.z))) {
+          los && e.seenT > 0.45) {
         // take turns on the trigger: only a couple of guns telegraph at once,
         // so fire arrives as a steady stream you can dodge, never a volley
         let aiming = 0;
@@ -4170,10 +4175,39 @@ function advanceFromOverlay() {
 // route leads to the next door.
 // ---------------------------------------------------------------------------
 const HALL = { cell: 4, h: 3.1, wall: 0.3 };
-const HALL_WALL_MAT = new THREE.MeshLambertMaterial({ color: 0xf0f1f4 });
+function makeHallWallTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = '#f0f1f4'; g.fillRect(0, 0, 256, 256);
+  g.fillStyle = 'rgba(22,24,29,0.14)';
+  for (let i = 0; i < 2; i++) g.fillRect(i * 128 + 62, 0, 4, 256);   // panel seams every 2m
+  g.fillStyle = 'rgba(22,24,29,0.08)';
+  g.fillRect(0, 74, 256, 3);                                          // datum line
+  g.fillStyle = 'rgba(22,24,29,0.35)';
+  g.fillRect(0, 236, 256, 20);                                        // baseboard
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+function makeHallFloorTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = '#e4e6ea'; g.fillRect(0, 0, 256, 256);
+  g.strokeStyle = 'rgba(22,24,29,0.12)'; g.lineWidth = 3;
+  for (let i = 0; i <= 4; i++) {                                      // 1m tile grid
+    g.beginPath(); g.moveTo(i * 64, 0); g.lineTo(i * 64, 256); g.stroke();
+    g.beginPath(); g.moveTo(0, i * 64); g.lineTo(256, i * 64); g.stroke();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+const HALL_WALL_MAT = new THREE.MeshLambertMaterial({ map: makeHallWallTexture() });
 // unlit: Lambert undersides get no directional light and go near-black
 const HALL_CEIL_MAT = new THREE.MeshBasicMaterial({ color: 0xd7dade });
-const HALL_FLOOR_MAT = new THREE.MeshLambertMaterial({ color: 0xe4e6ea });
+const HALL_FLOOR_MAT = new THREE.MeshLambertMaterial({ map: makeHallFloorTexture() });
 const DOOR_RED_MAT = new THREE.MeshBasicMaterial({ color: 0xff2d1a });
 const DOOR_SEAL_MAT = new THREE.MeshLambertMaterial({ color: 0x24262c });
 let hall = null;
@@ -4257,11 +4291,9 @@ function buildHallLeg(sgx, sgz) {
   const dx0 = endGx * C, dz0 = endGz * C + C / 2 - W / 2;
   wallBox(dx0 - 1.35, dz0, 0.7, W);   // jambs abut the side walls, no overlap
   wallBox(dx0 + 1.35, dz0, 0.7, W);
+  // the lintel is VISUAL only: ground collision is 2D, so a solid lintel
+  // would read as an invisible wall filling the open doorway
   walls.push([dx0, 2.8, dz0, 2, 0.6, W]);
-  obs.push({
-    min: new THREE.Vector3(dx0 - 1, 2.5, dz0 - W / 2),
-    max: new THREE.Vector3(dx0 + 1, H, dz0 + W / 2),
-  });
   const meshes = [
     mergedCityMesh(walls, HALL_WALL_MAT),
     mergedCityMesh(floors, HALL_FLOOR_MAT),
@@ -4710,6 +4742,7 @@ window.__ts = {
   sprint: () => sprintTo,
   audio: () => sfx.debug(), sfx,
   slow: () => ({ bank: +slowBank.toFixed(2), locked: timeLocked, mode: timeMode }),
+  hall: () => hall,
   fire: playerFire, setWeapon, spawnEnemy, spawnPickup,
   shot: (px, py, pz, dx, dy, dz, fromPlayer) =>
     spawnBullet(new THREE.Vector3(px, py, pz), new THREE.Vector3(dx, dy, dz).normalize(), fromPlayer),
