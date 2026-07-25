@@ -391,6 +391,7 @@ function mergedCityMesh(boxes, mat) {
 }
 
 const towerObstacles = [];
+const cityMeshes = [];
 {
   const half = CELL / 2, face = STREET_FACE;
   const buckets = new Map();           // material -> merged box list
@@ -479,7 +480,7 @@ const towerObstacles = [];
       buildCell(gx * CELL, gz * CELL, Math.max(Math.abs(gx), Math.abs(gz)), si);
     }
   }
-  for (const [mat, boxes] of buckets) mergedCityMesh(boxes, mat);
+  for (const [mat, boxes] of buckets) cityMeshes.push(mergedCityMesh(boxes, mat));
 }
 
 // The streets ARE the arena: the only solid things in the world are the
@@ -724,6 +725,7 @@ function shiftWorld(ax, d) {
   for (const m2 of missiles) { m2.pos[ax] += d; if (m2.mesh && m2.mesh.position !== m2.pos) m2.mesh.position[ax] += d; }
 }
 function recenterWorld() {
+  if (game.mode === 'hall') return;   // the hallway is not periodic
   for (const ax of ['x', 'z']) {
     if (Math.abs(player.pos[ax]) > PERIOD / 2) shiftWorld(ax, -Math.sign(player.pos[ax]) * PERIOD);
   }
@@ -1149,7 +1151,8 @@ function updateMissiles(sdt) {
     // detonate on player proximity, terrain, or cover
     const pd = Math.hypot(player.pos.x - m.pos.x, player.pos.z - m.pos.z);
     if ((pd < 0.6 && Math.abs(m.pos.y - 1.1) < 1.2) || m.pos.y <= 0.1 ||
-        Math.abs(m.pos.x) > LIVE_BOUND || Math.abs(m.pos.z) > LIVE_BOUND) {
+        Math.abs(m.pos.x - player.pos.x) > LIVE_BOUND ||
+        Math.abs(m.pos.z - player.pos.z) > LIVE_BOUND) {
       explodeMissile(i);
       continue;
     }
@@ -1734,37 +1737,63 @@ function spawnEnemy(type = 'gunner') {
   parts.g.scale.set(...spec.scale);
   // the wave attacks from one flank: spawn in an arc around the wave bearing
   // so the fight stays in front of you instead of whipping side to side
-  // valid ground = ON a street (never a block-interior pocket the player
-  // can't reach), inside the live world, and clear of buildings
-  const cellLocal = (v) => v - Math.round(v / CELL) * CELL;
-  const validGround = (px, pz) =>
-    Math.abs(px) < PERIOD / 2 + 24 && Math.abs(pz) < PERIOD / 2 + 24 &&
-    (Math.abs(cellLocal(px)) < STREET_FACE - 0.7 || Math.abs(cellLocal(pz)) < STREET_FACE - 0.7) &&
-    !pointInObstacle(px, pz, 0.8);
-  let x = 0, z = 0, placed = false, fbX = 0, fbZ = 0, fbOk = false;
-  for (let tries = 0; tries < 30 && !placed; tries++) {
-    const a = game.waveBearing + (Math.random() - 0.5) * 1.1;   // ±32°
-    const d = type === 'sniper' ? 17 + Math.random() * 6 : 13 + Math.random() * 8;
-    x = player.pos.x + Math.sin(a) * d;
-    z = player.pos.z + Math.cos(a) * d;
-    if (!validGround(x, z)) continue;
-    // prefer stepping out of cover: a spot you CAN'T see right now, so they
-    // round the corner toward you instead of popping in mid-street
-    if (!hasLineOfSight(_v2.set(x, 1.4, z), _v3.set(player.pos.x, EYE_HEIGHT, player.pos.z))) {
-      placed = true;
-      break;
+  let x = 0, z = 0, placed = false;
+  if (game.mode === 'hall' && hall) {
+    // corridor spawns: a cell of the current leg, mostly ahead of the
+    // player, ideally around a corner they can't see
+    const L = hall.legs[hall.cur], C = HALL.cell;
+    let fbX = 0, fbZ = 0, fbOk = false;
+    for (let tries = 0; tries < 34 && !placed; tries++) {
+      const [cgx, cgz] = L.cells[Math.floor(Math.random() * L.cells.length)];
+      const px = cgx * C + (Math.random() - 0.5) * 1.6;
+      const pz = cgz * C + (Math.random() - 0.5) * 1.6;
+      const d = Math.hypot(px - player.pos.x, pz - player.pos.z);
+      if (d < 7 || d > 34) continue;
+      if (pz < player.pos.z + 2 && Math.random() < 0.8) continue;   // mostly ahead
+      if (!hasLineOfSight(_v2.set(px, 1.4, pz), _v3.set(player.pos.x, EYE_HEIGHT, player.pos.z))) {
+        x = px; z = pz; placed = true;
+        break;
+      }
+      if (!fbOk) { fbOk = true; fbX = px; fbZ = pz; }
     }
-    if (!fbOk) { fbOk = true; fbX = x; fbZ = z; }
+    if (!placed && fbOk) { x = fbX; z = fbZ; placed = true; }
+    if (!placed) {   // last resort: right at the far door
+      const [cgx, cgz] = L.cells[L.cells.length - 1];
+      x = cgx * C; z = cgz * C;
+    }
+  } else {
+    // valid ground = ON a street (never a block-interior pocket the player
+    // can't reach), inside the live world, and clear of buildings
+    const cellLocal = (v) => v - Math.round(v / CELL) * CELL;
+    const validGround = (px, pz) =>
+      Math.abs(px) < PERIOD / 2 + 24 && Math.abs(pz) < PERIOD / 2 + 24 &&
+      (Math.abs(cellLocal(px)) < STREET_FACE - 0.7 || Math.abs(cellLocal(pz)) < STREET_FACE - 0.7) &&
+      !pointInObstacle(px, pz, 0.8);
+    let fbX = 0, fbZ = 0, fbOk = false;
+    for (let tries = 0; tries < 30 && !placed; tries++) {
+      const a = game.waveBearing + (Math.random() - 0.5) * 1.1;   // ±32°
+      const d = type === 'sniper' ? 17 + Math.random() * 6 : 13 + Math.random() * 8;
+      x = player.pos.x + Math.sin(a) * d;
+      z = player.pos.z + Math.cos(a) * d;
+      if (!validGround(x, z)) continue;
+      // prefer stepping out of cover: a spot you CAN'T see right now, so they
+      // round the corner toward you instead of popping in mid-street
+      if (!hasLineOfSight(_v2.set(x, 1.4, z), _v3.set(player.pos.x, EYE_HEIGHT, player.pos.z))) {
+        placed = true;
+        break;
+      }
+      if (!fbOk) { fbOk = true; fbX = x; fbZ = z; }
+    }
+    if (!placed && fbOk) { x = fbX; z = fbZ; placed = true; }   // visible beats invalid
+    for (let tries = 0; tries < 40 && !placed; tries++) {   // any street nearby
+      const a = Math.random() * Math.PI * 2;
+      const d = 10 + Math.random() * 10;
+      x = player.pos.x + Math.sin(a) * d;
+      z = player.pos.z + Math.cos(a) * d;
+      placed = validGround(x, z);
+    }
+    if (!placed) { x = player.pos.x * 0.5; z = player.pos.z * 0.5; }   // mid-avenue, last resort
   }
-  if (!placed && fbOk) { x = fbX; z = fbZ; placed = true; }   // visible beats invalid
-  for (let tries = 0; tries < 40 && !placed; tries++) {   // any street nearby
-    const a = Math.random() * Math.PI * 2;
-    const d = 10 + Math.random() * 10;
-    x = player.pos.x + Math.sin(a) * d;
-    z = player.pos.z + Math.cos(a) * d;
-    placed = validGround(x, z);
-  }
-  if (!placed) { x = player.pos.x * 0.5; z = player.pos.z * 0.5; }   // mid-avenue, last resort
   parts.g.position.set(x, 0, z);
   scene.add(parts.g);
   // materialize: red shards fly in from thin air and assemble into the body —
@@ -2112,9 +2141,9 @@ function aimSpeedFactor() {
 // a wall block, no matter what the steering did.
 function resolveEnemyCollisions(e) {
   const r = 0.5;
-  const lim = LIVE_BOUND;   // free-roam: recentering keeps the fight near origin
-  e.pos.x = Math.min(Math.max(e.pos.x, -lim), lim);
-  e.pos.z = Math.min(Math.max(e.pos.z, -lim), lim);
+  const lim = LIVE_BOUND;   // free-roam, but never further than the live zone
+  e.pos.x = Math.min(Math.max(e.pos.x, player.pos.x - lim), player.pos.x + lim);
+  e.pos.z = Math.min(Math.max(e.pos.z, player.pos.z - lim), player.pos.z + lim);
   for (const o of obstacles) {
     if (e.pos.x > o.min.x - r && e.pos.x < o.max.x + r &&
         e.pos.z > o.min.z - r && e.pos.z < o.max.z + r) {
@@ -2464,7 +2493,8 @@ function updateBullets(sdt) {
     }
 
     if (b.life <= 0 || b.pos.y <= 0.02 ||
-        Math.abs(b.pos.x) > LIVE_BOUND || Math.abs(b.pos.z) > LIVE_BOUND) {
+        Math.abs(b.pos.x - player.pos.x) > LIVE_BOUND ||
+        Math.abs(b.pos.z - player.pos.z) > LIVE_BOUND) {
       killBullet(i, b.pos.y <= 0.05 ? b.pos : null);
       continue;
     }
@@ -2711,6 +2741,11 @@ function onPointerDown(ev) {
     }
     if (game.state === 'menu' && ev.target && ev.target.closest && ev.target.closest('#rushlink')) {
       game.mode = 'rush';
+      advanceFromOverlay();
+      return;
+    }
+    if (game.state === 'menu' && ev.target && ev.target.closest && ev.target.closest('#halllink')) {
+      game.mode = 'hall';
       advanceFromOverlay();
       return;
     }
@@ -3600,7 +3635,7 @@ function loadRuns() {
 }
 
 function recordRun() {
-  if (game.mode === 'rush') return;   // TOP RUNS is the wave-mode board
+  if (game.mode !== 'wave') return;   // TOP RUNS is the wave-mode board
   const runs = loadRuns();
   const e = runs.find((r) => r.id === runStartAt);
   if (e) {   // retries extend the same run instead of adding a new row
@@ -3803,6 +3838,7 @@ const el = {
   menurow: document.getElementById('menurow'),
   moderow: document.getElementById('moderow'),
   rushlink: document.getElementById('rushlink'),
+  halllink: document.getElementById('halllink'),
 };
 renderScores();
 
@@ -3868,6 +3904,8 @@ function showMenu() {
   el.menurow.style.display = 'flex';
   el.moderow.style.display = 'flex';
   el.rushlink.style.display = '';
+  el.halllink.style.display = '';
+  setEnvironment('city');
   renderScores();
   updateSndBtn();
   el.menubtn.style.display = 'none';
@@ -3990,7 +4028,10 @@ function startWave(n, quiet = false) {   // quiet: the clear card already announ
 
 // how many are ON the street — the aim-token cap keeps most of them
 // stalking rather than shooting, so density can run higher than pressure
-function maxAlive() { return Math.min(6 + Math.floor(game.wave / 2), 10); }
+function maxAlive() {
+  if (game.mode === 'hall') return Math.min(3 + Math.floor(game.wave / 2), 6);
+  return Math.min(6 + Math.floor(game.wave / 2), 10);
+}
 
 let deathAt = 0;
 
@@ -4010,6 +4051,7 @@ function hitPlayer(ended = false) {
   el.timebtn.style.display = 'none';
   el.slowmeter.style.display = 'none';   // the meter goes with its button
   el.rushlink.style.display = 'none';    // retry retries THIS mode only
+  el.halllink.style.display = 'none';
   if (!ended) {   // a chosen exit skips the death drama
     el.redflash.style.opacity = 1;
     sfx.die();
@@ -4022,6 +4064,9 @@ function hitPlayer(ended = false) {
     const r = el.overlay.querySelector('.rules');
     r.innerHTML = game.mode === 'rush'
       ? `<div class="stats">RUSH HOUR · ${game.kills} SHATTERED · ${Math.round(runPlayT)}S</div>`
+      : game.mode === 'hall'
+      ? `<div class="stats">HALLWAY · ${hall ? hall.doorsPassed : 0} ` +
+        `${hall && hall.doorsPassed === 1 ? 'DOOR' : 'DOORS'} · ${game.kills} SHATTERED</div>`
       : `<div class="stats">${game.wave} ${game.wave === 1 ? 'WAVE' : 'WAVES'} · ` +
         `${game.kills} SHATTERED · BEST ${bestWave} ${bestWave === 1 ? 'WAVE' : 'WAVES'}</div>`;
     r.style.display = 'flex';
@@ -4029,7 +4074,8 @@ function hitPlayer(ended = false) {
     el.menurow.style.display = 'none';
     el.moderow.style.display = 'none';   // keep the stats line's row clear
     el.overlay.querySelector('.go').textContent =
-      game.mode === 'rush' ? 'TAP TO RETRY RUSH HOUR' : 'TAP TO RETRY WAVE';
+      game.mode === 'rush' ? 'TAP TO RETRY RUSH HOUR'
+        : game.mode === 'hall' ? 'TAP TO RETRY FROM LAST DOOR' : 'TAP TO RETRY WAVE';
     el.menubtn.style.display = 'inline-block';
     el.overlay.classList.remove('hidden');
   }, ended ? 400 : 900);
@@ -4093,7 +4139,9 @@ function advanceFromOverlay() {
     runStartAt = Date.now();
     runPlayT = 0;
     setWeapon('pistol');
-    if (game.mode === 'rush') initRush(); else { startWave(1); showGuide(); }
+    if (game.mode === 'rush') initRush();
+    else if (game.mode === 'hall') initHall();
+    else { startWave(1); showGuide(); }
   } else {   // retry current wave
     clearField();
     player.alive = true;
@@ -4107,8 +4155,249 @@ function advanceFromOverlay() {
     stickUI(false);
     sprintTo = null;
     setWeapon('pistol');
-    if (game.mode === 'rush') initRush(); else startWave(game.wave);
+    if (game.mode === 'rush') initRush();
+    else if (game.mode === 'hall') retryHall();
+    else startWave(game.wave);
   }
+}
+
+// ---------------------------------------------------------------------------
+// HALLWAY mode: door-to-door corridor legs. Each leg is a wave — clear it
+// and the red door slides into the floor; crossing it is a checkpoint, and
+// the door seals shut behind you. Corridors turn and branch, but every
+// route leads to the next door.
+// ---------------------------------------------------------------------------
+const HALL = { cell: 4, h: 3.1, wall: 0.3 };
+const HALL_WALL_MAT = new THREE.MeshLambertMaterial({ color: 0xf0f1f4 });
+// unlit: Lambert undersides get no directional light and go near-black
+const HALL_CEIL_MAT = new THREE.MeshBasicMaterial({ color: 0xd7dade });
+const HALL_FLOOR_MAT = new THREE.MeshLambertMaterial({ color: 0xe4e6ea });
+const DOOR_RED_MAT = new THREE.MeshBasicMaterial({ color: 0xff2d1a });
+const DOOR_SEAL_MAT = new THREE.MeshLambertMaterial({ color: 0x24262c });
+let hall = null;
+
+function setEnvironment(env) {
+  const inHall = env === 'hall';
+  for (const m of cityMeshes) m.visible = !inHall;
+  floor.visible = !inHall;
+  scene.fog.near = inHall ? 14 : CITY.fogNear;
+  scene.fog.far = inHall ? 55 : CITY.fogFar;
+  if (!inHall && hall) {
+    for (const L of hall.legs) {
+      if (!L) continue;
+      for (const m of L.meshes) scene.remove(m);
+      scene.remove(L.door.slab);
+    }
+    hall = null;
+    setLayout();   // restore the city's obstacles
+  }
+}
+
+// One corridor leg: forward runs with 90° jogs, plus 1-2 side loops that
+// rejoin the spine further along — branches, but every route reaches the door
+function genHallLeg(sgx, sgz) {
+  const cells = [];
+  const add = (gx, gz) => {
+    const k = gx + ',' + gz;
+    if (!hall.grid.has(k)) { hall.grid.add(k); cells.push([gx, gz]); }
+  };
+  let gx = sgx, gz = sgz;
+  add(gx, gz);
+  const spine = [[gx, gz]];
+  const fwd = 11 + Math.floor(Math.random() * 5);
+  let f = 0;
+  while (f < fwd) {
+    const run = 3 + Math.floor(Math.random() * 4);
+    for (let i = 0; i < run && f < fwd; i++) { gz++; f++; add(gx, gz); spine.push([gx, gz]); }
+    if (f >= fwd) break;
+    const jog = 2 + Math.floor(Math.random() * 3);
+    const jd = Math.random() < 0.5 ? 1 : -1;
+    for (let i = 0; i < jog; i++) { gx += jd; add(gx, gz); spine.push([gx, gz]); }
+  }
+  for (let b = 0; b < 2; b++) {
+    const i = 1 + Math.floor(Math.random() * Math.max(1, spine.length - 8));
+    const j = Math.min(spine.length - 1, i + 4 + Math.floor(Math.random() * 4));
+    const [ax, az] = spine[i], [bx, bz] = spine[j];
+    if (bz <= az) continue;
+    const side = Math.random() < 0.5 ? 2 : -2;
+    const ss = Math.sign(side), ox = ax + side;
+    for (let x = ax + ss; x !== ox + ss; x += ss) add(x, az);
+    for (let z = az; z <= bz; z++) add(ox, z);
+    if (bx !== ox) for (let x = ox; x !== bx; x += Math.sign(bx - ox)) add(x, bz);
+  }
+  return { cells, endGx: gx, endGz: gz };
+}
+
+function buildHallLeg(sgx, sgz) {
+  const { cells, endGx, endGz } = genHallLeg(sgx, sgz);
+  const C = HALL.cell, H = HALL.h, W = HALL.wall;
+  const walls = [], floors = [], ceils = [];
+  const obs = [];
+  const wallBox = (px, pz, w, d) => {
+    walls.push([px, H / 2, pz, w, H, d]);
+    obs.push({
+      min: new THREE.Vector3(px - w / 2, 0, pz - d / 2),
+      max: new THREE.Vector3(px + w / 2, H, pz + d / 2),
+    });
+  };
+  for (const [gx, gz] of cells) {
+    const x = gx * C, z = gz * C;
+    floors.push([x, -0.06, z, C, 0.12, C]);
+    ceils.push([x, H + 0.1, z, C + 0.2, 0.2, C + 0.2]);
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      if (hall.grid.has((gx + dx) + ',' + (gz + dz))) continue;
+      if (gx === endGx && gz === endGz && dz === 1) continue;   // the doorway
+      if (dx !== 0) wallBox(x + dx * (C / 2 - W / 2), z, W, C);
+      else wallBox(x, z + dz * (C / 2 - W / 2), C, W);
+    }
+  }
+  // door frame: jambs + lintel around a 2m opening at the leg's far edge
+  const dx0 = endGx * C, dz0 = endGz * C + C / 2 - W / 2;
+  wallBox(dx0 - 1.35, dz0, 0.7, W);   // jambs abut the side walls, no overlap
+  wallBox(dx0 + 1.35, dz0, 0.7, W);
+  walls.push([dx0, 2.8, dz0, 2, 0.6, W]);
+  obs.push({
+    min: new THREE.Vector3(dx0 - 1, 2.5, dz0 - W / 2),
+    max: new THREE.Vector3(dx0 + 1, H, dz0 + W / 2),
+  });
+  const meshes = [
+    mergedCityMesh(walls, HALL_WALL_MAT),
+    mergedCityMesh(floors, HALL_FLOOR_MAT),
+    mergedCityMesh(ceils, HALL_CEIL_MAT),
+  ];
+  const slab = new THREE.Mesh(new THREE.BoxGeometry(2, 2.72, 0.18), DOOR_RED_MAT);
+  slab.position.set(dx0, 1.36, dz0);
+  scene.add(slab);
+  const door = {
+    slab, x: dx0, z: endGz * C + C / 2, open: false,
+    ob: {
+      min: new THREE.Vector3(dx0 - 1, 0, dz0 - 0.2),
+      max: new THREE.Vector3(dx0 + 1, H, dz0 + 0.2),
+    },
+  };
+  return { cells, meshes, obs, door, endGx, endGz, retired: false, nextBuilt: false };
+}
+
+function rebuildHallObstacles() {
+  obstacles.length = 0;
+  for (const L of hall.legs) {
+    if (!L || L.retired) continue;
+    for (const o of L.obs) obstacles.push(o);
+    if (!L.door.open) obstacles.push(L.door.ob);
+  }
+}
+
+// corridor-safe cast: no lasers (the beam ignores walls) and no snipers /
+// rocketeers / bombers (they want open air) — their slots become fighters
+function hallWave(n) {
+  const sub = { laser: 'rusher', sniper: 'gunner', rocketeer: 'heavy', bomber: 'shotgunner' };
+  return composeWave(n).slice(0, 20).map((t) => sub[t] || t);
+}
+
+function initHall() {
+  game.wave = 1;
+  game.state = 'intro';
+  game.stateT = 0;
+  game.introLen = 1.6;
+  game.seenTypes = {};
+  setEnvironment('hall');
+  hall = { legs: [], grid: new Set(), cur: 0, doorsPassed: 0, checkpoint: { x: 0, z: 0 } };
+  hall.legs.push(buildHallLeg(0, 0));
+  rebuildHallObstacles();
+  game.spawnQueue = hallWave(1);
+  game.spawnTimer = 0.5;
+  player.pos.set(0, 0, 0);
+  player.vel.set(0, 0, 0);
+  player.yaw = Math.PI;   // the corridor runs +z
+  player.pitch = 0;
+  game.noFireBefore = performance.now() + 2500;
+  el.pausebtn.style.display = 'block';
+  el.ammo.style.display = '';
+  setTimeLocked(false);
+  slowBank = SLOWMO.base;
+  updateSlowMeter();
+  updateModeUI();
+  showBanner('THE HALLWAY<small>CLEAR THE FLOOR. REACH THE DOOR.</small>', 3000);
+  sfx.newWave();
+}
+
+function retryHall() {
+  // back to the last checkpoint: the current leg resets, door shut
+  const L = hall.legs[hall.cur];
+  if (L.door.open) {
+    L.door.open = false;
+    L.door.slab.material = DOOR_RED_MAT;
+    L.door.slab.position.y = 1.36;
+  }
+  rebuildHallObstacles();
+  game.state = 'intro';
+  game.stateT = 0;
+  game.introLen = 1.2;
+  game.spawnQueue = hallWave(game.wave);
+  game.spawnTimer = 0.5;
+  player.pos.set(hall.checkpoint.x, 0, hall.checkpoint.z);
+  player.yaw = Math.PI;
+  player.pitch = 0;
+  game.noFireBefore = performance.now() + 2000;
+  el.pausebtn.style.display = 'block';
+  el.ammo.style.display = '';
+  setTimeLocked(false);
+  slowBank = Math.max(slowBank, SLOWMO.base);
+  updateSlowMeter();
+  updateModeUI();
+  showBanner(`DOOR ${hall.doorsPassed + 1}<small>AGAIN.</small>`, 1600);
+}
+
+function openHallDoor() {
+  const L = hall.legs[hall.cur];
+  L.door.open = true;
+  if (!L.nextBuilt) {   // the corridor beyond appears as the door opens
+    L.nextBuilt = true;
+    hall.legs.push(buildHallLeg(L.endGx, L.endGz + 1));
+  }
+  rebuildHallObstacles();
+  showBanner('THE DOOR IS OPEN<small>GO</small>', 2000);
+  sfx.wave();
+  vibrate(20);
+}
+
+function crossHallDoor() {
+  const prev = hall.legs[hall.cur];
+  prev.door.open = false;   // sealed behind you — no going back
+  prev.door.slab.material = DOOR_SEAL_MAT;
+  prev.door.slab.position.y = 1.36;
+  hall.cur++;
+  hall.doorsPassed++;
+  game.wave++;
+  hall.checkpoint = { x: prev.door.x, z: prev.door.z + 2 };
+  const old = hall.legs[hall.cur - 2];
+  if (old && !old.retired) {   // two doors back is gone for good
+    old.retired = true;
+    for (const m of old.meshes) scene.remove(m);
+    scene.remove(old.door.slab);
+  }
+  rebuildHallObstacles();
+  game.spawnQueue = hallWave(game.wave);
+  game.spawnTimer = 0.9;
+  slowBank = Math.max(slowBank, SLOWMO.base);
+  updateSlowMeter();
+  showBanner(`CHECKPOINT<small>DOOR ${hall.doorsPassed} SEALED BEHIND YOU</small>`, 2200);
+  sfx.wave();
+  vibrate([15, 30, 15]);
+}
+
+function updateHall(dt) {
+  if (!hall) return;
+  const L = hall.legs[hall.cur];
+  if (game.state === 'play' && !L.door.open &&
+      game.spawnQueue.length === 0 && enemies.length === 0 &&
+      performance.now() >= killFlashUntil) {
+    openHallDoor();
+  }
+  if (L.door.open && L.door.slab.position.y > -1.55) {
+    L.door.slab.position.y -= dt * 3.5;   // slides into the floor
+  }
+  if (L.door.open && player.pos.z > L.door.z + 0.5) crossHallDoor();
 }
 
 // ---------------------------------------------------------------------------
@@ -4319,9 +4608,10 @@ function frame(now) {
     for (const e of enemies) updateEnemy(e, sdt);
     updateBullets(sdt);
     if (game.mode === 'rush') updateCrowd(sdt);
+    if (game.mode === 'hall') updateHall(dt);
     updateMarks(sdt);
 
-    if (game.mode !== 'rush' && game.state === 'play' && game.spawnQueue.length === 0 && enemies.length === 0 &&
+    if (game.mode === 'wave' && game.state === 'play' && game.spawnQueue.length === 0 && enemies.length === 0 &&
         performance.now() >= killFlashUntil) {   // let the final kill's word land first
       game.state = 'clear';
       game.stateT = 0;
@@ -4374,11 +4664,16 @@ function frame(now) {
 
   // --- HUD
   const left = game.spawnQueue.length + enemies.length;
+  const SEP = '\u00A0\u00A0\u00B7\u00A0\u00A0';
   el.score.textContent = game.mode === 'rush'
-    ? `RUSH  ·  ${game.kills}`
-    : game.state === 'play' && left > 0
-      ? `WAVE ${game.wave}  ·  ${left} ${left === 1 ? 'ENEMY' : 'ENEMIES'} LEFT`
-      : `WAVE ${game.wave}  ·  ${game.kills}`;
+    ? `RUSH${SEP}${game.kills}`
+    : game.mode === 'hall' && hall
+      ? (hall.legs[hall.cur].door.open
+          ? `DOOR ${hall.doorsPassed + 1}${SEP}OPEN \u2014 GO`
+          : `DOOR ${hall.doorsPassed + 1}${SEP}${left} ${left === 1 ? 'ENEMY' : 'ENEMIES'} LEFT`)
+      : game.state === 'play' && left > 0
+        ? `WAVE ${game.wave}${SEP}${left} ${left === 1 ? 'ENEMY' : 'ENEMIES'} LEFT`
+        : `WAVE ${game.wave}${SEP}${game.kills}`;
   el.tint.style.opacity = playing ? (1 - timeScale / TIME_FULL) : 0;
   document.body.classList.toggle('slowmo', playing && timeScale < 0.55);
   document.body.classList.toggle('inmenu', game.state === 'menu');
