@@ -114,7 +114,7 @@ const CITY = {
   hMin: 9, hMax: 24,
   density: 0.92,   // odds a lot gets a tower — dense, few empty gaps
   fogNear: 55, fogFar: 200,
-  reach: 3,        // distant rings of 40m city cells
+  reach: 4,        // distant rings of 40m city cells
 };
 scene.fog = new THREE.Fog(0xe8eaee, CITY.fogNear, CITY.fogFar);
 
@@ -323,6 +323,13 @@ function makeFacadeTexture(seed, h, style = 0) {
 }
 
 const CELL = ARENA_HALF * 2;
+// The city tiles from a 3x3 set of UNIQUE block designs, so the pattern only
+// repeats every PERIOD metres — walking reveals nine different blocks with
+// their own alleys and skylines before the city rhymes. The endless-walk
+// recenter shifts by a full PERIOD, so it stays pixel-invisible.
+const TILE = 3;
+const PERIOD = CELL * TILE;
+const LIVE_BOUND = PERIOD / 2 + 30;   // bullets/missiles die past here
 const streetTex = makeStreetTexture();
 streetTex.repeat.set(CITY.reach * 2 + 1, CITY.reach * 2 + 1);
 const floor = new THREE.Mesh(
@@ -385,7 +392,6 @@ function mergedCityMesh(boxes, mat) {
 
 const towerObstacles = [];
 {
-  const si = 60;                       // the one seed the whole city grows from
   const half = CELL / 2, face = STREET_FACE;
   const buckets = new Map();           // material -> merged box list
   const put = (mat, px, pz, w, h, d, solid) => {
@@ -398,11 +404,11 @@ const towerObstacles = [];
       });
     }
   };
-  const buildCell = (cx, cz, ring) => {
-    const solid = ring <= 1;   // physics only where anyone can actually reach
+  const buildCell = (cx, cz, ring, si) => {
+    const solid = ring <= 2;   // physics wherever the player can actually roam
     for (const [qi, [qx, qz]] of [[-1, -1], [1, -1], [-1, 1], [1, 1]].entries()) {
       let bi = qi * 37;
-      if (ring <= 2) {
+      if (ring <= 3) {
         // exact occupancy in quadrant-local coords (u along x, v along z):
         // nothing is ever allowed to interpenetrate anything else
         const placed = [];
@@ -437,7 +443,7 @@ const towerObstacles = [];
               // back wing: a lower annex fused flush to the building's rear,
               // so interior masses read as parts of buildings, never as
               // stray blocks floating in the courtyard
-              if (rnd01(si * 6.1 + bi * 3.9) < 0.85) {
+              if (rnd01(si * 6.1 + bi * 3.9) < 0.75) {
                 const ad = 5 + rnd01(si * 8.9 + bi * 5.3) * 8;
                 const ah = Math.max(6, h * (0.5 + rnd01(si * 12.7 + bi * 7.1) * 0.35));
                 const aw = w * (0.6 + rnd01(si * 3.3 + bi * 9.7) * 0.3);
@@ -451,7 +457,8 @@ const towerObstacles = [];
                 }
               }
             }
-            cur += w + (rnd01(si * 1.7 + bi * 13.3) < 0.18 ? 1.8 : 0.35);   // rare alley pocket
+            cur += w + (rnd01(si * 1.7 + bi * 13.3) < 0.32
+              ? 1.6 + rnd01(si * 2.3 + bi * 4.1) * 1.2 : 0.4);   // alley slots
             bi++;
           }
         }
@@ -468,7 +475,8 @@ const towerObstacles = [];
   };
   for (let gx = -CITY.reach; gx <= CITY.reach; gx++) {
     for (let gz = -CITY.reach; gz <= CITY.reach; gz++) {
-      buildCell(gx * CELL, gz * CELL, Math.max(Math.abs(gx), Math.abs(gz)));
+      const si = 60 + (((gx % TILE) + TILE) % TILE) * 7 + (((gz % TILE) + TILE) % TILE) * 29;
+      buildCell(gx * CELL, gz * CELL, Math.max(Math.abs(gx), Math.abs(gz)), si);
     }
   }
   for (const [mat, boxes] of buckets) mergedCityMesh(boxes, mat);
@@ -717,7 +725,7 @@ function shiftWorld(ax, d) {
 }
 function recenterWorld() {
   for (const ax of ['x', 'z']) {
-    if (Math.abs(player.pos[ax]) > CELL / 2) shiftWorld(ax, -Math.sign(player.pos[ax]) * CELL);
+    if (Math.abs(player.pos[ax]) > PERIOD / 2) shiftWorld(ax, -Math.sign(player.pos[ax]) * PERIOD);
   }
 }
 function resolvePlayerCollisions() {
@@ -1141,7 +1149,7 @@ function updateMissiles(sdt) {
     // detonate on player proximity, terrain, or cover
     const pd = Math.hypot(player.pos.x - m.pos.x, player.pos.z - m.pos.z);
     if ((pd < 0.6 && Math.abs(m.pos.y - 1.1) < 1.2) || m.pos.y <= 0.1 ||
-        Math.abs(m.pos.x) > CELL || Math.abs(m.pos.z) > CELL) {
+        Math.abs(m.pos.x) > LIVE_BOUND || Math.abs(m.pos.z) > LIVE_BOUND) {
       explodeMissile(i);
       continue;
     }
@@ -1730,7 +1738,7 @@ function spawnEnemy(type = 'gunner') {
   // can't reach), inside the live world, and clear of buildings
   const cellLocal = (v) => v - Math.round(v / CELL) * CELL;
   const validGround = (px, pz) =>
-    Math.abs(px) < CELL - 2 && Math.abs(pz) < CELL - 2 &&
+    Math.abs(px) < PERIOD / 2 + 24 && Math.abs(pz) < PERIOD / 2 + 24 &&
     (Math.abs(cellLocal(px)) < STREET_FACE - 0.7 || Math.abs(cellLocal(pz)) < STREET_FACE - 0.7) &&
     !pointInObstacle(px, pz, 0.8);
   let x = 0, z = 0, placed = false, fbX = 0, fbZ = 0, fbOk = false;
@@ -1858,12 +1866,19 @@ function spawnNPC(anywhere = false) {
   // pedestrians keep to the sidewalks: the band between the curb and the
   // shopfronts, on either side of the road
   const side = Math.random() < 0.5 ? -1 : 1;
-  const lane = side * (CITY.street / 2 + 0.8 + Math.random() * 0.8);
+  // the crowd walks the street the PLAYER is on: snap the lane to the
+  // avenue of the city grid nearest to them (streets repeat every CELL)
+  const perp = horiz ? player.pos.z : player.pos.x;
+  const lane = Math.round(perp / CELL) * CELL +
+    side * (CITY.street / 2 + 0.8 + Math.random() * 0.8);
   const dir = Math.random() < 0.5 ? 1 : -1;
   const n = { ...parts, horiz, lane, dir, pos: parts.g.position,
     walkPhase: Math.random() * 6.28, sleeper: Math.random() < 0.55, revealed: false,
     speed: 1.0 + Math.random() * 0.6 };
-  const along = anywhere ? (Math.random() * 2 - 1) * (ARENA_HALF - 1) : -dir * (ARENA_HALF - 0.6);
+  const pAlong = horiz ? player.pos.x : player.pos.z;
+  const along = pAlong + (anywhere
+    ? (Math.random() * 2 - 1) * (ARENA_HALF - 1)
+    : -dir * (ARENA_HALF - 0.6));
   if (horiz) n.pos.set(along, 0, lane); else n.pos.set(lane, 0, along);
   if (Math.hypot(n.pos.x - player.pos.x, n.pos.z - player.pos.z) < 4) n.pos.x += 6;
   n.g.traverse(o => { if (o.isMesh) { if (!o.userData.m0) o.userData.m0 = o.material; o.material = MAT_CROWD; } });
@@ -1941,7 +1956,13 @@ function updateCrowd(sdt) {
       n.revealed = slow;
       n.g.traverse(o => { if (o.isMesh) o.material = slow ? MAT_REVEAL : MAT_CROWD; });
     }
-    if (Math.abs(n.horiz ? n.pos.x : n.pos.z) > ARENA_HALF - 0.4) {
+    // walked out of the player's stretch of street (or the player moved on,
+    // possibly to a different avenue): recycle them near the player
+    const pAlong = n.horiz ? player.pos.x : player.pos.z;
+    const pPerp = n.horiz ? player.pos.z : player.pos.x;
+    const nPerp = n.horiz ? n.pos.z : n.pos.x;
+    if (Math.abs((n.horiz ? n.pos.x : n.pos.z) - pAlong) > ARENA_HALF + 4 ||
+        Math.abs(nPerp - pPerp) > ARENA_HALF + 4) {
       scene.remove(n.g); crowd.splice(i, 1); spawnNPC();
     }
   }
@@ -2091,7 +2112,7 @@ function aimSpeedFactor() {
 // a wall block, no matter what the steering did.
 function resolveEnemyCollisions(e) {
   const r = 0.5;
-  const lim = CELL;   // free-roam: recentering keeps the fight near origin
+  const lim = LIVE_BOUND;   // free-roam: recentering keeps the fight near origin
   e.pos.x = Math.min(Math.max(e.pos.x, -lim), lim);
   e.pos.z = Math.min(Math.max(e.pos.z, -lim), lim);
   for (const o of obstacles) {
@@ -2443,7 +2464,7 @@ function updateBullets(sdt) {
     }
 
     if (b.life <= 0 || b.pos.y <= 0.02 ||
-        Math.abs(b.pos.x) > CELL || Math.abs(b.pos.z) > CELL) {
+        Math.abs(b.pos.x) > LIVE_BOUND || Math.abs(b.pos.z) > LIVE_BOUND) {
       killBullet(i, b.pos.y <= 0.05 ? b.pos : null);
       continue;
     }
@@ -4388,7 +4409,7 @@ if ('serviceWorker' in navigator) {
 }
 
 window.__ts = {
-  game, player, enemies, bullets, pickups, ripples, camera, input, obstacles,
+  game, player, enemies, bullets, pickups, ripples, camera, input, obstacles, crowd,
   sprint: () => sprintTo,
   audio: () => sfx.debug(), sfx,
   slow: () => ({ bank: +slowBank.toFixed(2), locked: timeLocked, mode: timeMode }),
