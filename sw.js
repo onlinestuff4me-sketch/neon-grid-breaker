@@ -20,7 +20,9 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (url.origin !== self.location.origin) return;   // never touch cross-origin
   e.respondWith(
-    fetch(e.request)
+    // cache:'no-cache' forces revalidation past the CDN's 10-minute TTL, so
+    // index.html and main.js can never arrive as a mismatched pair
+    fetch(e.request, { cache: 'no-cache' })
       .then((res) => {
         if (res.ok) {
           const copy = res.clone();

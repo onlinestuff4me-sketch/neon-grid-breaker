@@ -433,7 +433,7 @@ const cityMeshes = [];
             const w = 5 + rnd01(si * 3.1 + bi * 7.7) * 6;      // along-street
             if (cur + w > half - 1.0) break;
             const dep = 5 + rnd01(si * 5.3 + bi * 11.9) * 5;   // into the block
-            if (axis === 0 && cur === face) corner = face + dep + 0.35;
+            if (axis === 0 && cur === face) corner = face + dep;   // seam-free corner
             let h = CITY.hMin + rnd01(si * 53.9 + bi * 29.3) * (CITY.hMax - CITY.hMin);
             if (rnd01(si * 21.1 + bi * 6.9) > 0.8) h *= 1.7;   // the odd high-rise
             const v = Math.floor(rnd01(si * 2.9 + bi * 4.7) * 4);
@@ -458,8 +458,10 @@ const cityMeshes = [];
                 }
               }
             }
+            // party walls: buildings abut flush unless the gap is a REAL
+            // alley — no more senseless 40cm slits between towers
             cur += w + (rnd01(si * 1.7 + bi * 13.3) < 0.32
-              ? 1.6 + rnd01(si * 2.3 + bi * 4.1) * 1.2 : 0.4);   // alley slots
+              ? 2.0 + rnd01(si * 2.3 + bi * 4.1) * 1.0 : 0);
             bi++;
           }
         }
