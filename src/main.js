@@ -2047,10 +2047,24 @@ function spawnEnemy(type = 'gunner') {
 // ---------------------------------------------------------------------------
 const crowd = [];
 const npcDebris = [];
-const RUSH = { crowd: 30 };
+const RUSH = {
+  crowd: 30,
+  ghostSpeed: 3.0,   // how much faster you move inside frozen time
+  markBonus: 3,      // seconds of bank for executing the mark
+  markMin: 9, markMax: 34,   // how far away a new mark may hide
+};
 let rushT = 0, nextSleeperT = 5;
 const MAT_CROWD = new THREE.MeshLambertMaterial({ color: 0x1b1d22 });
 const MAT_REVEAL = new THREE.MeshBasicMaterial({ color: 0xff2d1a });
+// the mark burns white-hot: the one face in the crowd you are hunting
+const MAT_MARK = new THREE.MeshBasicMaterial({ color: 0xffffff });
+let rushMark = null, markPips = 0, markRespawnT = 0;
+const markPin = new THREE.Mesh(
+  new THREE.OctahedronGeometry(0.34),
+  new THREE.MeshBasicMaterial({ color: 0xff2d1a })
+);
+markPin.visible = false;
+scene.add(markPin);
 
 function spawnNPC(anywhere = false) {
   const parts = buildEnemyMesh('gunner');
@@ -2120,6 +2134,8 @@ function initRush() {
   game.spawnQueue = [];
   clearCrowd();
   rushT = 0; nextSleeperT = 5;
+  rushMark = null; markPips = 0; markRespawnT = 1.5;
+  markPin.visible = false;
   for (let i = 0; i < RUSH.crowd; i++) spawnNPC(true);
   el.pausebtn.style.display = 'block';
   el.ammo.style.display = '';
@@ -2127,8 +2143,52 @@ function initRush() {
   slowBank = SLOWMO.base;
   updateSlowMeter();
   updateModeUI();   // shows the time button + meter in button mode
-  showBanner('RUSH HOUR<small>FREEZE TIME TO SEE WHO THEY REALLY ARE</small>', 3200);
+  showBanner('RUSH HOUR<small>FREEZE TIME<br>GHOST THROUGH THE CROWD</small>', 3200);
 }
+// THE MARK: one face in the crowd is the one that matters. It only shows
+// itself inside frozen time, so the loop is — freeze, ghost through the
+// crowd at speed, find the white one, execute, let time go.
+function pickMark() {
+  const pool = crowd.filter((n) => {
+    if (!n.sleeper) return false;
+    const d = Math.hypot(n.pos.x - player.pos.x, n.pos.z - player.pos.z);
+    return d > RUSH.markMin && d < RUSH.markMax;
+  });
+  if (!pool.length) return;
+  rushMark = pool[Math.floor(Math.random() * pool.length)];
+  markPin.visible = false;
+  showBanner('NEW MARK<small>FREEZE TIME TO FIND THEM</small>', 1800);
+  sfx.alert();
+}
+
+function updateMark(sdt, slow) {
+  // the pin floats over the mark, but only while time is frozen — at full
+  // speed they are just another body in the crowd
+  if (rushMark && crowd.includes(rushMark)) {
+    markPin.visible = slow;
+    if (slow) {
+      markPin.position.set(rushMark.pos.x, 2.35 + Math.sin(rushT * 3) * 0.08, rushMark.pos.z);
+      markPin.rotation.y += sdt * 2.5;
+    }
+  } else {
+    if (rushMark) rushMark = null;   // shattered, activated or recycled away
+    markPin.visible = false;
+    markRespawnT -= sdt;
+    if (markRespawnT <= 0) { pickMark(); markRespawnT = 4; }
+  }
+}
+
+function markDown() {
+  markPips++;
+  slowBank = Math.min(SLOWMO.cap, slowBank + RUSH.markBonus);
+  updateSlowMeter();
+  rushMark = null;
+  markPin.visible = false;
+  markRespawnT = 3.5;
+  showBanner('MARK DOWN<small>+' + RUSH.markBonus + 'S</small>', 1500);
+  vibrate([20, 40, 20]);
+}
+
 function updateCrowd(sdt) {
   const slow = timeScale < 0.55;
   for (let i = crowd.length - 1; i >= 0; i--) {
@@ -2146,7 +2206,8 @@ function updateCrowd(sdt) {
     n.armR.rotation.x = sw * 0.5;
     if (n.sleeper && n.revealed !== slow) {
       n.revealed = slow;
-      n.g.traverse(o => { if (o.isMesh) o.material = slow ? MAT_REVEAL : MAT_CROWD; });
+      const m = slow ? (n === rushMark ? MAT_MARK : MAT_REVEAL) : MAT_CROWD;
+      n.g.traverse(o => { if (o.isMesh) o.material = m; });
     }
     // walked out of the player's stretch of street (or the player moved on,
     // possibly to a different avenue): recycle them near the player
@@ -2159,6 +2220,7 @@ function updateCrowd(sdt) {
     }
   }
   while (crowd.length + enemies.length < RUSH.crowd) spawnNPC();
+  updateMark(sdt, slow);
   for (let i = npcDebris.length - 1; i >= 0; i--) {
     const d = npcDebris[i]; d.t += sdt;
     d.vy -= 12 * sdt;
@@ -2801,11 +2863,16 @@ function updateBullets(sdt) {
         const n = crowd[ci];
         _v2.set(n.pos.x, 0.45, n.pos.z); _v3.set(n.pos.x, 1.5, n.pos.z);
         if (segSegDistSq(b.prev, b.pos, _v2, _v3) < 0.3 * 0.3) {
-          // a civilian: shatters black — and the system docks your frozen time
+          const wasMark = n === rushMark;
           shatterNPC(n);
           crowd.splice(ci, 1);
           spawnNPC();
-          if (timeMode === 'toggle') slowBank = Math.max(0, slowBank - 2);
+          if (wasMark) {
+            game.kills++;
+            markDown();            // the one you were hunting
+          } else if (timeMode === 'toggle') {
+            slowBank = Math.max(0, slowBank - 2);   // a civilian: the system docks you
+          }
           killBullet(i, b.pos);
           hitC = true;
           break;
@@ -4445,7 +4512,8 @@ function hitPlayer(ended = false) {
     el.overlay.querySelector('.sub').textContent = ended ? 'YOU CALLED IT' : 'ONE HIT IS ALL IT TAKES';
     const r = el.overlay.querySelector('.rules');
     r.innerHTML = game.mode === 'rush'
-      ? `<div class="stats">RUSH HOUR · ${game.kills} SHATTERED · ${Math.round(runPlayT)}S</div>`
+      ? `<div class="stats">RUSH HOUR · ${markPips} ${markPips === 1 ? 'MARK' : 'MARKS'} · ` +
+        `${game.kills} SHATTERED · ${Math.round(runPlayT)}S</div>`
       : game.mode === 'hall'
       ? `<div class="stats">TUNNEL · ${hall ? hall.doorsPassed : 0} ` +
         `${hall && hall.doorsPassed === 1 ? 'DOOR' : 'DOORS'} · ${game.kills} SHATTERED</div>`
@@ -5062,8 +5130,11 @@ function frame(now) {
         const sinY = Math.sin(player.yaw), cosY = Math.cos(player.yaw);
         const dirX = cosY * sx + -sinY * -sy;   // right*stickX + fwd*(-stickY)
         const dirZ = -sinY * sx + -cosY * -sy;
-        tvx = dirX * sm * MOVE_SPEED;
-        tvz = dirZ * sm * MOVE_SPEED;
+        // GHOST: inside frozen time in Rush Hour you move at speed — the
+        // mode's verb is hunting through a stopped crowd, not just dodging
+        const ghost = game.mode === 'rush' && timeScale < 0.55 ? RUSH.ghostSpeed : 1;
+        tvx = dirX * sm * MOVE_SPEED * ghost;
+        tvz = dirZ * sm * MOVE_SPEED * ghost;
       }
     }
   }
@@ -5279,7 +5350,7 @@ function frame(now) {
   const left = game.spawnQueue.length + enemies.length;
   const SEP = '\u00A0\u00A0\u00B7\u00A0\u00A0';
   el.score.textContent = game.mode === 'rush'
-    ? `RUSH${SEP}${game.kills}`
+    ? `RUSH${SEP}${markPips} ${markPips === 1 ? 'MARK' : 'MARKS'}`
     : game.mode === 'hall' && hall
       ? (hall.legs[hall.cur].door.open
           ? `DOOR ${hall.doorsPassed + 1}${SEP}OPEN \u2014 GO`
