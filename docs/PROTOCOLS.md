@@ -2,6 +2,11 @@
 
 Design spec. Not built yet; this is the thing to build against.
 
+Every number here is adjustable in the **Protocol Pacing** artifact, which
+holds the same registry, simulates a run at any level of player experience,
+and draws the discovery curve. Tune there, export the values block, port it
+here and into `src/protocols.js` when that exists.
+
 ---
 
 ## 1. The name
@@ -25,26 +30,27 @@ own designation.
 > **P-07 · BLACKOUT** — *Emergency lighting only. Illumination reduced to
 > eight metres. Compliance is not required to see.*
 
-**Three flavours, one type.** An earlier draft had two — "form" and
-"measure, a rule laid over it" — which broke the moment the grinder went in:
-a machine advancing down the corridor is not a *rule*, it is a thing with a
-timeline. One bucket was hiding three kinds of content. The split that
-actually holds answers three different questions:
+**A protocol is the whole configuration of a leg** — not one of its parts.
+When the building decides what this floor will be, it assembles a protocol
+out of three kinds of **element**:
 
-| Flavour | Question | True for | Examples |
+| Kind | Question | True for | Examples |
 |---|---|---|---|
 | **Form** | what the leg *is* | the whole leg, structural | corridor, gauntlet, atrium, gallery, stairwell |
 | **Condition** | how the leg *is* | the whole leg, no timing | blackout, flood, fog, dead air (no audio tells) |
 | **Measure** | what the building *does* | a moment or a timeline | grinder, breach walls, one-way seal, turret drop |
 
-The distinction is operational, not poetic: **a condition needs no
-scheduling — it is simply true from the moment you enter. A measure needs a
-trigger and a clock.** That is exactly the line the composer needs to draw,
-which is how you know it is the right one.
+So a leg's protocol reads as a sentence:
 
-Slots per leg: **one form, at most one condition, one or two measures.**
-Categories do most of the conflict-prevention for free — you can't roll
-blackout *and* flood, because there is only one condition slot.
+> **P-31** — GALLERY, under BLACKOUT, with a GRINDER.
+
+An earlier draft had only two kinds, defining a measure as "a rule laid over
+the leg" — which broke the moment the grinder went in, because a machine
+advancing down the corridor is not a rule, it is a thing with a timeline.
+The condition/measure split is **operational, not poetic**: a condition needs
+no scheduling, it is simply true on entry; a measure needs a trigger and a
+clock. That is exactly the line the composer must draw in code, which is how
+you know it is the right cut.
 
 *(Alternatives considered: MEASURES — good fiction, weaker as a noun for a
 room shape. MODULES — accurate, lifeless. DIRECTIVES — implies orders to
@@ -61,7 +67,7 @@ One flat list. Adding content = adding a row. Nothing else changes.
 {
   id: 'grinder',
   name: 'GRINDER',
-  flavour: 'measure',        // 'form' | 'condition' | 'measure'
+  kind: 'measure',           // 'form' | 'condition' | 'measure'
   tier: 3,                   // 1 cheap ... 4 punishing — drives cost & order
   minDoor: 4,                // never before this door, even for a veteran
   unlockAt: 60,              // lifetime doors cleared before it is eligible
@@ -85,6 +91,39 @@ protocol can appear in a run, and orders the whole archive.
 
 Ten to twelve entries is enough to start; the system does not care how
 many there eventually are.
+
+---
+
+## 2b. What may combine
+
+Three layers of rule, cheapest first. Anything not forbidden is allowed —
+the deck should surprise us, not just obey us.
+
+**Slots.** One form (always). At most one condition. At most two measures.
+Most nonsense dies here for free: blackout *and* flood cannot co-occur
+because there is one condition slot, no rule needed.
+
+**Hard conflicts** — pairs that break each other mechanically:
+
+| Pair | Why |
+|---|---|
+| grinder ↔ one-way seal | both want to own the leg's back wall |
+| grinder ↔ flood | the grinder outruns a slowed player: unwinnable |
+| blackout ↔ gallery | a gallery is *for* long sightlines; blackout deletes its point |
+| dead air ↔ breach walls | the breach is telegraphed by sound; silence makes it a coin flip |
+| turret drop ↔ atrium | a turret with 360° of open room has no counterplay |
+
+**Soft rules** — allowed, but the composer avoids them unless the budget
+forces it:
+
+- two measures that both pressure movement (grinder + turret) only from
+  door 10
+- a condition plus two measures only at budget 5
+- never a debut element in a leg that already has a tier-4 element
+
+**Deliberately allowed** because they are good: blackout + service run (tight
+and blind), gauntlet + breach walls (the walls are the only cover, and they
+open), stairwell + fog (you hear them above you before you see them).
 
 ---
 
