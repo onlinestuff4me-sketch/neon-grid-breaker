@@ -217,7 +217,7 @@
                     text-shadow:0 0 10px rgba(232,234,238,.95); }
 
   /* recent-runs score table */
-  #scores { margin-top:26px; width:min(292px, 82vw); }
+  #scores { margin-top:22px; width:min(292px, 82vw); margin-bottom:96px; }
   #scores .schead { font-size:11px; font-weight:800; letter-spacing:.24em; color:#7a8089;
                     text-shadow:0 0 10px rgba(232,234,238,.95); margin-bottom:12px; }
   #scores .scpills { display:flex; justify-content:flex-start; gap:10px; margin-bottom:12px; padding-left:2px; }
@@ -225,11 +225,11 @@
                     padding:7px 18px; border:1.5px solid rgba(22,24,29,.3); border-radius:999px;
                     background:rgba(238,240,243,.55); }
   #scores .scpill.active { background:#16181d; color:#eef0f3; border-color:#16181d; }
-  #scores .scrow { display:flex; align-items:baseline; padding:4px 2px;
+  #scores .scrow { display:flex; align-items:baseline; padding:2px 2px;
                    font-weight:800; text-shadow:0 0 8px rgba(232,234,238,.95); }
   /* value column sits centered under the first (WAVES) pill */
   #scores .scval { flex:0 0 92px; display:flex; align-items:baseline; justify-content:center; gap:6px;
-                   font-size:17px; color:#16181d; }
+                   font-size:15px; color:#16181d; }
   #scores .scval em { font-style:normal; font-size:10px; font-weight:800; letter-spacing:.16em; color:#8a9099; }
   #scores .scdate { margin-left:auto; font-size:11px; font-weight:600; letter-spacing:.04em; color:#8a9099; }
 
@@ -239,11 +239,16 @@
   #moderow { position:absolute; left:0; right:0; bottom:calc(env(safe-area-inset-bottom, 0px) + 18px);
              display:flex; align-items:center; justify-content:center; height:32px; }
 
-  #rushlink { display:inline-block; margin-top:14px; padding:11px 26px; border:2px solid #ff2d1a;
-              border-radius:999px; font-size:12px; font-weight:900; letter-spacing:.3em; color:#ff2d1a; }
-  #citylink { display:block; margin-top:16px; font-size:11px; font-weight:800; letter-spacing:.28em;
-              color:#7a8089; text-decoration:underline; text-underline-offset:4px;
-              text-decoration-color:rgba(122,128,137,.5); }
+  /* one primary CTA; the alternates are a single quiet, equal-weight row so
+     nothing competes with TAP TO BEGIN */
+  #altmodes { margin-top:20px; display:flex; align-items:center; justify-content:center;
+              gap:0; }
+  #altwrap .altlabel { display:block; font-size:9.5px; font-weight:800; letter-spacing:.3em;
+              color:#9aa0a9; margin-bottom:9px; }
+  .altbtn { font-size:10.5px; font-weight:900; letter-spacing:.24em; color:#5c626b;
+            padding:9px 18px; border:1.5px solid rgba(22,24,29,.22); background:rgba(238,240,243,.5); }
+  .altbtn:first-of-type { border-radius:999px 0 0 999px; border-right-width:0; }
+  .altbtn:last-of-type { border-radius:0 999px 999px 0; }
   #howtolink, #setlink { font-size:11px; font-weight:800; letter-spacing:.28em; color:#7a8089;
                text-shadow:0 0 10px rgba(232,234,238,.95); text-decoration:underline;
                text-underline-offset:4px; text-decoration-color:rgba(122,128,137,.5); }
@@ -320,8 +325,13 @@
   <h1>TIME<br><em>SHATTER</em></h1>
   <div class="sub">STOP TIME. SHATTER THEM ALL.</div>
   <div class="go">TAP TO BEGIN</div>
-  <div id="rushlink">RUSH HOUR</div>
-  <div id="citylink">CITY STREETS</div>
+  <div id="altwrap">
+    <span class="altlabel">OR TRY</span>
+    <div id="altmodes">
+      <div class="altbtn" id="rushlink">RUSH HOUR</div>
+      <div class="altbtn" id="citylink">CITY STREETS</div>
+    </div>
+  </div>
   <div id="scores"></div>
   <div class="rules"></div>
   <div id="menurow">

@@ -12,6 +12,8 @@
 // speed while the world crawls.
 
 import * as THREE from '../lib/three.module.min.js';
+import { WEAPONS, TYPE_INTRO, TYPE_SHARE, TYPE_DROP, DROPS, RAMP, COMP, PACING, TIME }
+  from './balance.js';
 
 // ---------------------------------------------------------------------------
 // Tunables
@@ -20,8 +22,8 @@ const ARENA_HALF = 21;            // arena is a square, walls at ±ARENA_HALF
 const EYE_HEIGHT = 1.6;
 const PLAYER_RADIUS = 0.32;
 
-const TIME_SLOW = 0.05;           // time scale while finger is down and still
-const TIME_MOVE_MAX = 0.3;        // ... creeping up to this while you drag-dodge
+const TIME_SLOW = TIME.slowScale;           // time scale while finger is down and still
+const TIME_MOVE_MAX = TIME.moveScale;        // ... creeping up to this while you drag-dodge
 const TIME_FULL = 1.0;
 const TIME_EASE = 14;             // easing rate between the two
 
@@ -34,19 +36,6 @@ const BULLET_GRAVITY = 4;         // gentle drop, visible on long shots
 // carries 2 per clip, and picking the same weapon up again buys you another
 // clip. Reload time scales with the weight of the thing you are racking.
 // Run every clip dry and you are down to the knife.
-const WEAPONS = {
-  knife: { cd: 0.42, melee: 2.0, mag: Infinity, maxClips: 0, reload: 0, kick: 0.6 },
-  pistol: { cd: 0.22, pellets: 1, spread: 0, kick: 1, speed: 46, mag: 5, maxClips: 3, reload: 1.0 },
-  shotgun: { cd: 0.55, pellets: 6, spread: 0.055, kick: 1.8, speed: 46, mag: 2, maxClips: 3, reload: 1.5 },
-  burst: { cd: 0.5, pellets: 1, spread: 0.012, kick: 1.6, speed: 52, mag: 2, maxClips: 3, reload: 1.4, burst: 3, burstGap: 0.09 },
-  sniper: { cd: 0.9, pellets: 1, spread: 0, kick: 2.4, speed: 95, pierce: 3, mag: 2, maxClips: 3, reload: 1.75 },
-  launcher: { cd: 0.9, pellets: 1, spread: 0, kick: 2.6, speed: 26, mag: 2, maxClips: 3, reload: 2.0, blast: 5.5 },
-  rocket: { cd: 1.2, pellets: 1, spread: 0, kick: 3, speed: 34, mag: 2, maxClips: 3, reload: 2.35, blast: 8 },
-};
-const TYPE_DROP = {
-  shotgunner: 'shotgun', sniper: 'sniper', heavy: 'burst',
-  bomber: 'launcher', rocketeer: 'rocket', armored: 'burst',
-};
 const CLIP = 'clip';   // a pistol magazine on the floor
 
 // Soft aim assist: the camera never swings on its own — after you stop
@@ -1324,7 +1313,7 @@ function updateMissiles(sdt) {
 // Weapon pickups — shotgunners usually drop their gun; snipers always do.
 // ---------------------------------------------------------------------------
 const pickups = [];   // {g, spin, ring, t, life}
-const PICKUP_LIFE = 12;
+const PICKUP_LIFE = DROPS.life;
 const PICKUP_SINK = 1.2;   // final seconds: the gun sinks into the floor
 
 function spawnPickup(pos, type = 'shotgun') {
@@ -1400,14 +1389,10 @@ function updatePickups(dt, sdt) {
     if (player.alive) {
       const dx = p.g.position.x - player.pos.x, dz = p.g.position.z - player.pos.z;
       const d2 = dx * dx + dz * dz;
-      if (d2 < 3.2 * 3.2 && d2 > 0.01) {
-        // magnet: run near a drop and it slides to your hand (real time)
-        const d = Math.sqrt(d2);
-        const pull = Math.min(5 * dt, d);
-        p.g.position.x -= (dx / d) * pull;
-        p.g.position.z -= (dz / d) * pull;
-      }
-      if (d2 < 1.8 * 1.8) {
+      // no magnet: the drop stays where it fell, so crossing the room for
+      // it is a real decision. PICKUP_R is generous enough that walking
+      // over it always registers.
+      if (d2 < DROPS.pickupR * DROPS.pickupR) {
         takePickup(p.type);
         sfx.pickup();
         vibrate(20);
@@ -1925,7 +1910,7 @@ function spawnEnemy(type = 'gunner') {
       const pz = cgz * C + (Math.random() - 0.5) * 1.6;
       const d = Math.hypot(px - player.pos.x, pz - player.pos.z);
       // NEVER behind you: the tunnel's whole promise is forward momentum
-      if (pz < player.pos.z + 4) continue;
+      if (pz < player.pos.z + PACING.aheadMin) continue;
       if (d < (finale ? 8 : 12) || d > 40) continue;
       if (finale) { x = px; z = pz; placed = true; break; }
       if (!hasLineOfSight(_v2.set(px, 1.4, pz), _v3.set(player.pos.x, EYE_HEIGHT, player.pos.z))) {
@@ -2234,14 +2219,14 @@ function killEnemy(i, impulseDir) {
   const r = Math.random();
   if (typeof drop === 'string') spawnPickup(e.pos, drop);           // named loot
   else if (kind && r < drop) spawnPickup(e.pos, kind);               // his own weapon
-  else if (r < 0.34) spawnPickup(e.pos, CLIP);                       // pistol ammo
+  else if (r < DROPS.clipRate) spawnPickup(e.pos, CLIP);                       // pistol ammo
   scene.remove(e.g);
   enemies.splice(i, 1);
   game.kills++;
   // the flow: a kill pulls the next spawn forward, so the street never
   // stays empty for long
   if (game.mode !== 'rush' && game.state === 'play') {
-    game.spawnTimer = Math.min(game.spawnTimer, 0.5 + Math.random() * 0.9);
+    game.spawnTimer = Math.min(game.spawnTimer, PACING.killPullMin + Math.random() * PACING.killPullRange);
   }
   killWord();
   sfx.shatter();
@@ -2309,21 +2294,21 @@ function setEgunFlash(e, mat) {
 // to full heat).
 function diffT() {
   const w = game.mode === 'rush' ? 1 + rushT / 25 : game.wave;
-  return Math.min((w - 1) / 11, 1);   // full heat at 12, not 8
+  return Math.min((w - 1) / RAMP.rampWaves, 1);
 }
 
 // Enemy rounds open slow enough to sidestep at a walk (wave 1: ~55% speed),
 // reach full pace by wave 8, then keep creeping (+2%/wave, capped at +35%).
 function enemyBulletSpeed() {
   const w = game.mode === 'rush' ? 1 + rushT / 25 : game.wave;
-  const late = Math.max(0, w - 12) * 0.02;
-  return ENEMY_BULLET_SPEED * Math.min(0.55 + 0.45 * diffT() + late, 1.35);
+  const late = Math.max(0, w - (RAMP.rampWaves + 1)) * RAMP.lateCreep;
+  return RAMP.bulletBase * Math.min(RAMP.bulletFloor + RAMP.bulletRange * diffT() + late, RAMP.bulletCap);
 }
 
 // Telegraphs and cooldowns ride the same dial: leisurely on the opening
 // waves (x1.15), tightening to ~x0.5 by wave 8.
 function aimSpeedFactor() {
-  return 1.15 - 0.63 * diffT();
+  return RAMP.aimBase - RAMP.aimRange * diffT();
 }
 
 // Same slab push-out the player uses: an enemy can never end a frame inside
@@ -2451,7 +2436,7 @@ function updateEnemy(e, sdt) {
       if (e.type !== 'rusher' && dist < e.engageDist && e.fireCd <= 0 &&
           (!ENEMY_TYPES[e.type].shielded || Math.cos(e.g.rotation.y - wantYaw) > 0.8) &&
           performance.now() >= game.noFireBefore &&
-          los && e.seenT > 0.45) {
+          los && e.seenT > RAMP.sightGrace) {
         // take turns on the trigger: only a couple of guns telegraph at once,
         // so fire arrives as a steady stream you can dodge, never a volley
         let aiming = 0;
@@ -3986,7 +3971,7 @@ function renderScores() {
     const unit = scoreMetric === 'w' ? (v === 1 ? 'WAVE' : 'WAVES') : (v === 1 ? 'ENEMY' : 'ENEMIES');
     return `${v}<em>${unit}</em>`;
   };
-  const rows = display.slice(0, 5).map((r) =>
+  const rows = display.slice(0, 3).map((r) =>   // 3 rows keeps clear of the links
     `<div class="scrow"><span class="scval">${fmtVal(r)}</span>` +
     `<span class="scdate">${fmtWhen(r.at)}</span></div>`).join('');
   el.scores.innerHTML =
@@ -4004,25 +3989,17 @@ function renderScores() {
 // One debut per wave, and the two attrition types that made wave 8 spike
 // (armored needs headshots, shieldbearer needs flanking) are now separated
 // by three waves instead of landing together as the ramp maxes out.
-const TYPE_INTRO = {
-  gunner: 1, rusher: 2, shotgunner: 3, shieldbearer: 4, heavy: 5,
-  sniper: 6, bomber: 7, armored: 9, rocketeer: 11, laser: 12,
-};
-const TYPE_SHARE = {   // veteran shooter fill: floor(total/share), capped
-  shotgunner: [4, 4], heavy: [5, 3], shieldbearer: [8, 2],
-  sniper: [7, 2], bomber: [6, 2], armored: [9, 2], rocketeer: [8, 2],
-};
 function composeWave(n) {
-  const total = Math.min(6 + 2 * n, 30);
+  const total = Math.min(COMP.baseTotal + COMP.perWave * n, COMP.totalCap);
   const debut = Object.keys(TYPE_INTRO).find((t) => TYPE_INTRO[t] === n);
   const queue = [];
   // the horde core: rushers scale up fast once they debut — this is a game
   // about managing the melee crush while gunfire crosses the street
-  const rushers = n >= TYPE_INTRO.rusher ? Math.min(Math.round(total * 0.4), 2 + n) : 0;
+  const rushers = n >= TYPE_INTRO.rusher ? Math.min(Math.round(total * COMP.rusherFrac), 2 + n) : 0;
   for (let i = 0; i < rushers; i++) queue.push('rusher');
   // the debuting type gets a real showing
   if (debut && debut !== 'gunner' && debut !== 'rusher' && debut !== 'laser') {
-    for (let i = 0; i < Math.max(2, Math.round(total / 5)); i++) queue.push(debut);
+    for (let i = 0; i < Math.max(2, Math.round(total * COMP.debutFrac)); i++) queue.push(debut);
   }
   // veteran shooters fill in, capped so gunners keep at least ~25% of the wave
   const specials = [];
@@ -4035,7 +4012,7 @@ function composeWave(n) {
     const j = Math.floor(Math.random() * (i + 1));
     [specials[i], specials[j]] = [specials[j], specials[i]];
   }
-  const room = Math.max(0, total - queue.length - Math.ceil(total * 0.25));
+  const room = Math.max(0, total - queue.length - Math.ceil(total * COMP.gunnerFloor));
   queue.push(...specials.slice(0, room));
   while (queue.length < total) queue.push('gunner');
   for (let i = queue.length - 1; i > 0; i--) {   // shuffle
@@ -4061,7 +4038,7 @@ let timeLocked = false;
 // Button mode runs on a slow-mo bank: each wave charges it to BASE seconds,
 // it drains in real time while locked, and every kill pours BONUS back in.
 // Empty bank -> time snaps back (the usual resume sound/visuals fire).
-const SLOWMO = { base: 5, bonus: 2, cap: 10, drain: 1 };
+const SLOWMO = { base: TIME.base, bonus: TIME.bonus, cap: TIME.cap, drain: TIME.drain };
 let slowBank = SLOWMO.base;
 
 function setTimeLocked(v) {
@@ -4178,6 +4155,7 @@ const el = {
   moderow: document.getElementById('moderow'),
   rushlink: document.getElementById('rushlink'),
   citylink: document.getElementById('citylink'),
+  altwrap: document.getElementById('altwrap'),
   timetip: document.getElementById('timetip'),
   reloadbar: document.getElementById('reloadbar'),
   reloadfill: document.getElementById('reloadfill'),
@@ -4247,8 +4225,7 @@ function showMenu() {
   el.overlay.querySelector('.rules').style.display = 'none';
   el.menurow.style.display = 'flex';
   el.moderow.style.display = 'flex';
-  el.rushlink.style.display = '';
-  el.citylink.style.display = '';
+  el.altwrap.style.display = '';
   setEnvironment('city');
   renderScores();
   updateSndBtn();
@@ -4412,8 +4389,8 @@ function startWave(n, quiet = false) {   // quiet: the clear card already announ
 // how many are ON the street — the aim-token cap keeps most of them
 // stalking rather than shooting, so density can run higher than pressure
 function maxAlive() {
-  if (game.mode === 'hall') return Math.min(3 + Math.floor(game.wave / 2), 6);
-  return Math.min(6 + Math.floor(game.wave / 2), 10);
+  if (game.mode === 'hall') return Math.min(PACING.hallAliveBase + Math.floor(game.wave / 2), PACING.hallAliveCap);
+  return Math.min(PACING.cityAliveBase + Math.floor(game.wave / 2), PACING.cityAliveCap);
 }
 
 let deathAt = 0;
@@ -4437,8 +4414,8 @@ function hitPlayer(ended = false) {
   hideTimeTip();
   clearMessages();
   el.reloadbar.style.display = 'none';
-  el.rushlink.style.display = 'none';    // retry retries THIS mode only
-  el.citylink.style.display = 'none';
+  // retry retries THIS mode only — the alternates leave the death screen
+  el.altwrap.style.display = 'none';
   if (!ended) {   // a chosen exit skips the death drama
     el.redflash.style.opacity = 1;
     sfx.die();
@@ -4559,7 +4536,7 @@ function advanceFromOverlay() {
 // route leads to the next door.
 // ---------------------------------------------------------------------------
 const HALL = { cell: 4, h: 3.1, wall: 0.3 };
-const HALL_FINALE = 2;   // last N of a leg stage on the door approach
+const HALL_FINALE = PACING.finale;   // last of a leg stage on the door approach
 function makeHallWallTexture() {
   const c = document.createElement('canvas');
   c.width = c.height = 256;
@@ -4731,7 +4708,8 @@ function hallWave(n) {
   const q = composeWave(n).map((t) => sub[t] || t);
   // the first two legs are the game teaching itself — give them enough
   // bodies to actually feel like a fight before the door
-  const want = n === 1 ? 12 : n === 2 ? 15 : Math.min(12 + n * 2, 24);
+  const want = n === 1 ? COMP.hallDoor1 : n === 2 ? COMP.hallDoor2
+    : Math.min(COMP.hallBase + n * COMP.hallPerDoor, COMP.hallCap);
   while (q.length < want) q.push(Math.random() < 0.55 ? 'gunner' : 'rusher');
   q.length = Math.min(q.length, want);
   return q;
@@ -4973,7 +4951,7 @@ function frame(now) {
       // built AROUND frozen time (it's how you see the sleepers), so its
       // tank is cheap for the whole run.
       slowBank -= dt * SLOWMO.drain *
-        (game.mode === 'rush' ? 0.4 : 0.55 + 0.45 * diffT());
+        (game.mode === 'rush' ? RAMP.rushDrain : RAMP.drainFloor + RAMP.drainRange * diffT());
       if (slowBank <= 0) {
         slowBank = 0;
         setTimeLocked(false);   // time rushes back — resume SFX fires as usual
@@ -5170,11 +5148,11 @@ function frame(now) {
         if (game.mode === 'hall') {
           // A cleared corridor stays quiet only briefly — long enough to
           // breathe and push forward, never long enough to feel empty.
-          game.spawnTimer = (enemies.length === 0 ? 0.9 : 1.4 + 2.2 * fill) *
-            (0.85 + Math.random() * 0.3);
+          game.spawnTimer = (enemies.length === 0 ? PACING.hallEmptyGap
+            : PACING.hallFullGap + PACING.hallFillGap * fill) * (0.85 + Math.random() * 0.3);
         } else {
-          game.spawnTimer = (0.7 + 2.6 * fill) * (0.85 + Math.random() * 0.3) +
-            (game.spawnQueue.length <= 2 ? 1.6 : 0);
+          game.spawnTimer = (PACING.cityBaseGap + PACING.cityFillGap * fill) *
+            (0.85 + Math.random() * 0.3) + (game.spawnQueue.length <= 2 ? 1.6 : 0);
         }
       }
     }

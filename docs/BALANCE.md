@@ -1,193 +1,111 @@
 # TIME SHATTER — balance reference
 
-Every tunable number in the game, where it lives in `src/main.js`, and what
-it does. **This file is documentation, not configuration** — the game reads
-the constants in `src/main.js`. When you change a value there, change it
-here too.
+<!-- GENERATED FILE — do not edit by hand.
+     Source of truth: src/balance.js
+     Regenerate:      node tools/gen-balance-doc.mjs -->
 
-To experiment before committing, use the **Balance Tuner** artifact: it
-holds the same values, lets you drag them, and emits a values block that
-maps 1:1 onto the tables below.
+Every tunable number the game reads, straight out of `src/balance.js`. The
+game imports that file, this document is generated from it, and the Balance
+Tuner artifact mirrors the same shape — so none of the three can drift.
 
 ---
 
-## 1. Weapons
+## Weapons
 
-`const WEAPONS` — near the top of `src/main.js`.
+A weapon holds **`mag` bullets per clip** and up to **`maxClips` spares**.
+Reload burns one spare and runs on **real time**, so freezing the world never
+refills a gun. Picking up a weapon you already carry adds a clip. Empty every
+clip and you drop to the knife.
 
-Ammo model: a weapon holds **`mag` bullets per clip** and up to **`maxClips`
-spare clips**. Firing empties the clip; a reload burns one spare. Picking up
-a weapon you already carry adds a clip (capped at `maxClips`). Run every
-clip dry and you drop to the knife.
-
-| Weapon | Rounds / clip (`mag`) | Max clips | Reload (s) | Fire cd (s) | Muzzle speed | Notes |
+| Weapon | Rounds / clip | Max clips | Reload (s) | Fire cd (s) | Muzzle speed | Notes |
 |---|---|---|---|---|---|---|
-| knife | ∞ | 0 | — | 0.42 | — | 2.0 m reach, front arc only |
-| pistol | 5 | 3 | 1.00 | 0.22 | 46 | the only deep clip |
-| shotgun | 2 | 3 | 1.50 | 0.55 | 46 | 6 pellets, spread 0.055 |
-| burst (heavy) | 2 | 3 | 1.40 | 0.50 | 52 | 3-round burst, 0.09 s apart |
-| sniper | 2 | 3 | 1.75 | 0.90 | 95 | pierces 3 |
-| launcher | 2 | 3 | 2.00 | 0.90 | 26 | 5.5 m blast |
-| rocket | 2 | 3 | 2.35 | 1.20 | 34 | 8.0 m blast |
+| knife | ∞ | 0 | — | 0.42 | — | melee only, front arc |
+| pistol | 5 | 3 | 1 | 0.22 | 46 | the only deep clip |
+| shotgun | 2 | 3 | 1.5 | 0.55 | 46 | 6 pellets, spread 0.055 |
+| burst | 2 | 3 | 1.4 | 0.5 | 52 | 3-round burst, 0.09 s apart |
+| sniper | 2 | 3 | 1.75 | 0.9 | 95 | pierces 3 |
+| launcher | 2 | 3 | 2 | 0.9 | 26 | 5.5 m blast |
+| rocket | 2 | 3 | 2.35 | 1.2 | 34 | 8.0 m blast |
 
-Reload time rises with weapon weight — pistol is the fastest rack, rocket
-the slowest. Reloads run on **real time**, so freezing the world does not
-refill a gun.
+## Enemies
 
-Player bullets fall under `BULLET_GRAVITY = 4`; enemy bullets fly straight.
+The debut wave headlines its type: it spawns first and gets a warning card.
+After that the type fills in at `min(cap, floor(total / share))` per wave.
 
----
+| Enemy | Debut | Fill share | Fill cap | Drops | Role |
+|---|---|---|---|---|---|
+| gunner | 1 | — | — | — | the backbone |
+| rusher | 2 | — | — | — | telegraphed lunge, packs of 3–4 |
+| shotgunner | 3 | 4 | 4 | shotgun | close-range cloud |
+| shieldbearer | 4 | 8 | 2 | — | attrition: flank the plate |
+| heavy | 5 | 5 | 3 | burst | 3-round burst |
+| sniper | 6 | 7 | 2 | sniper | long telegraph, heavy round |
+| bomber | 7 | 6 | 2 | launcher | area denial |
+| armored | 9 | 9 | 2 | burst | attrition: headshots only |
+| rocketeer | 11 | 8 | 2 | rocket | homing missile |
+| laser | 12 | — | — | — | unavoidable sweep |
 
-## 2. Drops
+Drop chances live per-type in `ENEMY_TYPES` in `src/main.js`; the table above
+is what each one leaves behind when it rolls.
 
-Two constants: `ENEMY_TYPES[type].drop` (the probability) and `TYPE_DROP`
-(which weapon that enemy was carrying).
+## Drops and collection
 
-| Enemy | Drop chance | Drops |
+| Knob | Value | Meaning |
 |---|---|---|
-| shotgunner | 0.55 | shotgun |
-| heavy | 0.35 | burst |
-| armored | 0.30 | burst |
-| sniper | always | sniper |
-| bomber | 0 | — (launcher is wired in `TYPE_DROP`, chance is 0) |
-| rocketeer | 0 | — (rocket is wired in `TYPE_DROP`, chance is 0) |
-| gunner, rusher, shieldbearer, laser | 0 | — |
+| `clipRate` | 0.34 | chance a non-weapon kill leaves a pistol clip |
+| `life` | 12 s | time on the floor before it sinks |
+| `pickupR` | 2 m | walk this close and it is yours |
 
-**Pistol clips:** any kill that does not roll a weapon drops a clip if
-`Math.random() < 0.34`. This is the ammo lifeline — raise it if players hit
-the knife too often, lower it to squeeze them forward harder.
+There is **no magnet**. A drop stays where it fell, so crossing the room for
+it is a real decision — which is the whole point of collecting on foot.
 
-Drops live for `PICKUP_LIFE = 12` s (last 1.2 s they sink into the floor)
-and are collected by **walking over them** (1.8 m), with a 3.2 m magnet
-pull. There is no tap-to-collect.
+## Difficulty ramp
 
----
+`diffT` runs 0 → 1 across **11 waves** (full heat at wave
+12). In Rush Hour the wave number is replaced by
+`1 + rushT / 25`, so it ramps on the run clock instead.
 
-## 3. Difficulty curve
+| | Bullet speed (m/s) | Telegraph scale | Slow-mo cost |
+|---|---|---|---|
+| wave 1 | 6.05 | 1.15× | 0.55× |
+| wave 6 | 8.3 | 0.864× | 0.755× |
+| wave 12 | 11 | 0.52× | 1× |
 
-One dial drives everything: `diffT()` = `min((wave − 1) / 11, 1)` — 0 on
-wave 1, full heat at **wave 12**. In Rush Hour the wave number is replaced
-by `1 + rushT / 25`, so it ramps on the run clock (~3 min to full).
+Past wave 12, speed creeps 2 % per
+wave to a hard cap of 1.35× base. Rush Hour drains the bank at
+a flat 0.4×. An enemy must be in view for
+**0.45 s** before its telegraph may begin.
 
-| Metric | Formula | Wave 1 | Wave 6 | Wave 12 |
-|---|---|---|---|---|
-| Enemy bullet speed | `11 × min(0.55 + 0.45·diffT + late, 1.35)` | 6.1 | 8.3 | 11.0 |
-| Telegraph + cooldown scale | `1.15 − 0.63·diffT` | 1.15× | 0.86× | 0.52× |
-| Slow-mo drain rate | `0.55 + 0.45·diffT` (rush: flat 0.4) | 0.55× | 0.75× | 1.0× |
+## Wave composition
 
-`late` adds 2 % per wave past 12, capped at 1.35× base speed.
+- **Total** = `min(6 + 2n, 30)`
+- **Rushers** (once debuted) = `min(round(total × 0.4), 2 + n)`
+- **Debut type** gets `max(2, round(total × 0.2))`
+- **Gunners** keep at least 25 % of the wave
+- **Tunnel legs**: 12 at door 1, 15 at door 2,
+  then `min(12 + 2n, 24)`
 
-**Why wave 8 used to spike:** `armored` debuted there *and* the old ramp
-(`/7`) maxed out there, so full bullet speed, shortest telegraphs and
-full-price slow-mo all landed on the same wave as the headshot-only enemy.
-The ramp now runs to 12 and the attrition types are spread out.
-
----
-
-## 4. Enemy introductions
-
-`const TYPE_INTRO` — the wave (or door, in the tunnel) each type debuts.
-The debut headlines its wave: it spawns first and gets a warning card.
-
-| Wave | Debut |
-|---|---|
-| 1 | gunner |
-| 2 | rusher |
-| 3 | shotgunner |
-| 4 | shieldbearer |
-| 5 | heavy |
-| 6 | sniper |
-| 7 | bomber |
-| 9 | armored |
-| 11 | rocketeer |
-| 12 | laser |
-
----
-
-## 5. Wave composition
-
-`composeWave(n)`:
-
-- **Total** = `min(6 + 2n, 30)`.
-- **Rushers** (from wave 2) = `min(round(total × 0.4), 2 + n)` — the horde core.
-- **Debut type** gets `max(2, round(total / 5))` bodies on its wave.
-- **Veteran shooters** fill from `TYPE_SHARE`: `[share, cap]` means
-  `min(cap, floor(total / share))` of that type.
-- **Gunners** backfill, keeping at least ~25 % of the wave.
-- One **laser** leads every even wave from 12 on.
-
-| Type | share | cap |
-|---|---|---|
-| shotgunner | 4 | 4 |
-| heavy | 5 | 3 |
-| shieldbearer | 8 | 2 |
-| sniper | 7 | 2 |
-| bomber | 6 | 2 |
-| armored | 9 | 2 |
-| rocketeer | 8 | 2 |
-
-**Tunnel legs** (`hallWave(n)`) substitute the open-air types for
-close-quarters ones (laser→rusher, sniper→gunner, rocketeer→heavy,
-bomber→shotgunner) and set the quota to **12** (door 1), **15** (door 2),
-then `min(12 + 2n, 24)`.
-
----
-
-## 6. Spawn pacing
+## Spawn pacing
 
 | Knob | Tunnel | City / Rush |
 |---|---|---|
-| Alive at once (`maxAlive`) | `min(3 + ⌊wave/2⌋, 6)` | `min(6 + ⌊wave/2⌋, 10)` |
-| Gap after a spawn | `(empty ? 0.9 : 1.4 + 2.2·fill) × (0.85–1.15)` | `(0.7 + 2.6·fill) × (0.85–1.15)`, +1.6 s when ≤2 left |
-| Gap after a kill | pulled forward to 0.5–1.4 s | same |
-| Cluster size | 1–3 round the corner together | rushers arrive as packs of 3–4 |
+| Alive at once | `min(3 + ⌊wave/2⌋, 6)` | `min(6 + ⌊wave/2⌋, 10)` |
+| Gap when empty | 0.9 s | — |
+| Gap when busy | `1.4 + 2.2·fill` | `0.7 + 2.6·fill` |
+| Gap after a kill | pulled to 0.5–1.4 s | same |
 
-`fill` = live enemies ÷ `maxAlive`. Spawns are suppressed while a message
-card is on screen, and in the tunnel they are hard-gated to at least 4 m
-**ahead** of the player. The last `HALL_FINALE = 2` of a leg stage on the
-door approach so the door opens in view.
+All gaps are multiplied by a 0.85–1.15 jitter. Spawns are suppressed while a
+message card is on screen, and in the tunnel they are hard-gated to at least
+**4 m ahead** of the player. The last **2**
+of a leg stage on the door approach so the door opens in view.
 
-**Sight grace:** an enemy must be in the player's line of sight for 0.45 s
-before its telegraph may begin — rounding a corner never means eating an
-already-charged shot.
+## Time control
 
----
-
-## 7. Time control
-
-`const SLOWMO = { base: 5, bonus: 2, cap: 10, drain: 1 }`
-
-- `base` — seconds in the tank at wave start (and the floor every wave).
-- `bonus` — seconds refunded per kill.
-- `cap` — maximum bank.
-- `drain` — seconds per second while frozen, scaled by the difficulty curve
-  above.
-
-Time scale: `TIME_SLOW = 0.05` standing still, rising to
-`TIME_MOVE_MAX = 0.3` at full stick — moving costs the world time.
-
----
-
-## 8. Movement, camera, misc
-
-| Constant | Value | Meaning |
+| Knob | Value | Meaning |
 |---|---|---|
-| `MOVE_SPEED` | 5.5 | m/s at full stick |
-| `LOOK_SENS` | 4.4 | rad per screen-width, horizontal |
-| `LOOK_SENS_Y` | 1.15 | rad per screen-width, vertical |
-| `PITCH_LIMIT` | 0.42 | rad, the torso↔head band |
-| `BLAST_R` | 2.3 | enemy grenade blast radius |
-| `RUSH.crowd` | 30 | pedestrians in Rush Hour |
-| `HALL.cell` | 4 | corridor cell size (m) |
-| `CITY.street` | 7.5 | road width (m) |
-
----
-
-## 9. Rush Hour
-
-- Crowd of 30, **55 %** of whom are sleepers.
-- Sleeper clusters wake every `max(4, 10 − rushT × 0.045) × (0.8–1.3)` s;
-  cluster size 1, then 2 after 30 s, 3 after 90 s.
-- Slow-mo drains at a flat **0.4×** all run — freezing time is the mode's
-  core verb.
-- Shooting a civilian costs **2 s** of bank.
+| `base` | 5 s | bank at wave start, and the floor each wave |
+| `bonus` | 2 s | refunded per kill |
+| `cap` | 10 s | bank ceiling |
+| `drain` | 1 | seconds spent per second frozen, before ramp scaling |
+| `slowScale` | 0.05 | world speed while standing still |
+| `moveScale` | 0.3 | world speed at full stick |
