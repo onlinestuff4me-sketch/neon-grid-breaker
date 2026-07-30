@@ -34,13 +34,18 @@ const BULLET_GRAVITY = 4;         // gentle drop, visible on long shots
 // back to the pistol, which never runs out but always has to reload.
 const WEAPONS = {
   pistol: { cd: 0.22, pellets: 1, spread: 0, ammo: Infinity, kick: 1, speed: 46, mag: 5, reload: 1.15 },
-  shotgun: { cd: 0.55, pellets: 6, spread: 0.055, ammo: 6, kick: 1.8, speed: 46, mag: 2, reload: 1.5 },
-  sniper: { cd: 0.9, pellets: 1, spread: 0, ammo: 5, kick: 2.4, speed: 95, pierce: 3, mag: 3, reload: 1.7 },
-  burst: { cd: 0.42, pellets: 3, spread: 0.032, ammo: 12, kick: 1.6, speed: 52, mag: 6, reload: 1.2 },
-  launcher: { cd: 0.9, pellets: 1, spread: 0, ammo: 5, kick: 2.6, speed: 26, mag: 2, reload: 1.9, blast: 5.5 },
+  shotgun: { cd: 0.55, pellets: 6, spread: 0.055, ammo: 8, kick: 1.8, speed: 46, mag: 2, reload: 1.5 },
+  sniper: { cd: 0.9, pellets: 1, spread: 0, ammo: 6, kick: 2.4, speed: 95, pierce: 3, mag: 2, reload: 1.7 },
+  burst: { cd: 0.42, pellets: 3, spread: 0.032, ammo: 12, kick: 1.6, speed: 52, mag: 3, reload: 1.2 },
+  launcher: { cd: 0.9, pellets: 1, spread: 0, ammo: 4, kick: 2.6, speed: 26, mag: 1, reload: 1.9, blast: 5.5 },
   rocket: { cd: 1.2, pellets: 1, spread: 0, ammo: 3, kick: 3, speed: 34, mag: 1, reload: 2.1, blast: 8 },
 };
-const LOOT = ['shotgun', 'sniper', 'burst', 'launcher', 'rocket'];
+// You loot what they were carrying: the gun on the ground is the gun that
+// was pointed at you.
+const TYPE_DROP = {
+  shotgunner: 'shotgun', sniper: 'sniper', heavy: 'burst',
+  bomber: 'launcher', rocketeer: 'rocket', armored: 'burst',
+};
 
 // Soft aim assist: the camera never swings on its own — after you stop
 // aiming for a while (in slow motion only), it gently settles the crosshair
@@ -810,7 +815,59 @@ const sniperVM = new THREE.Group();
   sniperVM.rotation.x = -0.02;
 }
 sniperVM.visible = false;
-gun.add(pistolVM, shotgunVM, sniperVM);
+
+// BURST: boxy machine pistol with a stick magazine — clearly not the pistol
+const burstVM = new THREE.Group();
+{
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.085, 0.42), MAT_BLACK);
+  body.position.set(0, 0.015, -0.12);
+  const vent = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.05, 0.14), MAT_GUNMETAL);
+  vent.position.set(0, 0.045, -0.3);
+  const mag = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.19, 0.06), MAT_BLACK);
+  mag.position.set(0, -0.11, -0.02);
+  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.15, 0.075), MAT_BLACK);
+  grip.position.set(0, -0.09, 0.14);
+  grip.rotation.x = 0.3;
+  burstVM.add(body, vent, mag, grip);
+}
+burstVM.visible = false;
+
+// LAUNCHER: fat stubby tube with a drum — reads nothing like the shotgun
+const launcherVM = new THREE.Group();
+{
+  const tube = new THREE.Mesh(new THREE.BoxGeometry(0.115, 0.115, 0.46), MAT_BLACK);
+  tube.position.set(0, 0.03, -0.2);
+  const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 0.07), MAT_GUNMETAL);
+  mouth.position.set(0, 0.03, -0.42);
+  const drum = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.08, 10), MAT_BLACK);
+  drum.rotation.z = Math.PI / 2;
+  drum.position.set(0, -0.01, 0.04);
+  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.16, 0.08), MAT_BLACK);
+  grip.position.set(0, -0.11, 0.14);
+  grip.rotation.x = 0.3;
+  launcherVM.add(tube, mouth, drum, grip);
+}
+launcherVM.visible = false;
+
+// ROCKET: long shoulder tube with a rear venturi and a top sight
+const rocketVM = new THREE.Group();
+{
+  const tube = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.13, 0.95), MAT_BLACK);
+  tube.position.set(0, 0.05, -0.24);
+  const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.17, 0.09), MAT_GUNMETAL);
+  mouth.position.set(0, 0.05, -0.7);
+  const rear = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 0.1), MAT_GUNMETAL);
+  rear.position.set(0, 0.05, 0.22);
+  const sight = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.07, 0.12), MAT_GUNMETAL);
+  sight.position.set(0, 0.14, -0.16);
+  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.15, 0.08), MAT_BLACK);
+  grip.position.set(0, -0.05, 0.02);
+  grip.rotation.x = 0.28;
+  rocketVM.add(tube, mouth, rear, sight, grip);
+  rocketVM.rotation.y = 0.14;
+}
+rocketVM.visible = false;
+gun.add(pistolVM, shotgunVM, sniperVM, burstVM, launcherVM, rocketVM);
 // camera-attached meshes must never be frustum-culled: a stale bound can
 // blink the equipped gun out of existence
 gun.traverse((o) => { o.frustumCulled = false; });
@@ -834,9 +891,12 @@ function setWeapon(type) {
   player.ammo = spec.ammo;
   player.mag = Math.min(spec.mag, spec.ammo === Infinity ? spec.mag : spec.ammo);
   player.reloadT = 0;
-  pistolVM.visible = type === 'pistol' || type === 'burst';
-  shotgunVM.visible = type === 'shotgun' || type === 'launcher';
-  sniperVM.visible = type === 'sniper' || type === 'rocket';
+  pistolVM.visible = type === 'pistol';
+  shotgunVM.visible = type === 'shotgun';
+  sniperVM.visible = type === 'sniper';
+  burstVM.visible = type === 'burst';
+  launcherVM.visible = type === 'launcher';
+  rocketVM.visible = type === 'rocket';
   updateAmmoHud();
 }
 
@@ -1796,7 +1856,12 @@ function spawnEnemy(type = 'gunner') {
     // the door in frame, so the opening lands as visible payoff and you are
     // never left hunting for where to go next.
     const finale = game.spawnQueue.length < HALL_FINALE && L.approach && L.approach.length;
-    const pool = finale ? L.approach : L.cells;
+    // Everyone else comes out of the corridor the player still has to walk:
+    // cells ahead of them but short of the door approach, so the hallway
+    // leads you forward instead of stacking bodies at the exit.
+    const approachZ = L.approach && L.approach.length ? L.approach[0][1] * HALL.cell : 1e9;
+    const pool = finale ? L.approach
+      : L.cells.filter(([, cgz]) => cgz * HALL.cell < approachZ - 2);
     let fbX = 0, fbZ = 0, fbOk = false;
     for (let tries = 0; tries < 40 && !placed; tries++) {
       const [cgx, cgz] = pool[Math.floor(Math.random() * pool.length)];
@@ -2109,8 +2174,9 @@ function killEnemy(i, impulseDir) {
   if (game.state !== 'menu') vibrate(15);   // every kill lands in the thumb
   spawnShatter(e.pos, impulseDir);
   const drop = ENEMY_TYPES[e.type].drop;
+  const kind = TYPE_DROP[e.type];
   if (typeof drop === 'string') spawnPickup(e.pos, drop);           // named loot
-  else if (Math.random() < drop) spawnPickup(e.pos, LOOT[Math.floor(Math.random() * LOOT.length)]);
+  else if (kind && Math.random() < drop) spawnPickup(e.pos, kind);   // his own weapon
   scene.remove(e.g);
   enemies.splice(i, 1);
   game.kills++;
@@ -2277,8 +2343,11 @@ function updateEnemy(e, sdt) {
       moveSpeed = e.speed;
       e.strafeT -= sdt;
       if (e.strafeT <= 0) { e.strafe *= -1; e.strafeT = 1 + Math.random() * 2; }
-      const strafeDir = _v2.set(-toPlayer.z, 0, toPlayer.x).multiplyScalar(e.strafe * 0.55);
-      const dir = _v3.copy(toPlayer).add(strafeDir).normalize();
+      // in the tunnel, walk the corridor graph; elsewhere press straight in
+      const flow = game.mode === 'hall' ? hallSteer(e) : null;
+      const strafeDir = _v2.set(-toPlayer.z, 0, toPlayer.x)
+        .multiplyScalar(e.strafe * (flow ? 0.12 : 0.55));
+      const dir = _v3.copy(flow || toPlayer).add(strafeDir).normalize();
       // steer around cover
       for (const o of obstacles) {
         const cx = (o.min.x + o.max.x) / 2, cz = (o.min.z + o.max.z) / 2;
@@ -2975,6 +3044,36 @@ function applyLook(dx, dy) {
   input.lookIdle = 0;
 }
 
+// A tap on a dropped weapon must never be the thing that kills you: if the
+// run to it crosses live incoming fire, or passes a rusher who is already
+// committed, the tap falls through to firing instead.
+function sprintIsSafe(pk) {
+  const ax = player.pos.x, az = player.pos.z;
+  const bx = pk.g.position.x, bz = pk.g.position.z;
+  const len = Math.hypot(bx - ax, bz - az) || 1e-6;
+  const ux = (bx - ax) / len, uz = (bz - az) / len;
+  const near = (px, pz, pad) => {   // distance from the run line
+    const t = Math.min(Math.max((px - ax) * ux + (pz - az) * uz, 0), len);
+    return Math.hypot(ax + ux * t - px, az + uz * t - pz) < pad;
+  };
+  for (const b of bullets) {
+    if (b.fromPlayer) continue;
+    // where the round will be over the next couple of seconds
+    for (const t of [0.25, 0.5, 0.9, 1.4, 2.0]) {
+      if (near(b.pos.x + b.vel.x * t, b.pos.z + b.vel.z * t, 1.3)) return false;
+    }
+    if (near(b.pos.x, b.pos.z, 1.3)) return false;
+  }
+  for (const e of enemies) {
+    if (e.state === 'assemble') continue;
+    const committed = e.state === 'windup' || e.state === 'lunge' || e.state === 'melee';
+    if (near(e.pos.x, e.pos.z, committed ? 3.4 : 1.9)) return false;
+  }
+  for (const g2 of grenades) if (near(g2.pos.x, g2.pos.z, BLAST_R * 0.9)) return false;
+  for (const m2 of missiles) if (near(m2.pos.x, m2.pos.z, 2.4)) return false;
+  return true;
+}
+
 function releasePointer(ev, isTapEligible) {
   const p = input.pointers.get(ev.pointerId);
   if (!p) return;
@@ -2982,11 +3081,11 @@ function releasePointer(ev, isTapEligible) {
   if (isTapEligible && !p.role && performance.now() - p.downT < TAP_MS &&
       Math.hypot(p.x - p.sx, p.y - p.sy) <= TAP_PX) {
     const hit = pickupAtScreen(p.x, p.y);
-    if (hit) {
+    if (hit && sprintIsSafe(hit)) {
       sprintTo = hit;               // one tap: run there and take the gun
       vibrate(10);
     } else {
-      playerFire();
+      playerFire();   // blocked or nothing there: the tap is a shot
     }
   }
   input.pointers.delete(ev.pointerId);
@@ -4062,6 +4161,7 @@ const MENU_HTML = {
 
 function showMenu() {
   sfx.fadeAll(1, 0.35);
+  clearMessages();
   clearField();
   el.pausebtn.style.display = 'none';
   setTimeLocked(false);
@@ -4119,7 +4219,9 @@ let lastWarnAt = -10;
 function warnFlash(words) {
   const now = performance.now() / 1000;
   if (now - lastWarnAt < 4) return;   // don't nag
+  if (performance.now() < messageBusyUntil) return;   // a card already owns the screen
   lastWarnAt = now;
+  messageBusyUntil = performance.now() + 1900;
   el.warn.innerHTML = words
     .map((w, i) => `<span class="warnword${i ? ' w2' : ''}">${w}</span>`)
     .join('');
@@ -4181,11 +4283,41 @@ function killWord() {
   killWord._t = setTimeout(() => { el.flash.innerHTML = ''; }, KILLFLASH_MS + 50);
 }
 
+// A single message channel. Cards queue behind one another with a beat of
+// clear screen between them, so a wave card and an enemy-name card can
+// never land together — and spawns hold off while one is up (see
+// messageBusyUntil, read by the spawner).
+let messageBusyUntil = 0;
+const messageQueue = [];
 function showBanner(html, dur = 1600) {
-  el.banner.innerHTML = html;
+  messageQueue.push({ html, dur });
+  pumpMessages();
+}
+function pumpMessages() {
+  if (!messageQueue.length) return;
+  const now = performance.now();
+  if (now < messageBusyUntil) {
+    clearTimeout(pumpMessages._t);
+    pumpMessages._t = setTimeout(pumpMessages, messageBusyUntil - now + 30);
+    return;
+  }
+  const m = messageQueue.shift();
+  el.banner.innerHTML = m.html;
   el.banner.classList.add('show');
+  messageBusyUntil = now + m.dur + 500;   // the gap between cards
   clearTimeout(showBanner._t);
-  showBanner._t = setTimeout(() => el.banner.classList.remove('show'), dur);
+  showBanner._t = setTimeout(() => el.banner.classList.remove('show'), m.dur);
+  if (messageQueue.length) {
+    clearTimeout(pumpMessages._t);
+    pumpMessages._t = setTimeout(pumpMessages, m.dur + 520);
+  }
+}
+function clearMessages() {
+  messageQueue.length = 0;
+  messageBusyUntil = 0;
+  clearTimeout(pumpMessages._t);
+  clearTimeout(showBanner._t);
+  el.banner.classList.remove('show');
 }
 
 function startWave(n, quiet = false) {   // quiet: the clear card already announced it
@@ -4243,6 +4375,7 @@ function hitPlayer(ended = false) {
   el.timebtn.style.display = 'none';
   el.slowmeter.style.display = 'none';   // the meter goes with its button
   hideTimeTip();
+  clearMessages();
   el.reloadbar.style.display = 'none';
   el.rushlink.style.display = 'none';    // retry retries THIS mode only
   el.citylink.style.display = 'none';
@@ -4309,8 +4442,7 @@ function clearField() {
 
 function showGuide() {
   // the guide IS the intro — suppress the WAVE 1 banner underneath it
-  clearTimeout(showBanner._t);
-  el.banner.classList.remove('show');
+  clearMessages();
   const g = el.guide;
   g.style.display = 'flex';
   g.style.opacity = 1;
@@ -4367,7 +4499,7 @@ function advanceFromOverlay() {
 // route leads to the next door.
 // ---------------------------------------------------------------------------
 const HALL = { cell: 4, h: 3.1, wall: 0.3 };
-const HALL_FINALE = 3;   // last N of a leg stage on the door approach
+const HALL_FINALE = 2;   // last N of a leg stage on the door approach
 function makeHallWallTexture() {
   const c = document.createElement('canvas');
   c.width = c.height = 256;
@@ -4669,8 +4801,71 @@ function unstickHallEnemies(dt) {
   }
 }
 
+// Breadth-first distance field over the current leg's cells. Enemies read
+// the gradient, so they turn corners and take forks like people instead of
+// grinding into a wall on the straight line to the player.
+function hallFlow(fromKey) {
+  const L = hall.legs[hall.cur];
+  const open = new Set(L.cells.map(([gx, gz]) => gx + ',' + gz));
+  const dist = new Map([[fromKey, 0]]);
+  const q = [fromKey];
+  for (let i = 0; i < q.length; i++) {
+    const [gx, gz] = q[i].split(',').map(Number);
+    const d = dist.get(q[i]);
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const k = (gx + dx) + ',' + (gz + dz);
+      if (!open.has(k) || dist.has(k)) continue;
+      dist.set(k, d + 1);
+      q.push(k);
+    }
+  }
+  return dist;
+}
+const cellKeyOf = (x, z) => Math.round(x / HALL.cell) + ',' + Math.round(z / HALL.cell);
+const _vFlow = new THREE.Vector3();   // its own scratch: _v2 is reused downstream
+
+function updateHallFlow() {
+  const L = hall.legs[hall.cur], C = HALL.cell;
+  hall.toPlayer = hallFlow(cellKeyOf(player.pos.x, player.pos.z));
+  // the rally: a cell roughly 3 cells up the corridor from the player, so
+  // anyone caught behind loops around and re-engages from the front
+  let rally = null, bestD = 1e9;
+  for (const [gx, gz] of L.cells) {
+    if (gz * C < player.pos.z + 6) continue;
+    const d = Math.abs(gz * C - (player.pos.z + 13)) + Math.abs(gx * C - player.pos.x) * 0.4;
+    if (d < bestD) { bestD = d; rally = [gx, gz]; }
+  }
+  hall.rallyKey = rally ? rally[0] + ',' + rally[1] : null;
+  hall.toRally = rally ? hallFlow(hall.rallyKey) : null;
+}
+
+// Direction an enemy should walk this frame, following the corridor.
+// Returns null when there is no useful field (fall back to straight-line).
+function hallSteer(e) {
+  if (!hall || !hall.toPlayer) return null;
+  const C = HALL.cell;
+  // behind the player? head for the rally ahead of them, not their back
+  const behind = e.pos.z < player.pos.z - 2;
+  const field = behind && hall.toRally ? hall.toRally : hall.toPlayer;
+  const here = cellKeyOf(e.pos.x, e.pos.z);
+  const d0 = field.get(here);
+  if (d0 === undefined) return null;
+  if (d0 === 0) return null;   // same cell as the goal: close the last metre directly
+  const [gx, gz] = here.split(',').map(Number);
+  let best = null, bestD = d0;
+  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    const k = (gx + dx) + ',' + (gz + dz);
+    const d = field.get(k);
+    if (d !== undefined && d < bestD) { bestD = d; best = [gx + dx, gz + dz]; }
+  }
+  if (!best) return null;
+  return _vFlow.set(best[0] * C - e.pos.x, 0, best[1] * C - e.pos.z).normalize();
+}
+
 function updateHall(dt) {
   if (!hall) return;
+  hall.flowT = (hall.flowT || 0) - dt;
+  if (hall.flowT <= 0) { updateHallFlow(); hall.flowT = 0.3; }
   unstickHallEnemies(dt);
   const L = hall.legs[hall.cur];
   if (game.state === 'play' && !L.door.open &&
@@ -4872,7 +5067,8 @@ function frame(now) {
     }
     if (game.state === 'play' && game.spawnQueue.length > 0 && enemies.length < maxAlive()) {
       game.spawnTimer -= sdt;
-      if (game.spawnTimer <= 0) {
+      // hold entrances while a card is on screen: one thing to read at a time
+      if (game.spawnTimer <= 0 && performance.now() >= messageBusyUntil) {
         // one at a time: a figure stepping out of an alley or around the far
         // corner, usually somewhere ahead of where you're walking/looking.
         // The emptier the street, the sooner the next one appears — a steady
@@ -5019,6 +5215,7 @@ window.__ts = {
   audio: () => sfx.debug(), sfx,
   slow: () => ({ bank: +slowBank.toFixed(2), locked: timeLocked, mode: timeMode }),
   hall: () => hall,
+  sprintSafe: sprintIsSafe, banner: showBanner,
   fire: playerFire, setWeapon, spawnEnemy, spawnPickup,
   shot: (px, py, pz, dx, dy, dz, fromPlayer) =>
     spawnBullet(new THREE.Vector3(px, py, pz), new THREE.Vector3(dx, dy, dz).normalize(), fromPlayer),
