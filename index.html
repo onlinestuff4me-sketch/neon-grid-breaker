@@ -201,8 +201,10 @@
   #redflash { position:fixed; inset:0; pointer-events:none; opacity:0; background:radial-gradient(ellipse at center, rgba(255,45,26,.25) 0%, rgba(255,45,26,.75) 100%); }
 
   /* ---- full screen overlays ---- */
-  #overlay { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
-             background:rgba(232,234,238,.55); z-index:10; text-align:center; padding:28px; }
+  #overlay { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center;
+             justify-content:center; gap:20px;
+             background:rgba(232,234,238,.55); z-index:10; text-align:center;
+             padding:24px 24px calc(24px + env(safe-area-inset-bottom, 0px)); }
   #overlay.hidden { display:none; }
   #overlay h1 { font-size:min(22vw,104px); font-weight:900; line-height:.82; letter-spacing:.01em; color:#16181d;
                 transform:skewX(-6deg); text-shadow:0 0 24px rgba(232,234,238,.95), 0 0 60px rgba(232,234,238,.9); }
@@ -217,13 +219,19 @@
                     text-shadow:0 0 10px rgba(232,234,238,.95); }
 
   /* recent-runs score table */
-  #scores { margin-top:22px; width:min(292px, 82vw); margin-bottom:96px; }
-  #scores .schead { font-size:11px; font-weight:800; letter-spacing:.24em; color:#7a8089;
-                    text-shadow:0 0 10px rgba(232,234,238,.95); margin-bottom:12px; }
-  #scores .scpills { display:flex; justify-content:flex-start; gap:10px; margin-bottom:12px; padding-left:2px; }
-  #scores .scpill { font-size:10px; font-weight:900; letter-spacing:.22em; color:#5c626b;
-                    padding:7px 18px; border:1.5px solid rgba(22,24,29,.3); border-radius:999px;
-                    background:rgba(238,240,243,.55); }
+  #scores { width:min(292px, 82vw); }
+  #scores .schead { display:flex; align-items:center; justify-content:center; gap:0;
+                    margin-bottom:11px; }
+  #scores .svtab { font-size:9.5px; font-weight:900; letter-spacing:.22em; color:#8a9099;
+                   padding:7px 15px; border:1px solid rgba(22,24,29,.18); background:transparent; }
+  #scores .svtab:first-child { border-radius:999px 0 0 999px; border-right-width:0; }
+  #scores .svtab:last-child { border-radius:0 999px 999px 0; }
+  #scores .svtab.active { background:#16181d; color:#eef0f3; border-color:#16181d; }
+  #scores .scpills { display:flex; justify-content:center; gap:7px; margin-bottom:12px; }
+  /* the metric pills sit in the same tier as the view tabs above them */
+  #scores .scpill { font-size:9.5px; font-weight:900; letter-spacing:.22em; color:#8a9099;
+                    padding:7px 14px; border:1px solid rgba(22,24,29,.18); border-radius:999px;
+                    background:transparent; }
   #scores .scpill.active { background:#16181d; color:#eef0f3; border-color:#16181d; }
   #scores .scrow { display:flex; align-items:baseline; padding:2px 2px;
                    font-weight:800; text-shadow:0 0 8px rgba(232,234,238,.95); }
@@ -234,26 +242,35 @@
   #scores .scdate { margin-left:auto; font-size:11px; font-weight:600; letter-spacing:.04em; color:#8a9099; }
 
   /* bottom row: how-to link + flat speaker toggle */
-  #menurow { position:absolute; left:0; right:0; bottom:calc(env(safe-area-inset-bottom, 0px) + 54px);
-             display:flex; align-items:center; justify-content:center; height:44px; }
-  #moderow { position:absolute; left:0; right:0; bottom:calc(env(safe-area-inset-bottom, 0px) + 18px);
-             display:flex; align-items:center; justify-content:center; height:32px; }
+  #menurow { display:flex; align-items:center; justify-content:center; gap:10px; }
+  #moderow { display:none; }   /* folded into #menurow */
 
-  /* one primary CTA; the alternates are a single quiet, equal-weight row so
-     nothing competes with TAP TO BEGIN */
-  #altmodes { margin-top:20px; display:flex; align-items:center; justify-content:center;
-              gap:0; }
-  #altwrap .altlabel { display:block; font-size:9.5px; font-weight:800; letter-spacing:.3em;
-              color:#9aa0a9; margin-bottom:9px; }
-  .altbtn { font-size:10.5px; font-weight:900; letter-spacing:.24em; color:#5c626b;
-            padding:9px 18px; border:1.5px solid rgba(22,24,29,.22); background:rgba(238,240,243,.5); }
-  .altbtn:first-of-type { border-radius:999px 0 0 999px; border-right-width:0; }
-  .altbtn:last-of-type { border-radius:0 999px 999px 0; }
-  #howtolink, #setlink { font-size:11px; font-weight:800; letter-spacing:.28em; color:#7a8089;
-               text-shadow:0 0 10px rgba(232,234,238,.95); text-decoration:underline;
-               text-underline-offset:4px; text-decoration-color:rgba(122,128,137,.5); }
-  #sndbtn { position:absolute; right:20px; top:50%; transform:translateY(-50%);
-            width:44px; height:44px; border-radius:50%;
+  /* ---- ONE BUTTON FAMILY, FOUR WEIGHTS ----------------------------------
+     Everything actionable is a pill; weight encodes priority, so nothing has
+     to be a different species just to be a different rank.
+       .btn-1  solid red       the one thing to do
+       .btn-2  outlined ink    the other modes
+       .btn-3  hairline ghost  how to play / settings
+       segmented               leaderboard filters — a control, not an action */
+  .btn { display:inline-flex; align-items:center; justify-content:center;
+         border-radius:999px; font-weight:900; text-align:center; white-space:nowrap; }
+  .btn-1 { padding:17px 40px; font-size:15px; letter-spacing:.3em;
+           background:#ff2d1a; color:#fff; border:2px solid #ff2d1a;
+           max-width:min(340px, 86vw); }
+  /* long labels (the retry copy) shrink rather than bursting the pill */
+  .btn-1.long { font-size:12px; letter-spacing:.16em; padding:15px 26px; }
+  .btn-2 { padding:12px 20px; font-size:11px; letter-spacing:.2em;
+           color:#16181d; border:2px solid #16181d; background:rgba(238,240,243,.62); }
+  .btn-3 { padding:9px 16px; font-size:9.5px; letter-spacing:.22em;
+           color:#6b717a; border:1px solid rgba(22,24,29,.2); background:transparent; }
+
+  .mrow { display:flex; align-items:center; justify-content:center; gap:10px; }
+  .mlabel { font-size:9.5px; font-weight:800; letter-spacing:.3em; color:#9aa0a9;
+            text-shadow:0 0 10px rgba(232,234,238,.95); }
+  .mdiv { width:min(292px, 82vw); height:1px; background:rgba(22,24,29,.13); }
+  #altwrap { display:flex; flex-direction:column; align-items:center; gap:11px; }
+  /* how-to + settings ride tier 3 (.btn-3) */
+  #sndbtn { width:38px; height:38px; border-radius:50%;
             display:flex; align-items:center; justify-content:center; color:#7a8089;
             border:1.5px solid rgba(22,24,29,.28); background:rgba(238,240,243,.6); }
   #sndbtn svg { width:22px; height:22px; }
@@ -276,9 +293,10 @@
   .enmcard .enrow { text-align:left; letter-spacing:.04em; }
   .enmcard .enrow b { display:block; font-size:12px; letter-spacing:.18em; color:#16181d; }
   .enmcard .enrow span { font-size:12px; font-weight:600; color:#6b7078; }
-  #overlay .go { margin-top:12px; padding:18px 30px; font-size:15px; font-weight:900; letter-spacing:.34em;
-                 color:#ff2d1a; animation:pulse 1.2s ease-in-out infinite; }
-  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+  #overlay .go { animation:gopulse 2.6s ease-in-out infinite; }
+  @keyframes gopulse { 0%,100% { box-shadow:0 6px 20px rgba(255,45,26,.26); }
+                       55% { box-shadow:0 6px 30px rgba(255,45,26,.5); } }
+  @media (prefers-reduced-motion: reduce) { #overlay .go { animation:none; } }
   #overlay .stats { margin-top:14px; font-size:14px; font-weight:700; letter-spacing:.18em; color:#2a2d33; }
   #menubtn { display:none; margin-top:34px; padding:13px 36px; border:2px solid #16181d;
              border-radius:999px; font-size:13px; font-weight:900; letter-spacing:.26em; color:#16181d; }
@@ -324,23 +342,24 @@
 <div id="overlay">
   <h1>TIME<br><em>SHATTER</em></h1>
   <div class="sub">STOP TIME. SHATTER THEM ALL.</div>
-  <div class="go">TAP TO BEGIN</div>
+  <div class="go btn btn-1">PLAY</div>
   <div id="altwrap">
-    <span class="altlabel">OR TRY</span>
-    <div id="altmodes">
-      <div class="altbtn" id="rushlink">RUSH HOUR</div>
-      <div class="altbtn" id="citylink">CITY STREETS</div>
+    <span class="mlabel">OTHER MODES</span>
+    <div class="mrow">
+      <div class="btn btn-2" id="rushlink">RUSH HOUR</div>
+      <div class="btn btn-2" id="citylink">CITY STREETS</div>
     </div>
   </div>
+  <div class="mdiv"></div>
   <div id="scores"></div>
   <div class="rules"></div>
+  <div class="mdiv" id="div2"></div>
   <div id="menurow">
-    <div id="howtolink">HOW TO PLAY</div>
+    <div class="btn btn-3" id="howtolink">HOW TO PLAY</div>
+    <div class="btn btn-3" id="setlink">SETTINGS</div>
     <div id="sndbtn"></div>
   </div>
-  <div id="moderow">
-    <div id="setlink">SETTINGS</div>
-  </div>
+  <div id="moderow"></div>
   <div id="menubtn">MAIN MENU</div>
 </div>
 

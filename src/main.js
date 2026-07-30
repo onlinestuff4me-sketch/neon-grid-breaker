@@ -3012,6 +3012,12 @@ function onPointerDown(ev) {
         renderScores();
         return;
       }
+      const vtab = ev.target.closest('.svtab');
+      if (vtab) {   // TOP ranks by metric, RECENT lists newest first
+        scoreView = vtab.dataset.v;
+        renderScores();
+        return;
+      }
       if (ev.target.closest('#scores') || ev.target.closest('.rules')) return;   // reading
     }
     if (game.state === 'menu' && ev.target && ev.target.closest && ev.target.closest('#rushlink')) {
@@ -3924,6 +3930,7 @@ try { bestWave = Math.max(1, +localStorage.getItem('timeshard_best') || 1); } ca
 let runStartAt = 0;
 let runPlayT = 0;   // real seconds actually in combat this run (all retries)
 let scoreMetric = 'w';   // 'w' = wave, 'k' = shards (kills)
+let scoreView = 'top';   // 'top' = ranked by metric, 'recent' = newest first
 
 function loadRuns() {
   try { return JSON.parse(localStorage.getItem('timeshard_runs') || '[]'); } catch { return []; }
@@ -3959,8 +3966,10 @@ function renderScores() {
     return;
   }
   el.scores.style.display = 'block';
-  // a real leaderboard: sorted by the chosen metric, so #1 IS your best
-  display.sort((a, b) => ((b[scoreMetric] || 0) - (a[scoreMetric] || 0)) || (b.at - a.at));
+  // TOP ranks by the chosen metric so #1 is your best; RECENT is just the
+  // last few runs in order — two different questions, one table
+  if (scoreView === 'recent') display.sort((a, b) => b.at - a.at);
+  else display.sort((a, b) => ((b[scoreMetric] || 0) - (a[scoreMetric] || 0)) || (b.at - a.at));
   const fmtVal = (r) => {
     if (scoreMetric === 'd') {   // survival time as M:SS
       if (r.d == null) return '—<em></em>';
@@ -3971,16 +3980,22 @@ function renderScores() {
     const unit = scoreMetric === 'w' ? (v === 1 ? 'WAVE' : 'WAVES') : (v === 1 ? 'ENEMY' : 'ENEMIES');
     return `${v}<em>${unit}</em>`;
   };
-  const rows = display.slice(0, 3).map((r) =>   // 3 rows keeps clear of the links
+  const rows = display.slice(0, 5).map((r) =>
     `<div class="scrow"><span class="scval">${fmtVal(r)}</span>` +
     `<span class="scdate">${fmtWhen(r.at)}</span></div>`).join('');
   el.scores.innerHTML =
-    '<div class="schead">TOP RUNS</div>' +
-    `<div class="scpills">` +
-    `<span class="scpill${scoreMetric === 'w' ? ' active' : ''}" data-m="w">WAVES</span>` +
-    `<span class="scpill${scoreMetric === 'k' ? ' active' : ''}" data-m="k">ENEMIES</span>` +
-    `<span class="scpill${scoreMetric === 'd' ? ' active' : ''}" data-m="d">TIME</span>` +
-    `</div>${rows}`;
+    '<div class="schead">' +
+    `<span class="svtab${scoreView === 'top' ? ' active' : ''}" data-v="top">TOP RUNS</span>` +
+    `<span class="svtab${scoreView === 'recent' ? ' active' : ''}" data-v="recent">RECENT</span>` +
+    '</div>' +
+    // the metric pills only rank TOP; RECENT is already answered by its order
+    (scoreView === 'top'
+      ? `<div class="scpills">` +
+        `<span class="scpill${scoreMetric === 'w' ? ' active' : ''}" data-m="w">WAVES</span>` +
+        `<span class="scpill${scoreMetric === 'k' ? ' active' : ''}" data-m="k">ENEMIES</span>` +
+        `<span class="scpill${scoreMetric === 'd' ? ' active' : ''}" data-m="d">TIME</span>` +
+        `</div>`
+      : '') + rows;
 }
 
 // Each wave is a street encounter: a quota big enough to roam through, and
@@ -4222,10 +4237,12 @@ function showMenu() {
   el.overlay.querySelector('.sub').textContent = taglineFor();
   el.overlay.querySelector('.rules').innerHTML = MENU_HTML.rules;
   el.overlay.querySelector('.go').innerHTML = MENU_HTML.go;
+  el.overlay.querySelector('.go').classList.remove('long');
   el.overlay.querySelector('.rules').style.display = 'none';
   el.menurow.style.display = 'flex';
   el.moderow.style.display = 'flex';
   el.altwrap.style.display = '';
+  for (const d of document.querySelectorAll('.mdiv')) d.style.display = '';
   setEnvironment('city');
   renderScores();
   updateSndBtn();
@@ -4413,6 +4430,7 @@ function hitPlayer(ended = false) {
   el.slowmeter.style.display = 'none';   // the meter goes with its button
   hideTimeTip();
   clearMessages();
+  for (const d of document.querySelectorAll('.mdiv')) d.style.display = 'none';
   el.reloadbar.style.display = 'none';
   // retry retries THIS mode only — the alternates leave the death screen
   el.altwrap.style.display = 'none';
@@ -4437,9 +4455,10 @@ function hitPlayer(ended = false) {
     el.scores.style.display = 'none';
     el.menurow.style.display = 'none';
     el.moderow.style.display = 'none';   // keep the stats line's row clear
-    el.overlay.querySelector('.go').textContent =
-      game.mode === 'rush' ? 'TAP TO RETRY RUSH HOUR'
-        : game.mode === 'hall' ? 'TAP TO RETRY FROM LAST DOOR' : 'TAP TO RETRY WAVE';
+    const goEl = el.overlay.querySelector('.go');
+    goEl.textContent = game.mode === 'rush' ? 'RETRY RUSH HOUR'
+      : game.mode === 'hall' ? 'RETRY FROM LAST DOOR' : 'RETRY WAVE';
+    goEl.classList.add('long');
     el.menubtn.style.display = 'inline-block';
     el.overlay.classList.remove('hidden');
   }, ended ? 400 : 900);
