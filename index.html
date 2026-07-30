@@ -224,12 +224,15 @@
      segments, so the active fill reads as one cell of a symmetric whole
      rather than a dark chip weighting the left edge. */
   #scores .schead { display:grid; grid-template-columns:1fr 1fr; margin-bottom:8px; }
-  #scores .svtab { font-size:9.5px; font-weight:900; letter-spacing:.2em; color:#8a9099;
+  #scores .svtab { font-size:9.5px; font-weight:900; letter-spacing:.2em; color:#7d838c;
                    padding:8px 0; text-align:center;
                    border:1px solid rgba(22,24,29,.18); background:transparent; }
   #scores .svtab:first-child { border-radius:999px 0 0 999px; border-right-width:0; }
   #scores .svtab:last-child { border-radius:0 999px 999px 0; }
-  #scores .svtab.active { background:#16181d; color:#eef0f3; border-color:#16181d; }
+  /* the whole leaderboard stays quiet: the view tabs are one step stronger
+     than the metric row beneath, but neither reaches button-black */
+  #scores .svtab.active { background:rgba(22,24,29,.17); color:#16181d;
+                          border-color:rgba(22,24,29,.28); }
   #scores .scpills { display:grid; grid-template-columns:repeat(3, 1fr); margin-bottom:14px; }
   /* the metric row is the same control, one tier quieter: a hairline bar
      whose active cell is filled but never darker than the view tabs */
