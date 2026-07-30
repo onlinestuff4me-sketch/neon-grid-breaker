@@ -220,19 +220,27 @@
 
   /* recent-runs score table */
   #scores { width:min(292px, 82vw); }
-  #scores .schead { display:flex; align-items:center; justify-content:center; gap:0;
-                    margin-bottom:11px; }
-  #scores .svtab { font-size:9.5px; font-weight:900; letter-spacing:.22em; color:#8a9099;
-                   padding:7px 15px; border:1px solid rgba(22,24,29,.18); background:transparent; }
+  /* Both leaderboard controls are full-width segmented bars with equal
+     segments, so the active fill reads as one cell of a symmetric whole
+     rather than a dark chip weighting the left edge. */
+  #scores .schead { display:grid; grid-template-columns:1fr 1fr; margin-bottom:8px; }
+  #scores .svtab { font-size:9.5px; font-weight:900; letter-spacing:.2em; color:#8a9099;
+                   padding:8px 0; text-align:center;
+                   border:1px solid rgba(22,24,29,.18); background:transparent; }
   #scores .svtab:first-child { border-radius:999px 0 0 999px; border-right-width:0; }
   #scores .svtab:last-child { border-radius:0 999px 999px 0; }
   #scores .svtab.active { background:#16181d; color:#eef0f3; border-color:#16181d; }
-  #scores .scpills { display:flex; justify-content:center; gap:7px; margin-bottom:12px; }
-  /* the metric pills sit in the same tier as the view tabs above them */
-  #scores .scpill { font-size:9.5px; font-weight:900; letter-spacing:.22em; color:#8a9099;
-                    padding:7px 14px; border:1px solid rgba(22,24,29,.18); border-radius:999px;
-                    background:transparent; }
-  #scores .scpill.active { background:#16181d; color:#eef0f3; border-color:#16181d; }
+  #scores .scpills { display:grid; grid-template-columns:repeat(3, 1fr); margin-bottom:14px; }
+  /* the metric row is the same control, one tier quieter: a hairline bar
+     whose active cell is filled but never darker than the view tabs */
+  #scores .scpill { font-size:9px; font-weight:900; letter-spacing:.18em; color:#9aa0a9;
+                    padding:7px 0; text-align:center;
+                    border:1px solid rgba(22,24,29,.14); background:transparent; }
+  #scores .scpill:first-child { border-radius:999px 0 0 999px; border-right-width:0; }
+  #scores .scpill:last-child { border-radius:0 999px 999px 0; }
+  #scores .scpill:not(:first-child):not(:last-child) { border-right-width:0; }
+  #scores .scpill.active { background:rgba(22,24,29,.12); color:#16181d;
+                           border-color:rgba(22,24,29,.22); }
   #scores .scrow { display:flex; align-items:baseline; padding:2px 2px;
                    font-weight:800; text-shadow:0 0 8px rgba(232,234,238,.95); }
   /* value column sits centered under the first (WAVES) pill */
