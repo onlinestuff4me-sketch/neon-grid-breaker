@@ -29,11 +29,18 @@ const PLAYER_BULLET_SPEED = 46;
 const ENEMY_BULLET_SPEED = 11;    // base; creeps up slightly with each wave
 const BULLET_GRAVITY = 4;         // gentle drop, visible on long shots
 
+// mag: rounds before a reload; reload: seconds to swap a fresh one in.
+// Looted weapons carry `ammo` total rounds — when those run dry you fall
+// back to the pistol, which never runs out but always has to reload.
 const WEAPONS = {
-  pistol: { cd: 0.22, pellets: 1, spread: 0, ammo: Infinity, kick: 1, speed: 46 },
-  shotgun: { cd: 0.55, pellets: 6, spread: 0.055, ammo: 3, kick: 1.8, speed: 46 },
-  sniper: { cd: 0.9, pellets: 1, spread: 0, ammo: 3, kick: 2.4, speed: 95, pierce: 3 },
+  pistol: { cd: 0.22, pellets: 1, spread: 0, ammo: Infinity, kick: 1, speed: 46, mag: 5, reload: 1.15 },
+  shotgun: { cd: 0.55, pellets: 6, spread: 0.055, ammo: 6, kick: 1.8, speed: 46, mag: 2, reload: 1.5 },
+  sniper: { cd: 0.9, pellets: 1, spread: 0, ammo: 5, kick: 2.4, speed: 95, pierce: 3, mag: 3, reload: 1.7 },
+  burst: { cd: 0.42, pellets: 3, spread: 0.032, ammo: 12, kick: 1.6, speed: 52, mag: 6, reload: 1.2 },
+  launcher: { cd: 0.9, pellets: 1, spread: 0, ammo: 5, kick: 2.6, speed: 26, mag: 2, reload: 1.9, blast: 5.5 },
+  rocket: { cd: 1.2, pellets: 1, spread: 0, ammo: 3, kick: 3, speed: 34, mag: 1, reload: 2.1, blast: 8 },
 };
+const LOOT = ['shotgun', 'sniper', 'burst', 'launcher', 'rocket'];
 
 // Soft aim assist: the camera never swings on its own — after you stop
 // aiming for a while (in slow motion only), it gently settles the crosshair
@@ -710,6 +717,8 @@ const player = {
   fireCd: 0,
   weapon: 'pistol',
   ammo: Infinity,
+  mag: 5,
+  reloadT: 0,
   alive: true,
 };
 
@@ -725,6 +734,7 @@ function shiftWorld(ax, d) {
   for (const d2 of npcDebris) d2.m.position[ax] += d;
   for (const g2 of grenades) { g2.pos[ax] += d; if (g2.mesh && g2.mesh.position !== g2.pos) g2.mesh.position[ax] += d; if (g2.ring && g2.ring.position !== g2.pos) g2.ring.position[ax] += d; }
   for (const m2 of missiles) { m2.pos[ax] += d; if (m2.mesh && m2.mesh.position !== m2.pos) m2.mesh.position[ax] += d; }
+  for (const s2 of shells) { s2.pos[ax] += d; s2.prev[ax] += d; s2.mesh.position[ax] += d; }
 }
 function recenterWorld() {
   if (game.mode === 'hall') return;   // the hallway is not periodic
@@ -819,11 +829,38 @@ scene.add(camera);
 let gunKick = 0;
 
 function setWeapon(type) {
+  const spec = WEAPONS[type];
   player.weapon = type;
-  player.ammo = WEAPONS[type].ammo;
-  pistolVM.visible = type === 'pistol';
-  shotgunVM.visible = type === 'shotgun';
-  sniperVM.visible = type === 'sniper';
+  player.ammo = spec.ammo;
+  player.mag = Math.min(spec.mag, spec.ammo === Infinity ? spec.mag : spec.ammo);
+  player.reloadT = 0;
+  pistolVM.visible = type === 'pistol' || type === 'burst';
+  shotgunVM.visible = type === 'shotgun' || type === 'launcher';
+  sniperVM.visible = type === 'sniper' || type === 'rocket';
+  updateAmmoHud();
+}
+
+// A reload is the risk you take: 1-2 seconds where all you can do is dodge.
+// It runs on REAL time, so freezing the world does not refill your gun.
+function startReload() {
+  const spec = WEAPONS[player.weapon];
+  if (player.reloadT > 0 || player.mag >= spec.mag) return;
+  if (player.ammo !== Infinity && player.ammo <= 0) return;
+  player.reloadT = spec.reload;
+  sfx.pickup();
+  updateAmmoHud();
+}
+function updateReload(dt) {
+  if (player.reloadT <= 0) return;
+  player.reloadT -= dt;
+  if (player.reloadT <= 0) {
+    player.reloadT = 0;
+    const spec = WEAPONS[player.weapon];
+    const want = spec.mag - player.mag;
+    const got = spec.ammo === Infinity ? want : Math.min(want, player.ammo);
+    player.mag += got;
+    vibrate(12);
+  }
   updateAmmoHud();
 }
 
@@ -1176,7 +1213,14 @@ const PICKUP_SINK = 1.2;   // final seconds: the gun sinks into the floor
 function spawnPickup(pos, type = 'shotgun') {
   const g = new THREE.Group();
   const spin = new THREE.Group();
-  if (type === 'sniper') {
+  if (type === 'launcher' || type === 'rocket') {
+    const tube = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 1.0), MAT_BLACK);
+    const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.14), MAT_GUNMETAL);
+    mouth.position.z = -0.5;
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.18, 0.1), MAT_BLACK);
+    grip.position.set(0, -0.15, 0.12);
+    spin.add(tube, mouth, grip);
+  } else if (type === 'sniper') {
     const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 1.15), MAT_BLACK);
     const scope = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 0.2), MAT_GUNMETAL);
     scope.position.set(0, 0.08, 0.15);
@@ -1714,9 +1758,9 @@ function buildEnemyMesh(type) {
 const ENEMY_TYPES = {
   gunner: { speed: 2.0, scale: [1, 1, 1], drop: 0, aimTime: 0.55, cd: [0.9, 0.8], mul: 1, pellets: 1 },
   rusher: { speed: 3.4, scale: [0.85, 0.97, 0.85], drop: 0 },
-  heavy: { speed: 1.6, scale: [1.14, 1.05, 1.14], drop: 0, aimTime: 0.55, cd: [1.8, 1.0], mul: 1, pellets: 1, burst: 3 },
-  shotgunner: { speed: 1.8, scale: [1.06, 1, 1.06], drop: 0.8, aimTime: 0.65, cd: [1.6, 0.9], mul: 0.85, pellets: 5, spread: 0.09, engage: [10, 4] },
-  armored: { speed: 1.4, scale: [1.1, 1.06, 1.1], drop: 0, aimTime: 0.6, cd: [1.2, 0.8], mul: 1, pellets: 1, armored: true },
+  heavy: { speed: 1.6, scale: [1.14, 1.05, 1.14], drop: 0.35, aimTime: 0.55, cd: [1.8, 1.0], mul: 1, pellets: 1, burst: 3 },
+  shotgunner: { speed: 1.8, scale: [1.06, 1, 1.06], drop: 0.55, aimTime: 0.65, cd: [1.6, 0.9], mul: 0.85, pellets: 5, spread: 0.09, engage: [10, 4] },
+  armored: { speed: 1.4, scale: [1.1, 1.06, 1.1], drop: 0.3, aimTime: 0.6, cd: [1.2, 0.8], mul: 1, pellets: 1, armored: true },
   sniper: { speed: 1.2, scale: [0.92, 1.05, 0.92], drop: 'sniper', aimTime: 1.35, cd: [2.4, 1.0], mul: 2.3, pellets: 1, engage: [26, 4] },
   bomber: { speed: 1.7, scale: [1.05, 1, 1.05], drop: 0, aimTime: 0.8, cd: [2.4, 1.2], mul: 1, pellets: 1, engage: [11, 5] },
   shieldbearer: { speed: 1.5, scale: [1.08, 1, 1.08], drop: 0, aimTime: 0.7, cd: [1.6, 1.0], mul: 1, pellets: 1, shielded: true },
@@ -2055,7 +2099,7 @@ function killEnemy(i, impulseDir) {
   spawnShatter(e.pos, impulseDir);
   const drop = ENEMY_TYPES[e.type].drop;
   if (typeof drop === 'string') spawnPickup(e.pos, drop);           // named loot
-  else if (Math.random() < drop) spawnPickup(e.pos, 'shotgun');
+  else if (Math.random() < drop) spawnPickup(e.pos, LOOT[Math.floor(Math.random() * LOOT.length)]);
   scene.remove(e.g);
   enemies.splice(i, 1);
   game.kills++;
@@ -2431,7 +2475,9 @@ const _dir = new THREE.Vector3();
 let pendingFireUntil = 0;
 function playerFire() {
   if (!player.alive || game.state !== 'play') return;
+  if (player.reloadT > 0) return;                       // hands are busy
   if (player.fireCd > 0) { pendingFireUntil = performance.now() + 300; return; }
+  if (player.mag <= 0) { startReload(); return; }       // dry: rack a new mag
   const spec = WEAPONS[player.weapon];
   player.fireCd = spec.cd;
   camera.getWorldDirection(_dir);
@@ -2449,16 +2495,77 @@ function playerFire() {
       d.z += (Math.random() - 0.5) * 2 * spec.spread;
       d.normalize();
     }
-    spawnBullet(origin, d, true, spec.speed, spec.pierce || 0);
+    if (spec.blast) spawnPlayerShell(origin, d, spec);
+    else spawnBullet(origin, d, true, spec.speed, spec.pierce || 0);
   }
   gunKick = spec.kick;
   muzzle.material.opacity = 1;
   sfx.shot(player.weapon);
   vibrate(spec.pellets > 1 ? 26 : 12);
-  if (player.ammo !== Infinity) {
-    player.ammo--;
-    if (player.ammo <= 0) setWeapon('pistol');
-    else updateAmmoHud();
+  player.mag--;
+  if (player.ammo !== Infinity) player.ammo--;
+  if (player.ammo !== Infinity && player.ammo <= 0 && player.mag <= 0) {
+    setWeapon('pistol');   // that was the last round of the looted gun
+  } else {
+    updateAmmoHud();
+    if (player.mag <= 0) startReload();   // auto-rack the moment it goes dry
+  }
+}
+
+// Player ordnance: a slow shell that detonates on contact with the world,
+// with a blast radius that clears a whole knot of enemies.
+const shells = [];
+const shellGeo = new THREE.SphereGeometry(0.1, 8, 8);
+function spawnPlayerShell(origin, dir, spec) {
+  const mesh = new THREE.Mesh(shellGeo, MAT_BLACK);
+  mesh.position.copy(origin);
+  scene.add(mesh);
+  shells.push({
+    mesh, pos: origin.clone(), prev: origin.clone(),
+    vel: dir.clone().multiplyScalar(spec.speed), blast: spec.blast, life: 4,
+  });
+}
+function detonateShell(i) {
+  const sh = shells[i];
+  const at = sh.pos.clone();
+  scene.remove(sh.mesh);
+  shells.splice(i, 1);
+  spawnSparks(at, 0xff2d1a);
+  spawnSparks(at, 0x16181d);
+  spawnRipple(new THREE.Vector3(at.x, 0.5, at.z), _v1.set(0, 1, 0), true);
+  sfx.boom();
+  vibrate(34);
+  for (let j = enemies.length - 1; j >= 0; j--) {
+    const e = enemies[j];
+    if (e.state === 'assemble') continue;
+    if (Math.hypot(e.pos.x - at.x, e.pos.z - at.z) < sh.blast) {
+      killEnemy(j, _v1.set(e.pos.x - at.x, 0.5, e.pos.z - at.z).normalize());
+    }
+  }
+  // your own ordnance can absolutely kill you — mind the walls
+  if (player.alive && player.iframes <= 0 &&
+      Math.hypot(player.pos.x - at.x, player.pos.z - at.z) < sh.blast * 0.55) {
+    hitPlayer();
+  }
+}
+function updateShells(sdt) {
+  for (let i = shells.length - 1; i >= 0; i--) {
+    const sh = shells[i];
+    sh.prev.copy(sh.pos);
+    sh.vel.y -= 3.2 * sdt;
+    sh.pos.addScaledVector(sh.vel, sdt);
+    sh.mesh.position.copy(sh.pos);
+    sh.life -= sdt;
+    let hit = sh.pos.y <= 0.1;
+    if (!hit) {
+      for (const e of enemies) {
+        if (e.state === 'assemble') continue;
+        if (Math.hypot(e.pos.x - sh.pos.x, e.pos.z - sh.pos.z) < 0.6 &&
+            sh.pos.y > 0.2 && sh.pos.y < 2.1) { hit = true; break; }
+      }
+    }
+    if (!hit) hit = pointInObstacle(sh.pos.x, sh.pos.z, 0.1);
+    if (hit || sh.life <= 0) detonateShell(i);
   }
 }
 
@@ -2614,7 +2721,12 @@ const STICK_RADIUS = 70;        // px of thumb travel = full deflection
 const MOVE_SPEED = 5.5;         // m/s at full stick (real time)
 const SPRINT_SPEED = 9;         // m/s while auto-sprinting to a pickup
 const MOVE_EASE = 10;           // velocity smoothing rate — the "weight"
-const LOOK_SENS = 2.6;          // radians per screen-width of look drag
+const LOOK_SENS = 4.4;          // radians per screen-width of horizontal drag
+// Vertical is a fraction of horizontal and clamped to a narrow band: the
+// only reason to look up or down is to shift between torso and head, so
+// whipping left/right stays cheap while your aim height stays parked.
+const LOOK_SENS_Y = 1.15;
+const PITCH_LIMIT = 0.42;
 const TAP_MS = 380, TAP_PX = 18;  // thresholds on NET displacement — real
                                   // thumbs jitter, so never sum path length
 const PICKUP_TAP_PX = 120;      // generous screen-px hit radius for tapping a
@@ -2751,8 +2863,8 @@ function onPointerDown(ev) {
       advanceFromOverlay();
       return;
     }
-    if (game.state === 'menu' && ev.target && ev.target.closest && ev.target.closest('#halllink')) {
-      game.mode = 'hall';
+    if (game.state === 'menu' && ev.target && ev.target.closest && ev.target.closest('#citylink')) {
+      game.mode = 'wave';
       advanceFromOverlay();
       return;
     }
@@ -2760,7 +2872,7 @@ function onPointerDown(ev) {
     // after closing settings must not launch you into a wave
     if (game.state === 'menu' &&
         !(ev.target && ev.target.closest && ev.target.closest('.go'))) return;
-    if (game.state === 'menu') game.mode = 'wave';
+    if (game.state === 'menu') game.mode = 'hall';   // TAP TO BEGIN = the tunnel
     advanceFromOverlay();
     return;   // this pointer is never registered, so its release is inert
   }
@@ -2847,8 +2959,8 @@ function onPointerMove(ev) {
 function applyLook(dx, dy) {
   const w = window.innerWidth;
   player.yaw -= (dx / w) * LOOK_SENS;
-  player.pitch -= (dy / w) * LOOK_SENS;
-  player.pitch = Math.min(Math.max(player.pitch, -1.2), 1.2);
+  player.pitch -= (dy / w) * LOOK_SENS_Y;
+  player.pitch = Math.min(Math.max(player.pitch, -PITCH_LIMIT), PITCH_LIMIT);
   input.lookIdle = 0;
 }
 
@@ -3845,7 +3957,7 @@ const el = {
   menurow: document.getElementById('menurow'),
   moderow: document.getElementById('moderow'),
   rushlink: document.getElementById('rushlink'),
-  halllink: document.getElementById('halllink'),
+  citylink: document.getElementById('citylink'),
 };
 renderScores();
 
@@ -3911,7 +4023,7 @@ function showMenu() {
   el.menurow.style.display = 'flex';
   el.moderow.style.display = 'flex';
   el.rushlink.style.display = '';
-  el.halllink.style.display = '';
+  el.citylink.style.display = '';
   setEnvironment('city');
   renderScores();
   updateSndBtn();
@@ -3923,13 +4035,17 @@ function showMenu() {
 }
 
 function updateAmmoHud() {
-  if (player.weapon === 'pistol') {
-    el.ammo.textContent = 'PISTOL · ∞';
-    el.ammo.classList.remove('shotgun');
+  const spec = WEAPONS[player.weapon];
+  const name = player.weapon.toUpperCase();
+  if (player.reloadT > 0) {
+    el.ammo.textContent = `${name} · RELOADING`;
   } else {
-    el.ammo.textContent = `${player.weapon.toUpperCase()} · ` + '▮'.repeat(Math.max(player.ammo, 0));
-    el.ammo.classList.add('shotgun');
+    const pips = '▮'.repeat(Math.max(player.mag, 0)) +
+      '▯'.repeat(Math.max(spec.mag - Math.max(player.mag, 0), 0));
+    el.ammo.textContent = `${name} · ${pips}` +
+      (spec.ammo === Infinity ? '' : ` · ${Math.max(player.ammo, 0)}`);
   }
+  el.ammo.classList.toggle('shotgun', player.weapon !== 'pistol');
 }
 
 let lastWarnAt = -10;
@@ -4058,7 +4174,7 @@ function hitPlayer(ended = false) {
   el.timebtn.style.display = 'none';
   el.slowmeter.style.display = 'none';   // the meter goes with its button
   el.rushlink.style.display = 'none';    // retry retries THIS mode only
-  el.halllink.style.display = 'none';
+  el.citylink.style.display = 'none';
   if (!ended) {   // a chosen exit skips the death drama
     el.redflash.style.opacity = 1;
     sfx.die();
@@ -4072,7 +4188,7 @@ function hitPlayer(ended = false) {
     r.innerHTML = game.mode === 'rush'
       ? `<div class="stats">RUSH HOUR · ${game.kills} SHATTERED · ${Math.round(runPlayT)}S</div>`
       : game.mode === 'hall'
-      ? `<div class="stats">HALLWAY · ${hall ? hall.doorsPassed : 0} ` +
+      ? `<div class="stats">TUNNEL · ${hall ? hall.doorsPassed : 0} ` +
         `${hall && hall.doorsPassed === 1 ? 'DOOR' : 'DOORS'} · ${game.kills} SHATTERED</div>`
       : `<div class="stats">${game.wave} ${game.wave === 1 ? 'WAVE' : 'WAVES'} · ` +
         `${game.kills} SHATTERED · BEST ${bestWave} ${bestWave === 1 ? 'WAVE' : 'WAVES'}</div>`;
@@ -4112,6 +4228,10 @@ function clearField() {
   for (let i = missiles.length - 1; i >= 0; i--) {
     scene.remove(missiles[i].mesh);
     missiles.splice(i, 1);
+  }
+  for (let i = shells.length - 1; i >= 0; i--) {
+    scene.remove(shells[i].mesh);
+    shells.splice(i, 1);
   }
   for (let i = pickups.length - 1; i >= 0; i--) removePickup(i);
 }
@@ -4351,7 +4471,7 @@ function initHall() {
   slowBank = SLOWMO.base;
   updateSlowMeter();
   updateModeUI();
-  showBanner('THE HALLWAY<small>CLEAR THE FLOOR. REACH THE DOOR.</small>', 3000);
+  showBanner('THE TUNNEL<small>CLEAR THE FLOOR. REACH THE DOOR.</small>', 3000);
   sfx.newWave();
 }
 
@@ -4485,6 +4605,7 @@ function frame(now) {
   player.fireCd -= dt;
   player.iframes -= dt;
   input.lookIdle += dt;
+  updateReload(dt);
   if (pendingFireUntil > performance.now() && player.fireCd <= 0 &&
       player.alive && game.state === 'play') {
     pendingFireUntil = 0;
@@ -4690,6 +4811,7 @@ function frame(now) {
     if (game.mode === 'rush') updateCrowd(sdt);
     updateMarks(sdt);
   }
+  updateShells(sdt);
   updateDebris(sdt);
   updateRipples(sdt);
   updateGrenades(sdt);
