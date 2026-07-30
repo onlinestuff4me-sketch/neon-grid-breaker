@@ -184,11 +184,16 @@
   @keyframes kw { 0%{opacity:0; transform:scale(1.6)} 12%{opacity:1; transform:scale(1)} 70%{opacity:1} 100%{opacity:0; transform:scale(.92)} }
 
   /* ---- banners (wave intro / clear) ---- */
-  #banner { position:absolute; left:0; right:0; top:38%; text-align:center; pointer-events:none;
-            font-weight:900; color:#16181d; font-size:min(13vw,64px); letter-spacing:.1em;
+  /* cards sit ABOVE the crosshair, never across it: the sub-line's baseline
+     stops short of screen centre so aiming is never read through text */
+  #banner { position:absolute; left:0; right:0; bottom:56%; text-align:center; pointer-events:none;
+            font-weight:900; color:#16181d; font-size:min(12vw,58px); letter-spacing:.1em;
             opacity:0; transition:opacity .3s; }
   #banner.show { opacity:1; }
-  #banner small { display:block; font-size:min(4vw,18px); letter-spacing:.4em; color:#ff2d1a; margin-top:8px; }
+  #banner small { display:block; font-size:min(3.6vw,16px); letter-spacing:.34em; color:#ff2d1a;
+                  margin-top:8px; line-height:1.5; }
+  /* the warn flash shares the channel, so it shares the safe zone */
+  #warn { top:auto; bottom:60%; }
 
   /* ---- slow-mo tint & damage flash ---- */
   #tint { position:fixed; inset:0; pointer-events:none; opacity:0;

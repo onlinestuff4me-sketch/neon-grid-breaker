@@ -29,23 +29,25 @@ const PLAYER_BULLET_SPEED = 46;
 const ENEMY_BULLET_SPEED = 11;    // base; creeps up slightly with each wave
 const BULLET_GRAVITY = 4;         // gentle drop, visible on long shots
 
-// mag: rounds before a reload; reload: seconds to swap a fresh one in.
-// Looted weapons carry `ammo` total rounds — when those run dry you fall
-// back to the pistol, which never runs out but always has to reload.
+// The ammo economy: `mag` bullets per clip, at most `maxClips` clips held.
+// The pistol is the only weapon with a deep clip (5); everything heavier
+// carries 2 per clip, and picking the same weapon up again buys you another
+// clip. Reload time scales with the weight of the thing you are racking.
+// Run every clip dry and you are down to the knife.
 const WEAPONS = {
-  pistol: { cd: 0.22, pellets: 1, spread: 0, ammo: Infinity, kick: 1, speed: 46, mag: 5, reload: 1.15 },
-  shotgun: { cd: 0.55, pellets: 6, spread: 0.055, ammo: 8, kick: 1.8, speed: 46, mag: 2, reload: 1.5 },
-  sniper: { cd: 0.9, pellets: 1, spread: 0, ammo: 6, kick: 2.4, speed: 95, pierce: 3, mag: 2, reload: 1.7 },
-  burst: { cd: 0.42, pellets: 3, spread: 0.032, ammo: 12, kick: 1.6, speed: 52, mag: 3, reload: 1.2 },
-  launcher: { cd: 0.9, pellets: 1, spread: 0, ammo: 4, kick: 2.6, speed: 26, mag: 1, reload: 1.9, blast: 5.5 },
-  rocket: { cd: 1.2, pellets: 1, spread: 0, ammo: 3, kick: 3, speed: 34, mag: 1, reload: 2.1, blast: 8 },
+  knife: { cd: 0.42, melee: 2.0, mag: Infinity, maxClips: 0, reload: 0, kick: 0.6 },
+  pistol: { cd: 0.22, pellets: 1, spread: 0, kick: 1, speed: 46, mag: 5, maxClips: 3, reload: 1.0 },
+  shotgun: { cd: 0.55, pellets: 6, spread: 0.055, kick: 1.8, speed: 46, mag: 2, maxClips: 3, reload: 1.5 },
+  burst: { cd: 0.5, pellets: 1, spread: 0.012, kick: 1.6, speed: 52, mag: 2, maxClips: 3, reload: 1.4, burst: 3, burstGap: 0.09 },
+  sniper: { cd: 0.9, pellets: 1, spread: 0, kick: 2.4, speed: 95, pierce: 3, mag: 2, maxClips: 3, reload: 1.75 },
+  launcher: { cd: 0.9, pellets: 1, spread: 0, kick: 2.6, speed: 26, mag: 2, maxClips: 3, reload: 2.0, blast: 5.5 },
+  rocket: { cd: 1.2, pellets: 1, spread: 0, kick: 3, speed: 34, mag: 2, maxClips: 3, reload: 2.35, blast: 8 },
 };
-// You loot what they were carrying: the gun on the ground is the gun that
-// was pointed at you.
 const TYPE_DROP = {
   shotgunner: 'shotgun', sniper: 'sniper', heavy: 'burst',
   bomber: 'launcher', rocketeer: 'rocket', armored: 'burst',
 };
+const CLIP = 'clip';   // a pistol magazine on the floor
 
 // Soft aim assist: the camera never swings on its own — after you stop
 // aiming for a while (in slow motion only), it gently settles the crosshair
@@ -721,7 +723,7 @@ const player = {
   iframes: 0,
   fireCd: 0,
   weapon: 'pistol',
-  ammo: Infinity,
+  clips: 3,
   mag: 5,
   reloadT: 0,
   alive: true,
@@ -867,7 +869,24 @@ const rocketVM = new THREE.Group();
   rocketVM.rotation.y = 0.14;
 }
 rocketVM.visible = false;
-gun.add(pistolVM, shotgunVM, sniperVM, burstVM, launcherVM, rocketVM);
+
+// KNIFE: a short blade held low — no barrel, nothing to aim, all reach
+const knifeVM = new THREE.Group();
+{
+  const blade = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.012, 0.3), MAT_GUNMETAL);
+  blade.position.set(0, 0.01, -0.16);
+  const tip = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.01, 0.08), MAT_GUNMETAL);
+  tip.position.set(0, 0.01, -0.34);
+  const guard = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.02, 0.02), MAT_BLACK);
+  guard.position.set(0, 0, -0.02);
+  const handle = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.045, 0.13), MAT_BLACK);
+  handle.position.set(0, -0.01, 0.06);
+  knifeVM.add(blade, tip, guard, handle);
+  knifeVM.rotation.y = 0.1;
+  knifeVM.rotation.z = -0.12;
+}
+knifeVM.visible = false;
+gun.add(pistolVM, shotgunVM, sniperVM, burstVM, launcherVM, rocketVM, knifeVM);
 // camera-attached meshes must never be frustum-culled: a stale bound can
 // blink the equipped gun out of existence
 gun.traverse((o) => { o.frustumCulled = false; });
@@ -885,11 +904,11 @@ camera.add(gun);
 scene.add(camera);
 let gunKick = 0;
 
-function setWeapon(type) {
+function setWeapon(type, clips) {
   const spec = WEAPONS[type];
   player.weapon = type;
-  player.ammo = spec.ammo;
-  player.mag = Math.min(spec.mag, spec.ammo === Infinity ? spec.mag : spec.ammo);
+  player.clips = clips !== undefined ? clips : (type === 'knife' ? 0 : 1);
+  player.mag = spec.mag === Infinity ? Infinity : spec.mag;
   player.reloadT = 0;
   pistolVM.visible = type === 'pistol';
   shotgunVM.visible = type === 'shotgun';
@@ -897,15 +916,49 @@ function setWeapon(type) {
   burstVM.visible = type === 'burst';
   launcherVM.visible = type === 'launcher';
   rocketVM.visible = type === 'rocket';
+  knifeVM.visible = type === 'knife';
   updateAmmoHud();
 }
 
-// A reload is the risk you take: 1-2 seconds where all you can do is dodge.
+// Picking a weapon off the floor: a fresh one if it is new, another clip if
+// you already carry it (capped), and a pistol clip just tops the pistol up.
+function takePickup(type) {
+  if (type === CLIP) {
+    if (player.weapon === 'pistol') {
+      player.clips = Math.min(WEAPONS.pistol.maxClips, player.clips + 1);
+      updateAmmoHud();
+    } else {
+      setWeapon('pistol', 1);   // back to the sidearm with a fresh clip
+    }
+    return;
+  }
+  const spec = WEAPONS[type];
+  if (player.weapon === type) {
+    player.clips = Math.min(spec.maxClips, player.clips + 1);
+    updateAmmoHud();
+  } else {
+    setWeapon(type, 1);
+  }
+}
+
+// Out of everything: the knife. Lethal, silent, and it demands you close
+// the distance — which is the point.
+function dropToKnife() {
+  setWeapon('knife', 0);
+  showBanner('OUT OF AMMO<small>THE KNIFE IS ALL YOU HAVE</small>', 1700);
+  vibrate([40, 40, 40]);
+}
+
+// A reload is the risk you take: seconds where all you can do is dodge.
 // It runs on REAL time, so freezing the world does not refill your gun.
 function startReload() {
   const spec = WEAPONS[player.weapon];
-  if (player.reloadT > 0 || player.mag >= spec.mag) return;
-  if (player.ammo !== Infinity && player.ammo <= 0) return;
+  if (player.reloadT > 0 || spec.mag === Infinity) return;
+  if (player.mag >= spec.mag) return;
+  if (player.clips <= 0) {
+    if (player.mag <= 0) dropToKnife();
+    return;
+  }
   player.reloadT = spec.reload;
   sfx.pickup();
   updateAmmoHud();
@@ -915,16 +968,14 @@ function updateReload(dt) {
     if (el.reloadbar.style.display !== 'none') el.reloadbar.style.display = 'none';
     return;
   }
-  const spec0 = WEAPONS[player.weapon];
+  const spec = WEAPONS[player.weapon];
   el.reloadbar.style.display = 'block';
-  el.reloadfill.style.width = Math.max(0, Math.min(1, player.reloadT / spec0.reload)) * 100 + '%';
+  el.reloadfill.style.width = Math.max(0, Math.min(1, player.reloadT / spec.reload)) * 100 + '%';
   player.reloadT -= dt;
   if (player.reloadT <= 0) {
     player.reloadT = 0;
-    const spec = WEAPONS[player.weapon];
-    const want = spec.mag - player.mag;
-    const got = spec.ammo === Infinity ? want : Math.min(want, player.ammo);
-    player.mag += got;
+    player.clips--;
+    player.mag = spec.mag;
     vibrate(12);
   }
   updateAmmoHud();
@@ -1279,7 +1330,12 @@ const PICKUP_SINK = 1.2;   // final seconds: the gun sinks into the floor
 function spawnPickup(pos, type = 'shotgun') {
   const g = new THREE.Group();
   const spin = new THREE.Group();
-  if (type === 'launcher' || type === 'rocket') {
+  if (type === CLIP) {
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.4, 0.1), MAT_BLACK);
+    const lip = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.06, 0.13), MAT_GUNMETAL);
+    lip.position.y = 0.22;
+    spin.add(body, lip);
+  } else if (type === 'launcher' || type === 'rocket') {
     const tube = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 1.0), MAT_BLACK);
     const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.14), MAT_GUNMETAL);
     mouth.position.z = -0.5;
@@ -1316,7 +1372,7 @@ function spawnPickup(pos, type = 'shotgun') {
   pickups.push({ g, spin, ring, type, t: Math.random() * 6, life: PICKUP_LIFE });
   if (!spawnPickup.hinted) {   // one-time tutorial nudge
     spawnPickup.hinted = true;
-    showBanner('WEAPON DROP<small>TAP IT TO SPRINT &amp; EQUIP</small>', 1600);
+    showBanner('WEAPON DROP<small>WALK OVER IT TO TAKE IT</small>', 1600);
   }
 }
 
@@ -1352,7 +1408,7 @@ function updatePickups(dt, sdt) {
         p.g.position.z -= (dz / d) * pull;
       }
       if (d2 < 1.8 * 1.8) {
-        setWeapon(p.type);
+        takePickup(p.type);
         sfx.pickup();
         vibrate(20);
         removePickup(i);
@@ -2175,8 +2231,10 @@ function killEnemy(i, impulseDir) {
   spawnShatter(e.pos, impulseDir);
   const drop = ENEMY_TYPES[e.type].drop;
   const kind = TYPE_DROP[e.type];
+  const r = Math.random();
   if (typeof drop === 'string') spawnPickup(e.pos, drop);           // named loot
-  else if (kind && Math.random() < drop) spawnPickup(e.pos, kind);   // his own weapon
+  else if (kind && r < drop) spawnPickup(e.pos, kind);               // his own weapon
+  else if (r < 0.34) spawnPickup(e.pos, CLIP);                       // pistol ammo
   scene.remove(e.g);
   enemies.splice(i, 1);
   game.kills++;
@@ -2202,6 +2260,14 @@ function enemyFire(e, toPlayer) {
   }
   if (e.type === 'rocketeer') {   // rocketeers launch a homing missile
     spawnMissile(e);
+    return;
+  }
+  // Rounds leave the muzzle, pointing where the muzzle points. The
+  // shield-bearer slews slowly, so if he has not finished turning the shot
+  // simply does not happen — no more firing sideways out of his ribs.
+  const fx = Math.sin(e.g.rotation.y), fz = Math.cos(e.g.rotation.y);
+  if (fx * toPlayer.x + fz * toPlayer.z < 0.94) {
+    e.fireCd = 0.25;   // still coming round: hold
     return;
   }
   const origin = _v2.set(e.pos.x, 1.35, e.pos.z).addScaledVector(toPlayer, 0.45);
@@ -2243,14 +2309,14 @@ function setEgunFlash(e, mat) {
 // to full heat).
 function diffT() {
   const w = game.mode === 'rush' ? 1 + rushT / 25 : game.wave;
-  return Math.min((w - 1) / 7, 1);
+  return Math.min((w - 1) / 11, 1);   // full heat at 12, not 8
 }
 
 // Enemy rounds open slow enough to sidestep at a walk (wave 1: ~55% speed),
 // reach full pace by wave 8, then keep creeping (+2%/wave, capped at +35%).
 function enemyBulletSpeed() {
   const w = game.mode === 'rush' ? 1 + rushT / 25 : game.wave;
-  const late = Math.max(0, w - 8) * 0.02;
+  const late = Math.max(0, w - 12) * 0.02;
   return ENEMY_BULLET_SPEED * Math.min(0.55 + 0.45 * diffT() + late, 1.35);
 }
 
@@ -2557,8 +2623,9 @@ function playerFire() {
   if (!player.alive || game.state !== 'play') return;
   if (player.reloadT > 0) return;                       // hands are busy
   if (player.fireCd > 0) { pendingFireUntil = performance.now() + 300; return; }
-  if (player.mag <= 0) { startReload(); return; }       // dry: rack a new mag
   const spec = WEAPONS[player.weapon];
+  if (spec.melee) { knifeStrike(spec); return; }
+  if (player.mag <= 0) { startReload(); return; }       // dry: rack a new mag
   player.fireCd = spec.cd;
   camera.getWorldDirection(_dir);
   // fire from the gun muzzle, converging on the crosshair ~30m out, so the
@@ -2582,13 +2649,51 @@ function playerFire() {
   muzzle.material.opacity = 1;
   sfx.shot(player.weapon);
   vibrate(spec.pellets > 1 ? 26 : 12);
+  // the heavy fires a staggered burst, the way its owner does — three
+  // rounds in quick succession, not a shotgun's single cloud
+  if (spec.burst) {
+    for (let k = 1; k < spec.burst; k++) {
+      setTimeout(() => {
+        if (!player.alive || game.state !== 'play') return;
+        const d2 = baseDir.clone();
+        d2.x += (Math.random() - 0.5) * 2 * spec.spread;
+        d2.y += (Math.random() - 0.5) * 2 * spec.spread;
+        d2.z += (Math.random() - 0.5) * 2 * spec.spread;
+        spawnBullet(muzzle.getWorldPosition(new THREE.Vector3()), d2.normalize(), true, spec.speed, 0);
+        gunKick = spec.kick * 0.7;
+        sfx.shot(player.weapon);
+      }, k * spec.burstGap * 1000);
+    }
+  }
   player.mag--;
-  if (player.ammo !== Infinity) player.ammo--;
-  if (player.ammo !== Infinity && player.ammo <= 0 && player.mag <= 0) {
-    setWeapon('pistol');   // that was the last round of the looted gun
-  } else {
-    updateAmmoHud();
-    if (player.mag <= 0) startReload();   // auto-rack the moment it goes dry
+  updateAmmoHud();
+  if (player.mag <= 0) {
+    if (player.clips > 0) startReload();   // auto-rack the moment it goes dry
+    else dropToKnife();                    // nothing left to rack
+  }
+}
+
+// The knife: a short lunge-free slash with real reach. No ammo, no reload,
+// but you have to be close enough to smell them.
+function knifeStrike(spec) {
+  player.fireCd = spec.cd;
+  gunKick = 1.6;
+  camera.getWorldDirection(_dir);
+  sfx.shot('pistol');
+  vibrate(18);
+  let best = -1, bestD = 1e9;
+  for (let i = 0; i < enemies.length; i++) {
+    const e = enemies[i];
+    if (e.state === 'assemble') continue;
+    const dx = e.pos.x - player.pos.x, dz = e.pos.z - player.pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d > spec.melee) continue;
+    if ((dx / d) * _dir.x + (dz / d) * _dir.z < 0.55) continue;   // in front only
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  if (best >= 0) {
+    const e = enemies[best];
+    killEnemy(best, _v1.set(e.pos.x - player.pos.x, 0.4, e.pos.z - player.pos.z).normalize());
   }
 }
 
@@ -2829,20 +2934,6 @@ function stickUI(show, ox, oy, x, y) {
   nub.style.left = `${x}px`; nub.style.top = `${y}px`;
 }
 
-function pickupAtScreen(px, py) {
-  for (const p of pickups) {
-    _v1.set(p.g.position.x, 0.9, p.g.position.z).project(camera);
-    if (_v1.z > 1) continue;   // behind the camera
-    // no sprinting at guns hidden behind cover — you'd just run into the wall
-    if (!hasLineOfSight(
-      _v2.set(player.pos.x, EYE_HEIGHT, player.pos.z),
-      _v3.set(p.g.position.x, 0.9, p.g.position.z))) continue;
-    const sx = (_v1.x * 0.5 + 0.5) * window.innerWidth;
-    const sy = (-_v1.y * 0.5 + 0.5) * window.innerHeight;
-    if (Math.hypot(sx - px, sy - py) < PICKUP_TAP_PX) return p;
-  }
-  return null;
-}
 
 function onPointerDown(ev) {
   // "inside settings" means inside the CARD — the backdrop covers the screen
@@ -3044,49 +3135,13 @@ function applyLook(dx, dy) {
   input.lookIdle = 0;
 }
 
-// A tap on a dropped weapon must never be the thing that kills you: if the
-// run to it crosses live incoming fire, or passes a rusher who is already
-// committed, the tap falls through to firing instead.
-function sprintIsSafe(pk) {
-  const ax = player.pos.x, az = player.pos.z;
-  const bx = pk.g.position.x, bz = pk.g.position.z;
-  const len = Math.hypot(bx - ax, bz - az) || 1e-6;
-  const ux = (bx - ax) / len, uz = (bz - az) / len;
-  const near = (px, pz, pad) => {   // distance from the run line
-    const t = Math.min(Math.max((px - ax) * ux + (pz - az) * uz, 0), len);
-    return Math.hypot(ax + ux * t - px, az + uz * t - pz) < pad;
-  };
-  for (const b of bullets) {
-    if (b.fromPlayer) continue;
-    // where the round will be over the next couple of seconds
-    for (const t of [0.25, 0.5, 0.9, 1.4, 2.0]) {
-      if (near(b.pos.x + b.vel.x * t, b.pos.z + b.vel.z * t, 1.3)) return false;
-    }
-    if (near(b.pos.x, b.pos.z, 1.3)) return false;
-  }
-  for (const e of enemies) {
-    if (e.state === 'assemble') continue;
-    const committed = e.state === 'windup' || e.state === 'lunge' || e.state === 'melee';
-    if (near(e.pos.x, e.pos.z, committed ? 3.4 : 1.9)) return false;
-  }
-  for (const g2 of grenades) if (near(g2.pos.x, g2.pos.z, BLAST_R * 0.9)) return false;
-  for (const m2 of missiles) if (near(m2.pos.x, m2.pos.z, 2.4)) return false;
-  return true;
-}
-
 function releasePointer(ev, isTapEligible) {
   const p = input.pointers.get(ev.pointerId);
   if (!p) return;
   ev.preventDefault();
   if (isTapEligible && !p.role && performance.now() - p.downT < TAP_MS &&
       Math.hypot(p.x - p.sx, p.y - p.sy) <= TAP_PX) {
-    const hit = pickupAtScreen(p.x, p.y);
-    if (hit && sprintIsSafe(hit)) {
-      sprintTo = hit;               // one tap: run there and take the gun
-      vibrate(10);
-    } else {
-      playerFire();   // blocked or nothing there: the tap is a shot
-    }
+    playerFire();   // a tap is always a shot: weapons are collected on foot
   }
   input.pointers.delete(ev.pointerId);
   let stillMoving = false;
@@ -3946,13 +4001,16 @@ function renderScores() {
 // Each wave is a street encounter: a quota big enough to roam through, and
 // exactly one new enemy type debuting per wave so the game keeps introducing
 // itself. The debut headlines its wave and is the first thing you meet.
+// One debut per wave, and the two attrition types that made wave 8 spike
+// (armored needs headshots, shieldbearer needs flanking) are now separated
+// by three waves instead of landing together as the ramp maxes out.
 const TYPE_INTRO = {
-  gunner: 1, rusher: 2, shotgunner: 3, heavy: 4, shieldbearer: 5,
-  sniper: 6, bomber: 7, armored: 8, rocketeer: 9, laser: 10,
+  gunner: 1, rusher: 2, shotgunner: 3, shieldbearer: 4, heavy: 5,
+  sniper: 6, bomber: 7, armored: 9, rocketeer: 11, laser: 12,
 };
 const TYPE_SHARE = {   // veteran shooter fill: floor(total/share), capped
-  shotgunner: [4, 4], heavy: [5, 3], shieldbearer: [6, 2],
-  sniper: [7, 2], bomber: [6, 2], armored: [6, 2], rocketeer: [8, 2],
+  shotgunner: [4, 4], heavy: [5, 3], shieldbearer: [8, 2],
+  sniper: [7, 2], bomber: [6, 2], armored: [9, 2], rocketeer: [8, 2],
 };
 function composeWave(n) {
   const total = Math.min(6 + 2 * n, 30);
@@ -4204,15 +4262,17 @@ function showMenu() {
 function updateAmmoHud() {
   const spec = WEAPONS[player.weapon];
   const name = player.weapon.toUpperCase();
-  if (player.reloadT > 0) {
+  if (player.weapon === 'knife') {
+    el.ammo.textContent = 'KNIFE · NO AMMO';
+  } else if (player.reloadT > 0) {
     el.ammo.textContent = `${name} · RELOADING`;
   } else {
     const pips = '▮'.repeat(Math.max(player.mag, 0)) +
       '▯'.repeat(Math.max(spec.mag - Math.max(player.mag, 0), 0));
     el.ammo.textContent = `${name} · ${pips}` +
-      (spec.ammo === Infinity ? '' : ` · ${Math.max(player.ammo, 0)}`);
+      (player.clips > 0 ? ' · +' + player.clips : '');
   }
-  el.ammo.classList.toggle('shotgun', player.weapon !== 'pistol');
+  el.ammo.classList.remove('shotgun');   // the HUD stays ink; red is the bank
 }
 
 let lastWarnAt = -10;
@@ -4568,7 +4628,7 @@ function genHallLeg(sgx, sgz) {
   // Momentum is one-way: every jog is short and always followed by more
   // forward, so no route ever asks you to walk back the way you came.
   const fwd = 12 + Math.floor(Math.random() * 5);
-  let f = 0;
+  let f = 0, jogs = 0;
   while (f < fwd) {
     const run = 3 + Math.floor(Math.random() * 3);
     for (let i = 0; i < run && f < fwd; i++) { gz++; f++; add(gx, gz); spine.push([gx, gz]); }
@@ -4576,6 +4636,14 @@ function genHallLeg(sgx, sgz) {
     const jog = 2 + Math.floor(Math.random() * 2);
     const jd = Math.random() < 0.5 ? 1 : -1;
     for (let i = 0; i < jog; i++) { gx += jd; add(gx, gz); spine.push([gx, gz]); }
+    jogs++;
+  }
+  // a leg is never a straight shot: if the rolls gave us none, put a turn
+  // in right before the approach so the door is always found around a corner
+  if (jogs === 0) {
+    const jd = Math.random() < 0.5 ? 1 : -1;
+    for (let i = 0; i < 3; i++) { gx += jd; add(gx, gz); spine.push([gx, gz]); }
+    for (let i = 0; i < 2; i++) { gz++; add(gx, gz); spine.push([gx, gz]); }
   }
   // the approach: a clean straight run so the door is visible from it
   const APPROACH = 4;
@@ -4692,7 +4760,7 @@ function initHall() {
   slowBank = SLOWMO.base;
   updateSlowMeter();
   updateModeUI();
-  showBanner('THE TUNNEL<small>CLEAR THE FLOOR. REACH THE DOOR.</small>', 3000);
+  showBanner('THE TUNNEL<small>CLEAR THE FLOOR<br>REACH THE DOOR</small>', 3000);
   setTimeout(showTimeTip, 2600);
   sfx.newWave();
 }
@@ -4757,7 +4825,7 @@ function crossHallDoor() {
   game.spawnTimer = 0.9;
   slowBank = Math.max(slowBank, SLOWMO.base);
   updateSlowMeter();
-  showBanner(`CHECKPOINT<small>DOOR ${hall.doorsPassed} SEALED BEHIND YOU</small>`, 2200);
+  showBanner(`CHECKPOINT<small>DOOR ${hall.doorsPassed}<br>SEALED BEHIND YOU</small>`, 2200);
   showTimeTip();
   sfx.wave();
   vibrate([15, 30, 15]);
@@ -5215,7 +5283,8 @@ window.__ts = {
   audio: () => sfx.debug(), sfx,
   slow: () => ({ bank: +slowBank.toFixed(2), locked: timeLocked, mode: timeMode }),
   hall: () => hall,
-  sprintSafe: sprintIsSafe, banner: showBanner,
+  banner: showBanner,
+  diff: () => ({ speed: enemyBulletSpeed(), aim: aimSpeedFactor(), t: diffT() }),
   fire: playerFire, setWeapon, spawnEnemy, spawnPickup,
   shot: (px, py, pz, dx, dy, dz, fromPlayer) =>
     spawnBullet(new THREE.Vector3(px, py, pz), new THREE.Vector3(dx, dy, dz).normalize(), fromPlayer),
