@@ -851,7 +851,13 @@ function startReload() {
   updateAmmoHud();
 }
 function updateReload(dt) {
-  if (player.reloadT <= 0) return;
+  if (player.reloadT <= 0) {
+    if (el.reloadbar.style.display !== 'none') el.reloadbar.style.display = 'none';
+    return;
+  }
+  const spec0 = WEAPONS[player.weapon];
+  el.reloadbar.style.display = 'block';
+  el.reloadfill.style.width = Math.max(0, Math.min(1, player.reloadT / spec0.reload)) * 100 + '%';
   player.reloadT -= dt;
   if (player.reloadT <= 0) {
     player.reloadT = 0;
@@ -3906,7 +3912,7 @@ function setTimeLocked(v) {
   if (v && !timeLocked) noteTimeUse();
   timeLocked = v;
   el.timebtn.classList.toggle('locked', v);
-  if (v) el.timebtn.classList.remove('hint');   // lesson learned
+  if (v && timeUses >= 6) el.timebtn.classList.remove('hint');   // lesson learned
 }
 
 // --- pause: freezes the whole simulation; settings + end run live inside
@@ -3977,7 +3983,7 @@ function showTimeTip() {
 function hideTimeTip() {
   clearTimeout(showTimeTip._t);
   el.timetip.classList.remove('show');
-  if (timeUses >= 3) el.timebtn.classList.remove('hint');
+  if (timeUses >= 6) el.timebtn.classList.remove('hint');
 }
 
 const el = {
@@ -4016,6 +4022,8 @@ const el = {
   rushlink: document.getElementById('rushlink'),
   citylink: document.getElementById('citylink'),
   timetip: document.getElementById('timetip'),
+  reloadbar: document.getElementById('reloadbar'),
+  reloadfill: document.getElementById('reloadfill'),
 };
 renderScores();
 
@@ -4235,6 +4243,7 @@ function hitPlayer(ended = false) {
   el.timebtn.style.display = 'none';
   el.slowmeter.style.display = 'none';   // the meter goes with its button
   hideTimeTip();
+  el.reloadbar.style.display = 'none';
   el.rushlink.style.display = 'none';    // retry retries THIS mode only
   el.citylink.style.display = 'none';
   if (!ended) {   // a chosen exit skips the death drama
@@ -4519,7 +4528,13 @@ function rebuildHallObstacles() {
 // rocketeers / bombers (they want open air) — their slots become fighters
 function hallWave(n) {
   const sub = { laser: 'rusher', sniper: 'gunner', rocketeer: 'heavy', bomber: 'shotgunner' };
-  return composeWave(n).slice(0, 20).map((t) => sub[t] || t);
+  const q = composeWave(n).map((t) => sub[t] || t);
+  // the first two legs are the game teaching itself — give them enough
+  // bodies to actually feel like a fight before the door
+  const want = n === 1 ? 12 : n === 2 ? 15 : Math.min(12 + n * 2, 24);
+  while (q.length < want) q.push(Math.random() < 0.55 ? 'gunner' : 'rusher');
+  q.length = Math.min(q.length, want);
+  return q;
 }
 
 function initHall() {
@@ -4616,8 +4631,47 @@ function crossHallDoor() {
   vibrate([15, 30, 15]);
 }
 
+// Corridor AI steers straight at the player, so a wall corner or a branch
+// lane can wedge someone permanently — and the door waits on the last kill.
+// Any enemy that stops closing the distance, unseen, gets re-routed to the
+// approach ahead of the player. A wave can therefore always be finished.
+function unstickHallEnemies(dt) {
+  const L = hall.legs[hall.cur], C = HALL.cell;
+  for (const e of enemies) {
+    if (e.state === 'assemble') continue;
+    const d = Math.hypot(e.pos.x - player.pos.x, e.pos.z - player.pos.z);
+    const seen = hasLineOfSight(_v2.set(e.pos.x, 1.35, e.pos.z),
+      _v3.set(player.pos.x, EYE_HEIGHT - 0.3, player.pos.z));
+    if (seen || d < (e.bestD || 1e9) - 0.6) {
+      e.bestD = Math.min(d, e.bestD || 1e9);
+      e.stuckT = 0;
+      continue;
+    }
+    e.stuckT = (e.stuckT || 0) + dt;
+    // the last few of a wave get rescued sooner: they gate the door
+    const limit = game.spawnQueue.length === 0 ? 4 : 8;
+    if (e.stuckT < limit) continue;
+    const pool = (L.approach && L.approach.length ? L.approach : L.cells);
+    let best = null, bestScore = -1e9;
+    for (const [cgx, cgz] of pool) {
+      const px = cgx * C, pz = cgz * C;
+      if (pz < player.pos.z + 5) continue;
+      const score = -Math.abs(Math.hypot(px - player.pos.x, pz - player.pos.z) - 14);
+      if (score > bestScore) { bestScore = score; best = [px, pz]; }
+    }
+    if (!best) continue;
+    e.pos.x = best[0] + (Math.random() - 0.5) * 1.2;
+    e.pos.z = best[1] + (Math.random() - 0.5) * 1.2;
+    e.stuckT = 0;
+    e.bestD = 1e9;
+    e.state = 'advance';
+    e.stateT = 0;
+  }
+}
+
 function updateHall(dt) {
   if (!hall) return;
+  unstickHallEnemies(dt);
   const L = hall.legs[hall.cur];
   if (game.state === 'play' && !L.door.open &&
       game.spawnQueue.length === 0 && enemies.length === 0 &&
@@ -4791,8 +4845,19 @@ function frame(now) {
   gunKick = Math.max(0, gunKick - dt * 8);
   muzzle.material.opacity = Math.max(0, muzzle.material.opacity - dt * 14);
   const sway = Math.sin(now * 0.0011) * 0.004;
-  gun.position.set(0.055 + sway, -0.115 + Math.cos(now * 0.0017) * 0.004 + gunKick * 0.03, -0.5 + gunKick * 0.06);
-  gun.rotation.x = gunKick * 0.22;
+  // reload: the weapon folds forward and down out of frame, then swings
+  // back up as the fresh magazine seats — every weapon uses the same rig
+  const spec = WEAPONS[player.weapon];
+  const rp = player.reloadT > 0 ? 1 - player.reloadT / spec.reload : 1;
+  const fold = player.reloadT > 0
+    ? Math.sin(Math.min(rp, 1) * Math.PI) ** 0.6   // out and back within the reload
+    : 0;
+  gun.position.set(
+    0.055 + sway + fold * 0.06,
+    -0.115 + Math.cos(now * 0.0017) * 0.004 + gunKick * 0.03 - fold * 0.42,
+    -0.5 + gunKick * 0.06 + fold * 0.12
+  );
+  gun.rotation.x = gunKick * 0.22 - fold * 1.15;
 
   // --- world (scaled time)
   if (playing) {

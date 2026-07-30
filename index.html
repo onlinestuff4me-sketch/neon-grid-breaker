@@ -53,6 +53,12 @@
   #ammo { position:absolute; left:0; right:0; bottom:calc(env(safe-area-inset-bottom, 0px) + 18px);
           text-align:center; font-size:13px; font-weight:900; letter-spacing:.26em; color:#16181d; }
   #ammo.shotgun { color:#ff2d1a; }
+  #reloadbar { position:absolute; left:50%; transform:translateX(-50%);
+               bottom:calc(env(safe-area-inset-bottom, 0px) + 8px);
+               width:132px; height:5px; border-radius:3px;
+               background:rgba(22,24,29,.18); display:none; overflow:hidden; }
+  #reloadfill { height:100%; width:100%; background:#ff2d1a; border-radius:3px; }
+  body.slowmo #reloadbar { background:rgba(238,240,243,.28); }
 
   /* pause control in the bottom bar's right corner (settings + end run live inside) */
   #pausebtn { display:none; position:fixed; right:10px;
@@ -77,9 +83,9 @@
 
   /* button-mode time control: 96px hit zone, 64px visual — misses forgive.
      Tap toggles bullet time; press-and-hold slows only while held. */
-  #timebtn { display:none; position:fixed; right:0px;
-             bottom:calc(env(safe-area-inset-bottom, 0px) + 11vh); z-index:8;
-             width:128px; height:128px; border-radius:50%;
+  #timebtn { display:none; position:fixed; right:-2px;
+             bottom:calc(env(safe-area-inset-bottom, 0px) + 5.2vh); z-index:8;
+             width:146px; height:146px; border-radius:50%;
              align-items:center; justify-content:center;
              pointer-events:auto; }
   #timebtn::after { content:''; position:absolute; inset:18px; border-radius:50%;
@@ -89,7 +95,11 @@
              background:#16181d;
              clip-path:polygon(0 0, 100% 0, 50% 46%, 100% 100%, 0 100%, 50% 54%);
              transition:background .15s ease; }
-  #timebtn.locked::after { background:#ff2d1a; border-color:#ff2d1a; }
+  @keyframes tglow { 0%,100% { box-shadow:0 0 0 0 rgba(255,45,26,.34); }
+                     60% { box-shadow:0 0 0 18px rgba(255,45,26,0); } }
+  #timebtn::after { animation:tglow 2.6s ease-out infinite; }
+  #timebtn.hint::after { animation:tglow 1.15s ease-out infinite; }
+  #timebtn.locked::after { background:#ff2d1a; border-color:#ff2d1a; animation:none; }
   #timebtn.locked::before { background:#fff; }
   #timebtn.empty::after { border-color:#9aa0ab; opacity:.55; }
 
@@ -107,7 +117,14 @@
              pointer-events:none; opacity:0; transition:opacity .35s ease; }
   #timetip.show { opacity:1; }
   #timetip .tt1 { font-size:15px; font-weight:900; letter-spacing:.26em; color:#ff2d1a;
-                  text-shadow:0 0 12px rgba(232,234,238,.95); }
+                  text-shadow:0 0 12px rgba(232,234,238,.95);
+                  display:flex; align-items:center; justify-content:center; gap:9px; }
+  /* a miniature of the real button, inline in the sentence */
+  .ttbtn { display:inline-flex; align-items:center; justify-content:center;
+           width:30px; height:30px; border-radius:50%; border:2.5px solid #16181d;
+           background:rgba(238,240,243,.9); flex:0 0 auto; }
+  .ttbtn i { width:11px; height:11px; background:#16181d; display:block;
+             clip-path:polygon(0 0, 100% 0, 50% 46%, 100% 100%, 0 100%, 50% 54%); }
   #timetip .tt2 { margin-top:6px; font-size:11px; font-weight:800; letter-spacing:.2em;
                   color:#16181d; text-shadow:0 0 10px rgba(232,234,238,.95); }
 
@@ -115,8 +132,15 @@
   #slowmeter { display:none; position:fixed; left:16px; right:16px;
                top:calc(env(safe-area-inset-top, 0px) + 38px); height:4px;
                background:rgba(22,24,29,.16); border-radius:2px; z-index:7;
-               pointer-events:none; }
-  #slowfill { height:100%; width:50%; background:#ff2d1a; border-radius:2px; }
+               pointer-events:none;
+               transition:height .18s ease, top .18s ease, box-shadow .18s ease; }
+  #slowfill { height:100%; width:50%; background:#ff2d1a; border-radius:3px;
+              transition:background .18s ease; }
+  /* in bullet time the bank meter triples in height and glows: the thing
+     draining is the thing you are spending */
+  body.slowmo #slowmeter { height:13px; top:calc(env(safe-area-inset-top, 0px) + 34px);
+               box-shadow:0 0 18px rgba(255,45,26,.5); }
+  body.slowmo #slowfill { background:#ff4a35; }
   body.slowmo #slowmeter { background:rgba(238,240,243,.25); }
   #timebtn.empty::before { background:#9aa0ab; }
   @keyframes tpulse { 0%,100% { box-shadow:0 0 0 0 rgba(255,45,26,.55); }
@@ -261,6 +285,7 @@
   <div id="warn"></div>
   <div id="banner"></div>
   <div id="ammo">PISTOL · ∞</div>
+  <div id="reloadbar"><div id="reloadfill"></div></div>
   <div id="pausebtn">❚❚</div>
   <div id="timebtn"></div>
   <div id="slowmeter"><div id="slowfill"></div></div>
@@ -278,10 +303,10 @@
   <div class="gt gtL">MOVE</div>
   <div class="gt gtR">LOOK</div>
   <div class="gfire">TAP ANYWHERE TO SHOOT</div>
-  <div id="gtime">TAP THE CLOCK<br>TO STOP TIME &#9654;</div>
+  <div id="gtime">TAP THIS<br>TO STOP TIME &#9654;</div>
 </div>
 <div id="timetip">
-  <div class="tt1">TAP THE CLOCK TO STOP TIME</div>
+  <div class="tt1"><span>TAP</span><span class="ttbtn"><i></i></span><span>TO STOP TIME</span></div>
   <div class="tt2">BULLETS FREEZE WHILE YOU MOVE</div>
 </div>
 
