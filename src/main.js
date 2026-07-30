@@ -4588,6 +4588,8 @@ function makeHallFloorTexture() {
 const HALL_WALL_MAT = new THREE.MeshLambertMaterial({ map: makeHallWallTexture() });
 // unlit: Lambert undersides get no directional light and go near-black
 const HALL_CEIL_MAT = new THREE.MeshBasicMaterial({ color: 0xd7dade });
+// unlit and bright: the strips read as the light source, not a lit surface
+const HALL_LIGHT_MAT = new THREE.MeshBasicMaterial({ color: 0xffffff });
 const HALL_FLOOR_MAT = new THREE.MeshLambertMaterial({ map: makeHallFloorTexture() });
 const DOOR_RED_MAT = new THREE.MeshBasicMaterial({ color: 0xff2d1a });
 const DOOR_SEAL_MAT = new THREE.MeshLambertMaterial({ color: 0x24262c });
@@ -4614,6 +4616,7 @@ function setEnvironment(env) {
 // rejoin the spine further along — branches, but every route reaches the door
 function genHallLeg(sgx, sgz) {
   const cells = [];
+  const pillars = [];
   const add = (gx, gz) => {
     const k = gx + ',' + gz;
     if (!hall.grid.has(k)) { hall.grid.add(k); cells.push([gx, gz]); }
@@ -4641,6 +4644,24 @@ function genHallLeg(sgx, sgz) {
     for (let i = 0; i < 3; i++) { gx += jd; add(gx, gz); spine.push([gx, gz]); }
     for (let i = 0; i < 2; i++) { gz++; add(gx, gz); spine.push([gx, gz]); }
   }
+  // A CHAMBER mid-leg: widen a stretch of spine into a room. Walls are
+  // derived from missing neighbours, so simply owning more cells opens the
+  // space up — and the corridor gets a rhythm of tight / open / tight.
+  const roomCells = [];
+  if (spine.length > 10) {
+    const i = 3 + Math.floor(Math.random() * Math.max(1, spine.length - 9));
+    const [rx, rz] = spine[i];
+    for (let dx = -2; dx <= 2; dx++) {
+      for (let dz = 0; dz <= 3; dz++) {
+        const k = (rx + dx) + ',' + (rz + dz);
+        if (!hall.grid.has(k)) { hall.grid.add(k); cells.push([rx + dx, rz + dz]); }
+        roomCells.push([rx + dx, rz + dz]);
+      }
+    }
+    // two pillars: cover to fight around, and something to break the volume
+    for (const px of [-1, 1]) pillars.push([(rx + px) * HALL.cell, (rz + 1) * HALL.cell]);
+  }
+
   // the approach: a clean straight run so the door is visible from it
   const APPROACH = 4;
   for (let i = 0; i < APPROACH; i++) { gz++; add(gx, gz); spine.push([gx, gz]); }
@@ -4660,13 +4681,13 @@ function genHallLeg(sgx, sgz) {
   // the last APPROACH cells, nearest the door first — where the final
   // enemies are staged so you watch the door open as they shatter
   const approach = spine.slice(spine.length - APPROACH);
-  return { cells, spine, approach, endGx: gx, endGz: gz };
+  return { cells, spine, approach, pillars, endGx: gx, endGz: gz };
 }
 
 function buildHallLeg(sgx, sgz) {
-  const { cells, approach, endGx, endGz } = genHallLeg(sgx, sgz);
+  const { cells, approach, pillars, endGx, endGz } = genHallLeg(sgx, sgz);
   const C = HALL.cell, H = HALL.h, W = HALL.wall;
-  const walls = [], floors = [], ceils = [];
+  const walls = [], floors = [], ceils = [], lights = [], ribs = [];
   const obs = [];
   const wallBox = (px, pz, w, d) => {
     walls.push([px, H / 2, pz, w, H, d]);
@@ -4679,11 +4700,22 @@ function buildHallLeg(sgx, sgz) {
     const x = gx * C, z = gz * C;
     floors.push([x, -0.06, z, C, 0.12, C]);
     ceils.push([x, H + 0.1, z, C + 0.2, 0.2, C + 0.2]);
+    // recessed ceiling strip every other cell: the corridor finally has a
+    // rhythm to measure your own movement against
+    if ((gx + gz) % 2 === 0) lights.push([x, H - 0.04, z, 1.5, 0.08, 2.6]);
     for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
       if (hall.grid.has((gx + dx) + ',' + (gz + dz))) continue;
       if (gx === endGx && gz === endGz && dz === 1) continue;   // the doorway
       if (dx !== 0) wallBox(x + dx * (C / 2 - W / 2), z, W, C);
       else wallBox(x, z + dz * (C / 2 - W / 2), C, W);
+      // a pilaster rib now and then: it sits just proud of the wall face
+      // (never intersecting it, so nothing can z-fight) and gives blank
+      // runs something for the eye to clock as you move past
+      if (rnd01(gx * 12.7 + gz * 5.3 + dx * 3.1 + dz * 7.9) > 0.72) {
+        const inset = C / 2 - W - 0.07;
+        if (dx !== 0) ribs.push([x + dx * inset, H / 2 - 0.1, z, 0.13, H - 0.2, 0.62]);
+        else ribs.push([x, H / 2 - 0.1, z + dz * inset, 0.62, H - 0.2, 0.13]);
+      }
     }
   }
   // door frame: jambs + lintel around a 2m opening at the leg's far edge
@@ -4693,10 +4725,20 @@ function buildHallLeg(sgx, sgz) {
   // the lintel is VISUAL only: ground collision is 2D, so a solid lintel
   // would read as an invisible wall filling the open doorway
   walls.push([dx0, 2.8, dz0, 2, 0.6, W]);
+  // pillars: solid cover standing in the chamber
+  for (const [px, pz] of pillars) {
+    walls.push([px, H / 2, pz, 0.9, H, 0.9]);
+    obs.push({
+      min: new THREE.Vector3(px - 0.45, 0, pz - 0.45),
+      max: new THREE.Vector3(px + 0.45, H, pz + 0.45),
+    });
+  }
   const meshes = [
     mergedCityMesh(walls, HALL_WALL_MAT),
     mergedCityMesh(floors, HALL_FLOOR_MAT),
     mergedCityMesh(ceils, HALL_CEIL_MAT),
+    mergedCityMesh(lights, HALL_LIGHT_MAT),
+    mergedCityMesh(ribs, HALL_CEIL_MAT),   // ribs read a shade darker
   ];
   const slab = new THREE.Mesh(new THREE.BoxGeometry(2, 2.72, 0.18), DOOR_RED_MAT);
   slab.position.set(dx0, 1.36, dz0);
@@ -4708,7 +4750,7 @@ function buildHallLeg(sgx, sgz) {
       max: new THREE.Vector3(dx0 + 1, H, dz0 + 0.2),
     },
   };
-  return { cells, approach, meshes, obs, door, endGx, endGz, retired: false, nextBuilt: false };
+  return { cells, approach, pillars, meshes, obs, door, endGx, endGz, retired: false, nextBuilt: false };
 }
 
 function rebuildHallObstacles() {
