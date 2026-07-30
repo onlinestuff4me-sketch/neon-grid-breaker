@@ -16,8 +16,8 @@ The fiction earns it. The city runs on schedule; the building is part of the
 system; when you refuse to comply it *reconfigures itself* to contain you. A
 long open gallery is a protocol. Killing the lights is a protocol. Sending a
 grinder down the corridor behind you is a protocol. They are all the same
-kind of thing — a measure the building takes — which is why they belong in
-one registry, one deck, and one archive.
+kind of thing — something the building does to contain you — which is why
+they belong in one registry, one deck, and one archive.
 
 It also gives every entry a voice: the archive lists them by the building's
 own designation.
@@ -25,14 +25,26 @@ own designation.
 > **P-07 · BLACKOUT** — *Emergency lighting only. Illumination reduced to
 > eight metres. Compliance is not required to see.*
 
-Two flavours, one type:
+**Three flavours, one type.** An earlier draft had two — "form" and
+"measure, a rule laid over it" — which broke the moment the grinder went in:
+a machine advancing down the corridor is not a *rule*, it is a thing with a
+timeline. One bucket was hiding three kinds of content. The split that
+actually holds answers three different questions:
 
-| Flavour | What it is | Examples |
-|---|---|---|
-| **Form** | the shape of the leg | gauntlet, atrium, service run, gallery, stairwell |
-| **Measure** | a rule or event laid over it | blackout, breach walls, one-way door, grinder, flood |
+| Flavour | Question | True for | Examples |
+|---|---|---|---|
+| **Form** | what the leg *is* | the whole leg, structural | corridor, gauntlet, atrium, gallery, stairwell |
+| **Condition** | how the leg *is* | the whole leg, no timing | blackout, flood, fog, dead air (no audio tells) |
+| **Measure** | what the building *does* | a moment or a timeline | grinder, breach walls, one-way seal, turret drop |
 
-Every leg is **one form + zero or more measures**.
+The distinction is operational, not poetic: **a condition needs no
+scheduling — it is simply true from the moment you enter. A measure needs a
+trigger and a clock.** That is exactly the line the composer needs to draw,
+which is how you know it is the right one.
+
+Slots per leg: **one form, at most one condition, one or two measures.**
+Categories do most of the conflict-prevention for free — you can't roll
+blackout *and* flood, because there is only one condition slot.
 
 *(Alternatives considered: MEASURES — good fiction, weaker as a noun for a
 room shape. MODULES — accurate, lifeless. DIRECTIVES — implies orders to
@@ -49,7 +61,7 @@ One flat list. Adding content = adding a row. Nothing else changes.
 {
   id: 'grinder',
   name: 'GRINDER',
-  flavour: 'measure',        // 'form' | 'measure'
+  flavour: 'measure',        // 'form' | 'condition' | 'measure'
   tier: 3,                   // 1 cheap ... 4 punishing — drives cost & order
   minDoor: 4,                // never before this door, even for a veteran
   unlockAt: 60,              // lifetime doors cleared before it is eligible
@@ -64,12 +76,12 @@ protocol can appear in a run, and orders the whole archive.
 
 ### Starting deck
 
-| Tier | Forms | Measures |
-|---|---|---|
-| 1 | corridor (the default), service run | side alcoves, dim strips |
-| 2 | atrium, gauntlet | breach walls, one-way door |
-| 3 | gallery, stairwell | blackout, grinder |
-| 4 | the spiral, the shaft | flood, lights-and-grinder pairing |
+| Tier | Forms | Conditions | Measures |
+|---|---|---|---|
+| 1 | corridor (default), service run | dim strips | side alcoves |
+| 2 | atrium, gauntlet | fog | one-way seal, breach walls |
+| 3 | gallery, stairwell | blackout | grinder, turret drop |
+| 4 | the spiral, the shaft | flood, dead air | grinder + blackout pairing |
 
 Ten to twelve entries is enough to start; the system does not care how
 many there eventually are.
@@ -86,16 +98,19 @@ budget(door) = min(1 + floor(door / 3), 5)
 
 - Door 1–2 → 1 · Door 3–5 → 2 · Door 6–8 → 3 · Door 9–11 → 4 · Door 12+ → 5
 
-Spend it: **one form first** (cost = its tier), then measures until the
-budget is gone. A tier-3 form on door 6 leaves nothing for measures; a
-tier-1 form leaves room for two. That single rule produces the whole
-texture — some legs are strange rooms, some are plain corridors with a
-nasty rule, deep legs are both.
+Spend it in slot order: **form** (cost = its tier), then **condition** if
+anything is left, then **measures** while budget remains. A tier-3 form on
+door 6 leaves nothing else; a tier-1 form leaves room for a condition and a
+measure. That single rule produces the whole texture — some legs are strange
+rooms, some are plain corridors under a nasty condition, some are ordinary
+rooms the building actively attacks, deep legs are all three.
 
 Constraints while picking:
 - `tier <= budget` and `door >= minDoor` and `lifetimeDoors >= unlockAt`
-- no `conflicts` collision inside a leg
-- no form repeated within 3 legs; no measure repeated within 4
+- one form, ≤1 condition, ≤2 measures — the slots are the first guard
+- `conflicts` handles the rest (grinder vs one-way seal: both own the leg's
+  back wall, so they can never share a leg)
+- no form repeated within 3 legs; no condition or measure within 4
 - weighted random among what survives — **this is the run-to-run variety**
 
 ---
@@ -154,7 +169,8 @@ trick: the archive buys you strangeness, never strength.
 
 ## 6. The grinder (your idea, specified)
 
-**P-?? · GRINDER**, tier 3, measure. A slab of the building's machinery
+**P-?? · GRINDER**, tier 3, *measure* — it has a clock, so it is not a
+condition. A slab of the building's machinery
 seals the leg behind you and advances at a steady walk — slower than you,
 faster than fighting carefully allows. It kills on contact, grinds shards
 of anything it catches, and it does **not** stop while time is frozen
