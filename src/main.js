@@ -823,7 +823,7 @@ muzzle.position.set(0, 0.02, -0.3);
 gun.add(muzzle);
 gun.scale.setScalar(0.45);
 gun.rotation.y = -0.06;
-gun.position.set(0.14, -0.19, -0.5);   // low & slightly right — thumb-friendly in portrait
+gun.position.set(0.055, -0.115, -0.5);   // centred and lifted: clear of the time button
 camera.add(gun);
 scene.add(camera);
 let gunKick = 0;
@@ -1785,27 +1785,32 @@ function spawnEnemy(type = 'gunner') {
   // so the fight stays in front of you instead of whipping side to side
   let x = 0, z = 0, placed = false;
   if (game.mode === 'hall' && hall) {
-    // corridor spawns: a cell of the current leg, mostly ahead of the
-    // player, ideally around a corner they can't see
     const L = hall.legs[hall.cur], C = HALL.cell;
+    // The wave's last few stage on the door approach: you fight them with
+    // the door in frame, so the opening lands as visible payoff and you are
+    // never left hunting for where to go next.
+    const finale = game.spawnQueue.length < HALL_FINALE && L.approach && L.approach.length;
+    const pool = finale ? L.approach : L.cells;
     let fbX = 0, fbZ = 0, fbOk = false;
-    for (let tries = 0; tries < 34 && !placed; tries++) {
-      const [cgx, cgz] = L.cells[Math.floor(Math.random() * L.cells.length)];
+    for (let tries = 0; tries < 40 && !placed; tries++) {
+      const [cgx, cgz] = pool[Math.floor(Math.random() * pool.length)];
       const px = cgx * C + (Math.random() - 0.5) * 1.6;
       const pz = cgz * C + (Math.random() - 0.5) * 1.6;
       const d = Math.hypot(px - player.pos.x, pz - player.pos.z);
-      if (d < 12 || d > 34) continue;   // never right on top of a corner you're at
-      if (pz < player.pos.z + 2 && Math.random() < 0.8) continue;   // mostly ahead
+      // NEVER behind you: the tunnel's whole promise is forward momentum
+      if (pz < player.pos.z + 4) continue;
+      if (d < (finale ? 8 : 12) || d > 40) continue;
+      if (finale) { x = px; z = pz; placed = true; break; }
       if (!hasLineOfSight(_v2.set(px, 1.4, pz), _v3.set(player.pos.x, EYE_HEIGHT, player.pos.z))) {
-        x = px; z = pz; placed = true;
+        x = px; z = pz; placed = true;   // prefer stepping out from cover
         break;
       }
       if (!fbOk) { fbOk = true; fbX = px; fbZ = pz; }
     }
     if (!placed && fbOk) { x = fbX; z = fbZ; placed = true; }
-    if (!placed) {   // last resort: right at the far door
-      const [cgx, cgz] = L.cells[L.cells.length - 1];
-      x = cgx * C; z = cgz * C;
+    if (!placed) {   // last resort: on the approach, ahead of the player
+      const [cgx, cgz] = (L.approach && L.approach[0]) || L.cells[L.cells.length - 1];
+      x = cgx * C; z = Math.max(cgz * C, player.pos.z + 8);
     }
   } else {
     // valid ground = ON a street (never a block-interior pocket the player
@@ -3073,6 +3078,7 @@ const sfx = (() => {
   let echoIn = null, echoWet = null, echoSendBus = null, voiceBus = null;
   let musicSrc = null, musicGain = null, musicFilter = null;
   let musicRate = 1, lastTs = 1, building = false;
+  let faded = false;   // pause/death silence
   let muted = false;
   try { muted = localStorage.getItem('timeshard_muted') === '1'; } catch { /* private mode */ }
   let musicVol = 1, sfxVol = 1;
@@ -3722,6 +3728,31 @@ const sfx = (() => {
       noise(0.3, 900, 0.6, 0.4, r, 0.4);
       tone(110, 26, 0.55, 0.5, 'sine', r, 0.5);
     },
+    // Airlock: pneumatic hiss, heavy clunk, and the slab running down its
+    // track — the sound of somewhere sealed being opened for you.
+    airlock() {
+      if (!ctx || muted) return;
+      noise(0.55, 2600, 0.55, 0.16, 1, 0.25);           // pressure release
+      tone(70, 44, 0.5, 0.55, 'sine', 1, 0.35);         // the clunk
+      setTimeout(() => {
+        if (!ctx || muted) return;
+        noise(0.85, 420, 0.5, 0.2, 1, 0.3);             // slab on its track
+        tone(150, 96, 0.75, 0.16, 'sawtooth', 1, 0.3);
+      }, 130);
+    },
+    // Everything ducks to silence for pause/death and swells back on resume.
+    // Ramping the master (not stopping voices) is what kills the buzzing
+    // loop a sample used to make when the world froze mid-playback.
+    fadeAll(to, seconds) {
+      if (!ctx || !master) return;
+      const now = ctx.currentTime;
+      const target = Math.max(0.0001, to);
+      master.gain.cancelScheduledValues(now);
+      master.gain.setValueAtTime(Math.max(master.gain.value, 0.0001), now);
+      master.gain.exponentialRampToValueAtTime(target, now + Math.max(0.02, seconds));
+      faded = to <= 0.001;
+    },
+    isFaded() { return faded; },
   };
 })();
 
@@ -3872,6 +3903,7 @@ let slowBank = SLOWMO.base;
 
 function setTimeLocked(v) {
   if (v && timeMode === 'toggle' && slowBank <= 0) return;   // dry tank
+  if (v && !timeLocked) noteTimeUse();
   timeLocked = v;
   el.timebtn.classList.toggle('locked', v);
   if (v) el.timebtn.classList.remove('hint');   // lesson learned
@@ -3882,6 +3914,7 @@ function openPause() {
   if (game.state !== 'play' && game.state !== 'intro' && game.state !== 'clear') return;
   game.pausedFrom = game.state;
   game.state = 'paused';
+  sfx.fadeAll(0, 0.16);   // silence: a frozen world must not drone
   el.pausemenu.style.display = 'flex';
   input.pointers.clear();
   input.stickX = input.stickY = 0;
@@ -3892,6 +3925,7 @@ function closePause() {
   if (game.state !== 'paused') return;
   game.state = game.pausedFrom || 'play';
   el.pausemenu.style.display = 'none';
+  sfx.fadeAll(1, 0.22);   // and back up as the world resumes
 }
 function openSettings() {
   const v = sfx.vols();
@@ -3922,6 +3956,29 @@ function updateSlowMeter() {
   el.timebtn.classList.toggle('empty', slowBank <= 0);
 }
 let demoT = 0, demoSpawnT = 0.3, demoKillT = 4;   // menu attract-mode clocks
+
+// New players were missing the time button entirely. It now re-teaches
+// itself at the start of every wave until it has been used several times.
+let timeUses = 0;
+try { timeUses = parseInt(localStorage.getItem('timeshard_timeuses') || '0', 10) || 0; } catch { /* private */ }
+function noteTimeUse() {
+  if (timeUses >= 99) return;
+  timeUses++;
+  try { localStorage.setItem('timeshard_timeuses', String(timeUses)); } catch { /* private */ }
+  hideTimeTip();
+}
+function showTimeTip() {
+  if (timeMode !== 'toggle' || timeUses >= 6) return;
+  el.timetip.classList.add('show');
+  el.timebtn.classList.add('hint');
+  clearTimeout(showTimeTip._t);
+  showTimeTip._t = setTimeout(hideTimeTip, 3600);
+}
+function hideTimeTip() {
+  clearTimeout(showTimeTip._t);
+  el.timetip.classList.remove('show');
+  if (timeUses >= 3) el.timebtn.classList.remove('hint');
+}
 
 const el = {
   overlay: document.getElementById('overlay'),
@@ -3958,6 +4015,7 @@ const el = {
   moderow: document.getElementById('moderow'),
   rushlink: document.getElementById('rushlink'),
   citylink: document.getElementById('citylink'),
+  timetip: document.getElementById('timetip'),
 };
 renderScores();
 
@@ -3995,6 +4053,7 @@ const MENU_HTML = {
 };
 
 function showMenu() {
+  sfx.fadeAll(1, 0.35);
   clearField();
   el.pausebtn.style.display = 'none';
   setTimeLocked(false);
@@ -4137,6 +4196,7 @@ function startWave(n, quiet = false) {   // quiet: the clear card already announ
   }
   if (!quiet) {
     showBanner(`WAVE ${n}<small>THEY ARE COMING</small>`, 1500);
+    showTimeTip();
     if (n > 1) sfx.wave();   // wave 1 is the onboarding — it starts silent
   }
   sfx.newWave();
@@ -4165,6 +4225,7 @@ function hitPlayer(ended = false) {
   game.state = 'dead';
   game.stateT = 0;
   deathAt = performance.now();
+  sfx.fadeAll(0, ended ? 0.3 : 1.1);   // the run's audio dies with you
   recordRun();
   el.guide.style.opacity = 0;
   el.guide.style.display = 'none';
@@ -4173,6 +4234,7 @@ function hitPlayer(ended = false) {
   setTimeLocked(false);
   el.timebtn.style.display = 'none';
   el.slowmeter.style.display = 'none';   // the meter goes with its button
+  hideTimeTip();
   el.rushlink.style.display = 'none';    // retry retries THIS mode only
   el.citylink.style.display = 'none';
   if (!ended) {   // a chosen exit skips the death drama
@@ -4252,6 +4314,7 @@ function showGuide() {
 }
 
 function advanceFromOverlay() {
+  sfx.fadeAll(1, 0.25);
   el.overlay.classList.add('hidden');
   el.redflash.style.opacity = 0;
   if (game.state === 'menu') {
@@ -4295,6 +4358,7 @@ function advanceFromOverlay() {
 // route leads to the next door.
 // ---------------------------------------------------------------------------
 const HALL = { cell: 4, h: 3.1, wall: 0.3 };
+const HALL_FINALE = 3;   // last N of a leg stage on the door approach
 function makeHallWallTexture() {
   const c = document.createElement('canvas');
   c.width = c.height = 256;
@@ -4360,32 +4424,42 @@ function genHallLeg(sgx, sgz) {
   let gx = sgx, gz = sgz;
   add(gx, gz);
   const spine = [[gx, gz]];
-  const fwd = 11 + Math.floor(Math.random() * 5);
+  // Momentum is one-way: every jog is short and always followed by more
+  // forward, so no route ever asks you to walk back the way you came.
+  const fwd = 12 + Math.floor(Math.random() * 5);
   let f = 0;
   while (f < fwd) {
-    const run = 3 + Math.floor(Math.random() * 4);
+    const run = 3 + Math.floor(Math.random() * 3);
     for (let i = 0; i < run && f < fwd; i++) { gz++; f++; add(gx, gz); spine.push([gx, gz]); }
-    if (f >= fwd) break;
-    const jog = 2 + Math.floor(Math.random() * 3);
+    if (f >= fwd - 4) break;   // leave the tail straight for the door sightline
+    const jog = 2 + Math.floor(Math.random() * 2);
     const jd = Math.random() < 0.5 ? 1 : -1;
     for (let i = 0; i < jog; i++) { gx += jd; add(gx, gz); spine.push([gx, gz]); }
   }
+  // the approach: a clean straight run so the door is visible from it
+  const APPROACH = 4;
+  for (let i = 0; i < APPROACH; i++) { gz++; add(gx, gz); spine.push([gx, gz]); }
+  // Branches: alternate routes that only ever move FORWARD and rejoin the
+  // spine further along — a choice of lane, never a detour backwards.
   for (let b = 0; b < 2; b++) {
-    const i = 1 + Math.floor(Math.random() * Math.max(1, spine.length - 8));
-    const j = Math.min(spine.length - 1, i + 4 + Math.floor(Math.random() * 4));
+    const i = 1 + Math.floor(Math.random() * Math.max(1, spine.length - 9));
+    const j = Math.min(spine.length - 1 - APPROACH, i + 4 + Math.floor(Math.random() * 4));
     const [ax, az] = spine[i], [bx, bz] = spine[j];
-    if (bz <= az) continue;
+    if (bz <= az + 1) continue;
     const side = Math.random() < 0.5 ? 2 : -2;
     const ss = Math.sign(side), ox = ax + side;
     for (let x = ax + ss; x !== ox + ss; x += ss) add(x, az);
     for (let z = az; z <= bz; z++) add(ox, z);
     if (bx !== ox) for (let x = ox; x !== bx; x += Math.sign(bx - ox)) add(x, bz);
   }
-  return { cells, endGx: gx, endGz: gz };
+  // the last APPROACH cells, nearest the door first — where the final
+  // enemies are staged so you watch the door open as they shatter
+  const approach = spine.slice(spine.length - APPROACH);
+  return { cells, spine, approach, endGx: gx, endGz: gz };
 }
 
 function buildHallLeg(sgx, sgz) {
-  const { cells, endGx, endGz } = genHallLeg(sgx, sgz);
+  const { cells, approach, endGx, endGz } = genHallLeg(sgx, sgz);
   const C = HALL.cell, H = HALL.h, W = HALL.wall;
   const walls = [], floors = [], ceils = [];
   const obs = [];
@@ -4429,7 +4503,7 @@ function buildHallLeg(sgx, sgz) {
       max: new THREE.Vector3(dx0 + 1, H, dz0 + 0.2),
     },
   };
-  return { cells, meshes, obs, door, endGx, endGz, retired: false, nextBuilt: false };
+  return { cells, approach, meshes, obs, door, endGx, endGz, retired: false, nextBuilt: false };
 }
 
 function rebuildHallObstacles() {
@@ -4472,6 +4546,7 @@ function initHall() {
   updateSlowMeter();
   updateModeUI();
   showBanner('THE TUNNEL<small>CLEAR THE FLOOR. REACH THE DOOR.</small>', 3000);
+  setTimeout(showTimeTip, 2600);
   sfx.newWave();
 }
 
@@ -4511,7 +4586,7 @@ function openHallDoor() {
   }
   rebuildHallObstacles();
   showBanner('THE DOOR IS OPEN<small>GO</small>', 2000);
-  sfx.wave();
+  sfx.airlock();   // the door speaks for itself; the VO waits for the crossing
   vibrate(20);
 }
 
@@ -4536,6 +4611,7 @@ function crossHallDoor() {
   slowBank = Math.max(slowBank, SLOWMO.base);
   updateSlowMeter();
   showBanner(`CHECKPOINT<small>DOOR ${hall.doorsPassed} SEALED BEHIND YOU</small>`, 2200);
+  showTimeTip();
   sfx.wave();
   vibrate([15, 30, 15]);
 }
@@ -4715,7 +4791,7 @@ function frame(now) {
   gunKick = Math.max(0, gunKick - dt * 8);
   muzzle.material.opacity = Math.max(0, muzzle.material.opacity - dt * 14);
   const sway = Math.sin(now * 0.0011) * 0.004;
-  gun.position.set(0.14 + sway, -0.19 + Math.cos(now * 0.0017) * 0.004 + gunKick * 0.03, -0.5 + gunKick * 0.06);
+  gun.position.set(0.055 + sway, -0.115 + Math.cos(now * 0.0017) * 0.004 + gunKick * 0.03, -0.5 + gunKick * 0.06);
   gun.rotation.x = gunKick * 0.22;
 
   // --- world (scaled time)
@@ -4752,12 +4828,25 @@ function frame(now) {
               extra--;
             } else i++;
           }
+        } else if (game.mode === 'hall') {
+          // corridors fight in clusters: 1-3 round the corner together
+          let extra = Math.min(
+            (Math.random() < 0.65 ? 1 : 0) + (Math.random() < 0.3 ? 1 : 0),
+            game.spawnQueue.length, maxAlive() - enemies.length);
+          while (extra-- > 0) spawnEnemy(game.spawnQueue.shift());
         }
         // the fuller the street (a fresh pack fills it fast), the longer
         // until the next arrival
         const fill = enemies.length / maxAlive();
-        game.spawnTimer = (0.7 + 2.6 * fill) * (0.85 + Math.random() * 0.3) +
-          (game.spawnQueue.length <= 2 ? 1.6 : 0);
+        if (game.mode === 'hall') {
+          // A cleared corridor stays quiet only briefly — long enough to
+          // breathe and push forward, never long enough to feel empty.
+          game.spawnTimer = (enemies.length === 0 ? 0.9 : 1.4 + 2.2 * fill) *
+            (0.85 + Math.random() * 0.3);
+        } else {
+          game.spawnTimer = (0.7 + 2.6 * fill) * (0.85 + Math.random() * 0.3) +
+            (game.spawnQueue.length <= 2 ? 1.6 : 0);
+        }
       }
     }
     for (const e of enemies) updateEnemy(e, sdt);
