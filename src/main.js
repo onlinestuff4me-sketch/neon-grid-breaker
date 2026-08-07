@@ -14,6 +14,7 @@
 import * as THREE from '../lib/three.module.min.js';
 import { WEAPONS, TYPE_INTRO, TYPE_SHARE, TYPE_DROP, DROPS, RAMP, COMP, PACING, TIME }
   from './balance.js';
+import { composeProtocol, newRunMemory, enemyRoster, ELEMENTS } from './protocols.js';
 
 // ---------------------------------------------------------------------------
 // Tunables
@@ -4622,6 +4623,26 @@ function advanceFromOverlay() {
 // the door seals shut behind you. Corridors turn and branch, but every
 // route leads to the next door.
 // ---------------------------------------------------------------------------
+// Lifetime progress: every door ever passed, and every element ever met.
+// These are the two keys the protocol system gates on, so they outlive runs.
+let lifetimeDoors = 0;
+let archive = new Set();
+try {
+  lifetimeDoors = parseInt(localStorage.getItem('timeshard_doors') || '0', 10) || 0;
+  archive = new Set(JSON.parse(localStorage.getItem('timeshard_archive') || '[]'));
+} catch { /* private mode */ }
+function saveProgress() {
+  try {
+    localStorage.setItem('timeshard_doors', String(lifetimeDoors));
+    localStorage.setItem('timeshard_archive', JSON.stringify([...archive]));
+  } catch { /* private mode */ }
+}
+function recordMet(ids) {
+  let fresh = false;
+  for (const id of ids) if (id && !archive.has(id)) { archive.add(id); fresh = true; }
+  if (fresh) saveProgress();
+}
+
 const HALL = { cell: 4, h: 3.1, wall: 0.3 };
 const HALL_FINALE = PACING.finale;   // last of a leg stage on the door approach
 function makeHallWallTexture() {
@@ -4682,7 +4703,7 @@ function setEnvironment(env) {
 
 // One corridor leg: forward runs with 90° jogs, plus 1-2 side loops that
 // rejoin the spine further along — branches, but every route reaches the door
-function genHallLeg(sgx, sgz) {
+function genHallLeg(sgx, sgz, proto) {
   const cells = [];
   const pillars = [];
   const add = (gx, gz) => {
@@ -4694,10 +4715,16 @@ function genHallLeg(sgx, sgz) {
   const spine = [[gx, gz]];
   // Momentum is one-way: every jog is short and always followed by more
   // forward, so no route ever asks you to walk back the way you came.
-  const fwd = 12 + Math.floor(Math.random() * 5);
+  const form = (proto && proto.form && proto.form.id) || 'corridor';
+  // FORM decides the skeleton: a service run turns constantly, a gauntlet is
+  // one long straight with nowhere to hide, an atrium is mostly chamber.
+  const fwd = form === 'gauntlet' ? 17 + Math.floor(Math.random() * 4)
+    : 12 + Math.floor(Math.random() * 5);
   let f = 0, jogs = 0;
   while (f < fwd) {
-    const run = 3 + Math.floor(Math.random() * 3);
+    const run = form === 'serviceRun' ? 2 + Math.floor(Math.random() * 2)
+      : form === 'gauntlet' ? 6 + Math.floor(Math.random() * 4)
+      : 3 + Math.floor(Math.random() * 3);
     for (let i = 0; i < run && f < fwd; i++) { gz++; f++; add(gx, gz); spine.push([gx, gz]); }
     if (f >= fwd - 4) break;   // leave the tail straight for the door sightline
     const jog = 2 + Math.floor(Math.random() * 2);
@@ -4716,11 +4743,13 @@ function genHallLeg(sgx, sgz) {
   // derived from missing neighbours, so simply owning more cells opens the
   // space up — and the corridor gets a rhythm of tight / open / tight.
   const roomCells = [];
-  if (spine.length > 10) {
+  const wantsRoom = form === 'atrium' || form === 'corridor';
+  const roomWide = form === 'atrium' ? 3 : 2;
+  if (wantsRoom && spine.length > 10) {
     const i = 3 + Math.floor(Math.random() * Math.max(1, spine.length - 9));
     const [rx, rz] = spine[i];
-    for (let dx = -2; dx <= 2; dx++) {
-      for (let dz = 0; dz <= 3; dz++) {
+    for (let dx = -roomWide; dx <= roomWide; dx++) {
+      for (let dz = 0; dz <= (form === 'atrium' ? 4 : 3); dz++) {
         const k = (rx + dx) + ',' + (rz + dz);
         if (!hall.grid.has(k)) { hall.grid.add(k); cells.push([rx + dx, rz + dz]); }
         roomCells.push([rx + dx, rz + dz]);
@@ -4735,7 +4764,8 @@ function genHallLeg(sgx, sgz) {
   for (let i = 0; i < APPROACH; i++) { gz++; add(gx, gz); spine.push([gx, gz]); }
   // Branches: alternate routes that only ever move FORWARD and rejoin the
   // spine further along — a choice of lane, never a detour backwards.
-  for (let b = 0; b < 2; b++) {
+  const branches = form === 'gauntlet' ? 0 : form === 'serviceRun' ? 3 : 2;
+  for (let b = 0; b < branches; b++) {
     const i = 1 + Math.floor(Math.random() * Math.max(1, spine.length - 9));
     const j = Math.min(spine.length - 1 - APPROACH, i + 4 + Math.floor(Math.random() * 4));
     const [ax, az] = spine[i], [bx, bz] = spine[j];
@@ -4752,8 +4782,10 @@ function genHallLeg(sgx, sgz) {
   return { cells, spine, approach, pillars, endGx: gx, endGz: gz };
 }
 
-function buildHallLeg(sgx, sgz) {
-  const { cells, approach, pillars, endGx, endGz } = genHallLeg(sgx, sgz);
+function buildHallLeg(sgx, sgz, proto) {
+  const { cells, approach, pillars, endGx, endGz } = genHallLeg(sgx, sgz, proto);
+  const cond = (proto && proto.condition && proto.condition.id) || null;
+  const measures = new Set((proto && proto.measures || []).map((m) => m.id));
   const C = HALL.cell, H = HALL.h, W = HALL.wall;
   const walls = [], floors = [], ceils = [], lights = [], ribs = [];
   const obs = [];
@@ -4770,7 +4802,9 @@ function buildHallLeg(sgx, sgz) {
     ceils.push([x, H + 0.1, z, C + 0.2, 0.2, C + 0.2]);
     // recessed ceiling strip every other cell: the corridor finally has a
     // rhythm to measure your own movement against
-    if ((gx + gz) % 2 === 0) lights.push([x, H - 0.04, z, 1.5, 0.08, 2.6]);
+    // DIM STRIPS halves the lighting; otherwise every other cell is lit
+    const lit = cond === 'dimStrips' ? (gx + gz) % 4 === 0 : (gx + gz) % 2 === 0;
+    if (lit) lights.push([x, H - 0.04, z, 1.5, 0.08, 2.6]);
     for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
       if (hall.grid.has((gx + dx) + ',' + (gz + dz))) continue;
       if (gx === endGx && gz === endGz && dz === 1) continue;   // the doorway
@@ -4779,7 +4813,7 @@ function buildHallLeg(sgx, sgz) {
       // a pilaster rib now and then: it sits just proud of the wall face
       // (never intersecting it, so nothing can z-fight) and gives blank
       // runs something for the eye to clock as you move past
-      if (rnd01(gx * 12.7 + gz * 5.3 + dx * 3.1 + dz * 7.9) > 0.72) {
+      if (measures.has('alcoves') && rnd01(gx * 12.7 + gz * 5.3 + dx * 3.1 + dz * 7.9) > 0.55) {
         const inset = C / 2 - W - 0.07;
         if (dx !== 0) ribs.push([x + dx * inset, H / 2 - 0.1, z, 0.13, H - 0.2, 0.62]);
         else ribs.push([x, H / 2 - 0.1, z + dz * inset, 0.62, H - 0.2, 0.13]);
@@ -4818,7 +4852,8 @@ function buildHallLeg(sgx, sgz) {
       max: new THREE.Vector3(dx0 + 1, H, dz0 + 0.2),
     },
   };
-  return { cells, approach, pillars, meshes, obs, door, endGx, endGz, retired: false, nextBuilt: false };
+  return { cells, approach, pillars, meshes, obs, door, endGx, endGz, proto,
+    retired: false, nextBuilt: false };
 }
 
 function rebuildHallObstacles() {
@@ -4834,13 +4869,27 @@ function rebuildHallObstacles() {
 // rocketeers / bombers (they want open air) — their slots become fighters
 function hallWave(n) {
   const sub = { laser: 'rusher', sniper: 'gunner', rocketeer: 'heavy', bomber: 'shotgunner' };
-  const q = composeWave(n).map((t) => sub[t] || t);
+  // Only types this player has actually unlocked may appear — the same two
+  // keys the protocols use, so the cast is metered across runs too.
+  const roster = new Set(enemyRoster(n, lifetimeDoors).map((t) => sub[t] || t));
+  roster.add('gunner');
+  const q = composeWave(n).map((t) => sub[t] || t).filter((t) => roster.has(t));
   // the first two legs are the game teaching itself — give them enough
   // bodies to actually feel like a fight before the door
   const want = n === 1 ? COMP.hallDoor1 : n === 2 ? COMP.hallDoor2
     : Math.min(COMP.hallBase + n * COMP.hallPerDoor, COMP.hallCap);
-  while (q.length < want) q.push(Math.random() < 0.55 ? 'gunner' : 'rusher');
+  const filler = roster.has('rusher') ? ['gunner', 'rusher'] : ['gunner'];
+  while (q.length < want) q.push(filler[Math.floor(Math.random() * filler.length)]);
   q.length = Math.min(q.length, want);
+  // the leg's debut enemy leads the wave, so the introduction actually lands
+  const leg = hall && hall.legs[hall.cur];
+  const debut = leg && leg.proto && leg.proto.enemyDebut;
+  if (debut) {
+    const mapped = sub[debut.id] || debut.id;
+    const i = q.indexOf(mapped);
+    if (i > 0) { q.splice(i, 1); q.unshift(mapped); }
+    else if (i < 0) { q.pop(); q.unshift(mapped); }
+  }
   return q;
 }
 
@@ -4851,8 +4900,9 @@ function initHall() {
   game.introLen = 1.6;
   game.seenTypes = {};
   setEnvironment('hall');
-  hall = { legs: [], grid: new Set(), cur: 0, doorsPassed: 0, checkpoint: { x: 0, z: 0 } };
-  hall.legs.push(buildHallLeg(0, 0));
+  hall = { legs: [], grid: new Set(), cur: 0, doorsPassed: 0, checkpoint: { x: 0, z: 0 },
+    mem: newRunMemory(archive) };
+  hall.legs.push(buildHallLeg(0, 0, composeProtocol(1, lifetimeDoors, hall.mem)));
   rebuildHallObstacles();
   game.spawnQueue = hallWave(1);
   game.spawnTimer = 0.5;
@@ -4904,7 +4954,8 @@ function openHallDoor() {
   L.door.open = true;
   if (!L.nextBuilt) {   // the corridor beyond appears as the door opens
     L.nextBuilt = true;
-    hall.legs.push(buildHallLeg(L.endGx, L.endGz + 1));
+    const proto = composeProtocol(hall.doorsPassed + 2, lifetimeDoors, hall.mem);
+    hall.legs.push(buildHallLeg(L.endGx, L.endGz + 1, proto));
   }
   rebuildHallObstacles();
   showBanner('THE DOOR IS OPEN<small>GO</small>', 2000);
@@ -4920,6 +4971,15 @@ function crossHallDoor() {
   hall.cur++;
   hall.doorsPassed++;
   game.wave++;
+  lifetimeDoors++;
+  saveProgress();
+  const L2 = hall.legs[hall.cur];
+  if (L2 && L2.proto) {   // everything this leg is made of is now "met"
+    recordMet([L2.proto.form && L2.proto.form.id,
+      L2.proto.condition && L2.proto.condition.id,
+      ...L2.proto.measures.map((m) => m.id),
+      L2.proto.enemyDebut && L2.proto.enemyDebut.id]);
+  }
   hall.checkpoint = { x: prev.door.x, z: prev.door.z + 2 };
   const old = hall.legs[hall.cur - 2];
   if (old && !old.retired) {   // two doors back is gone for good
@@ -4932,7 +4992,10 @@ function crossHallDoor() {
   game.spawnTimer = 0.9;
   slowBank = Math.max(slowBank, SLOWMO.base);
   updateSlowMeter();
-  showBanner(`CHECKPOINT<small>DOOR ${hall.doorsPassed}<br>SEALED BEHIND YOU</small>`, 2200);
+  const nx = hall.legs[hall.cur] && hall.legs[hall.cur].proto;
+  const spec = nx ? [nx.form && nx.form.name, nx.condition && nx.condition.name,
+    ...nx.measures.map((m) => m.name)].filter(Boolean).join(' · ') : '';
+  showBanner(`CHECKPOINT<small>DOOR ${hall.doorsPassed}${spec ? '<br>' + spec : ''}</small>`, 2200);
   showTimeTip();
   sfx.wave();
   vibrate([15, 30, 15]);
@@ -5393,6 +5456,7 @@ window.__ts = {
   audio: () => sfx.debug(), sfx,
   slow: () => ({ bank: +slowBank.toFixed(2), locked: timeLocked, mode: timeMode }),
   hall: () => hall,
+  progress: () => ({ lifetimeDoors, archive: [...archive] }),
   banner: showBanner,
   diff: () => ({ speed: enemyBulletSpeed(), aim: aimSpeedFactor(), t: diffT() }),
   fire: playerFire, setWeapon, spawnEnemy, spawnPickup,
