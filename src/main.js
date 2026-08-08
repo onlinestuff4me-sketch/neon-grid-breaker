@@ -893,6 +893,9 @@ gun.position.set(0.055, -0.115, -0.5);   // centred and lifted: clear of the tim
 camera.add(gun);
 scene.add(camera);
 let gunKick = 0;
+// the knife has no recoil to model: it has a stroke. jabT runs 1 -> 0 over
+// one thrust and drives its own animation path, separate from the gun rig.
+let jabT = 0;
 
 function setWeapon(type, clips) {
   const spec = WEAPONS[type];
@@ -1891,7 +1894,7 @@ function spawnEnemy(type = 'gunner') {
   parts.g.scale.set(...spec.scale);
   // the wave attacks from one flank: spawn in an arc around the wave bearing
   // so the fight stays in front of you instead of whipping side to side
-  let x = 0, z = 0, placed = false;
+  let x = 0, z = 0, placed = false, holdZ;
   if (game.mode === 'hall' && hall) {
     const L = hall.legs[hall.cur], C = HALL.cell;
     // The wave's last few stage on the door approach: you fight them with
@@ -1904,6 +1907,14 @@ function spawnEnemy(type = 'gunner') {
     const approachZ = L.approach && L.approach.length ? L.approach[0][1] * HALL.cell : 1e9;
     const pool = finale ? L.approach
       : L.cells.filter(([, cgz]) => cgz * HALL.cell < approachZ - 2);
+    // The door's own sightline: the last approach cell, which the slab sits
+    // at the end of. Anything that can see this cell can see the door open.
+    const doorView = finale
+      ? L.approach[L.approach.length - 1]
+      : null;
+    // and they hold there — see holdZ in advance(): a finale enemy may close
+    // on you but never retreats back round a corner out of the door's frame
+    if (finale) holdZ = approachZ - C;
     let fbX = 0, fbZ = 0, fbOk = false;
     for (let tries = 0; tries < 40 && !placed; tries++) {
       const [cgx, cgz] = pool[Math.floor(Math.random() * pool.length)];
@@ -1912,8 +1923,16 @@ function spawnEnemy(type = 'gunner') {
       const d = Math.hypot(px - player.pos.x, pz - player.pos.z);
       // NEVER behind you: the tunnel's whole promise is forward momentum
       if (pz < player.pos.z + PACING.aheadMin) continue;
-      if (d < (finale ? 8 : 12) || d > 40) continue;
-      if (finale) { x = px; z = pz; placed = true; break; }
+      if (finale) {
+        // no 12m floor here: if you are already deep in the approach the
+        // stage still has to happen, and it has to happen where you can see
+        // the door — never in a branch lane off to the side of it
+        if (d < 4) continue;
+        if (!hasLineOfSight(_v2.set(px, 1.4, pz),
+          _v3.set(doorView[0] * C, 1.4, doorView[1] * C))) continue;
+        x = px; z = pz; placed = true; break;
+      }
+      if (d < 12 || d > 40) continue;
       if (!hasLineOfSight(_v2.set(px, 1.4, pz), _v3.set(player.pos.x, EYE_HEIGHT, player.pos.z))) {
         x = px; z = pz; placed = true;   // prefer stepping out from cover
         break;
@@ -1921,9 +1940,14 @@ function spawnEnemy(type = 'gunner') {
       if (!fbOk) { fbOk = true; fbX = px; fbZ = pz; }
     }
     if (!placed && fbOk) { x = fbX; z = fbZ; placed = true; }
-    if (!placed) {   // last resort: on the approach, ahead of the player
-      const [cgx, cgz] = (L.approach && L.approach[0]) || L.cells[L.cells.length - 1];
-      x = cgx * C; z = Math.max(cgz * C, player.pos.z + 8);
+    if (!placed) {
+      // last resort: on the approach spine, ahead of the player but never
+      // past the doorway itself
+      const app = L.approach && L.approach.length ? L.approach : null;
+      const [cgx, cgz] = (app && app[0]) || L.cells[L.cells.length - 1];
+      const cap = app ? app[app.length - 1][1] * C : cgz * C;
+      x = cgx * C;
+      z = Math.min(cap, Math.max(cgz * C, player.pos.z + 6));
     }
   } else {
     // valid ground = ON a street (never a block-interior pocket the player
@@ -2028,6 +2052,7 @@ function spawnEnemy(type = 'gunner') {
       : 19 + Math.random() * 6,           // guns come up early — pressure from range
     burstLeft: 0,
     burstT: 0,
+    holdZ,                                // set for the door-approach finale
     alive: true,
   });
   // snipers and lasers announce every entrance; everyone else gets a warning
@@ -2483,6 +2508,11 @@ function updateEnemy(e, sdt) {
         }
       }
       dir.normalize();
+      // The last few of a wave hold the door approach. They may close on you
+      // and they may strafe, but they never walk back down the corridor and
+      // round a corner — so the fight that opens the door is always fought
+      // with the door in frame.
+      if (e.holdZ !== undefined && dir.z < 0 && e.pos.z <= e.holdZ) dir.z = 0;
       e.pos.x += dir.x * moveSpeed * sdt;
       e.pos.z += dir.z * moveSpeed * sdt;
       resolveEnemyCollisions(e);   // hard guarantee: steering can fail, this can't
@@ -2725,10 +2755,10 @@ function playerFire() {
 // but you have to be close enough to smell them.
 function knifeStrike(spec) {
   player.fireCd = spec.cd;
-  gunKick = 1.6;
+  jabT = 1;                  // a thrust, not a recoil
   camera.getWorldDirection(_dir);
-  sfx.shot('pistol');
-  vibrate(18);
+  sfx.swipe();
+  vibrate(12);
   let best = -1, bestD = 1e9;
   for (let i = 0; i < enemies.length; i++) {
     const e = enemies[i];
@@ -3818,6 +3848,32 @@ const sfx = (() => {
         noise(0.14, 1600, 0.7, 0.5, r, 0.25); tone(320, 70, 0.1, 0.25, 'square', r);
       }
     },
+    // the knife: air over an edge, not powder. A short band of noise whose
+    // filter sweeps up and back down across the swing — no crack, no body.
+    swipe() {
+      if (!ctx || game.state === 'menu') return;
+      const r = selfRate();
+      const dur = 0.17 / r;
+      const n = Math.floor(ctx.sampleRate * dur);
+      const buf = ctx.createBuffer(1, n, ctx.sampleRate);
+      const d = buf.getChannelData(0);
+      // swells to the middle of the stroke and dies: the sound of the arm,
+      // not of an impact
+      for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.sin((i / n) * Math.PI) ** 1.4;
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      const filt = ctx.createBiquadFilter();
+      filt.type = 'bandpass'; filt.Q.value = 1.5;
+      const t0 = ctx.currentTime;
+      filt.frequency.setValueAtTime(600 * r, t0);
+      filt.frequency.exponentialRampToValueAtTime(3200 * r, t0 + dur * 0.5);
+      filt.frequency.exponentialRampToValueAtTime(800 * r, t0 + dur);
+      const g = ctx.createGain();
+      g.gain.value = 0.3;
+      src.connect(filt).connect(g);
+      route(g, 0.08);
+      src.start(t0);
+    },
     clank() {
       if (game.state === 'menu') return;   // demo stays silent   // armor shrugging off a body shot
       noise(0.06, 3200, 2.2, 0.45, 1, 0.25);
@@ -4776,8 +4832,9 @@ function genHallLeg(sgx, sgz, proto) {
     for (let z = az; z <= bz; z++) add(ox, z);
     if (bx !== ox) for (let x = ox; x !== bx; x += Math.sign(bx - ox)) add(x, bz);
   }
-  // the last APPROACH cells, nearest the door first — where the final
-  // enemies are staged so you watch the door open as they shatter
+  // the last APPROACH cells in walking order — a straight run with the door
+  // at its end, where the final enemies stage so you watch it open as they
+  // shatter. approach[0] is where the run begins; the last is at the slab.
   const approach = spine.slice(spine.length - APPROACH);
   return { cells, spine, approach, pillars, endGx: gx, endGz: gz };
 }
@@ -5065,13 +5122,27 @@ const _vFlow = new THREE.Vector3();   // its own scratch: _v2 is reused downstre
 function updateHallFlow() {
   const L = hall.legs[hall.cur], C = HALL.cell;
   hall.toPlayer = hallFlow(cellKeyOf(player.pos.x, player.pos.z));
-  // the rally: a cell roughly 3 cells up the corridor from the player, so
-  // anyone caught behind loops around and re-engages from the front
+  // The rally: where anyone caught behind the player is sent so they loop
+  // around and re-engage from the front. Once the wave is down to its last
+  // few it becomes the door approach itself, so stragglers converge on the
+  // exit instead of being hunted down in some branch lane behind you.
   let rally = null, bestD = 1e9;
-  for (const [gx, gz] of L.cells) {
-    if (gz * C < player.pos.z + 6) continue;
-    const d = Math.abs(gz * C - (player.pos.z + 13)) + Math.abs(gx * C - player.pos.x) * 0.4;
-    if (d < bestD) { bestD = d; rally = [gx, gz]; }
+  if (game.spawnQueue.length === 0 && enemies.length <= HALL_FINALE &&
+      L.approach && L.approach.length) {
+    const [ax, az] = L.approach[Math.min(1, L.approach.length - 1)];
+    if (az * C > player.pos.z + 3) rally = [ax, az];
+    // survivors of earlier spawns inherit the hold too: whoever happens to
+    // be last is the one you finish in front of the door, not just whoever
+    // was queued last
+    const line = L.approach[0][1] * C - C;
+    for (const e of enemies) if (e.holdZ === undefined) e.holdZ = line;
+  }
+  if (!rally) {
+    for (const [gx, gz] of L.cells) {
+      if (gz * C < player.pos.z + 6) continue;
+      const d = Math.abs(gz * C - (player.pos.z + 13)) + Math.abs(gx * C - player.pos.x) * 0.4;
+      if (d < bestD) { bestD = d; rally = [gx, gz]; }
+    }
   }
   hall.rallyKey = rally ? rally[0] + ',' + rally[1] : null;
   hall.toRally = rally ? hallFlow(hall.rallyKey) : null;
@@ -5082,8 +5153,14 @@ function updateHallFlow() {
 function hallSteer(e) {
   if (!hall || !hall.toPlayer) return null;
   const C = HALL.cell;
-  // behind the player? head for the rally ahead of them, not their back
-  const behind = e.pos.z < player.pos.z - 2;
+  // Not clearly IN FRONT of the player? Head for the rally up the corridor,
+  // not their back. The threshold sits slightly ahead of the player on
+  // purpose: anyone level with you is already halfway to attacking from
+  // behind, and looping them forward costs a couple of seconds of walking.
+  // Close-quarters attackers are exempt — turning tail at 3m looks absurd,
+  // and a rusher at that range is committed anyway.
+  const behind = e.pos.z < player.pos.z + 1.5 &&
+    Math.hypot(e.pos.x - player.pos.x, e.pos.z - player.pos.z) > 4;
   const field = behind && hall.toRally ? hall.toRally : hall.toPlayer;
   const here = cellKeyOf(e.pos.x, e.pos.z);
   const d0 = field.get(here);
@@ -5279,6 +5356,7 @@ function frame(now) {
 
   // gun kick + sway
   gunKick = Math.max(0, gunKick - dt * 8);
+  jabT = Math.max(0, jabT - dt * 4.4);   // ~0.23s stroke
   muzzle.material.opacity = Math.max(0, muzzle.material.opacity - dt * 14);
   const sway = Math.sin(now * 0.0011) * 0.004;
   // reload: the weapon folds forward and down out of frame, then swings
@@ -5288,12 +5366,30 @@ function frame(now) {
   const fold = player.reloadT > 0
     ? Math.sin(Math.min(rp, 1) * Math.PI) ** 0.6   // out and back within the reload
     : 0;
-  gun.position.set(
-    0.055 + sway + fold * 0.06,
-    -0.115 + Math.cos(now * 0.0017) * 0.004 + gunKick * 0.03 - fold * 0.42,
-    -0.5 + gunKick * 0.06 + fold * 0.12
-  );
-  gun.rotation.x = gunKick * 0.22 - fold * 1.15;
+  const bob = Math.cos(now * 0.0017) * 0.004;
+  if (spec.melee) {
+    // The knife has no recoil and nothing to rack, so it gets its own path:
+    // a fast punch straight down the sightline and a slower recovery, with
+    // the blade levelling out as it goes in. Nothing about it reads as a gun.
+    const p = 1 - jabT;
+    const out = jabT > 0 ? (p < 0.3 ? p / 0.3 : 1 - (p - 0.3) / 0.7) : 0;
+    const push = out * out * (3 - 2 * out);            // smoothstep out and back
+    gun.position.set(
+      0.055 + sway - push * 0.055,
+      -0.115 + bob + push * 0.055,
+      -0.5 - push * 0.34
+    );
+    gun.rotation.x = -push * 0.36;    // tip drops level with the throat
+    gun.rotation.z = -push * 0.2;     // the wrist rolls over with the thrust
+  } else {
+    gun.position.set(
+      0.055 + sway + fold * 0.06,
+      -0.115 + bob + gunKick * 0.03 - fold * 0.42,
+      -0.5 + gunKick * 0.06 + fold * 0.12
+    );
+    gun.rotation.x = gunKick * 0.22 - fold * 1.15;
+    gun.rotation.z = 0;
+  }
 
   // --- world (scaled time)
   if (playing) {
