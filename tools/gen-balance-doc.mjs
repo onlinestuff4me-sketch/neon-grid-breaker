@@ -119,6 +119,10 @@ Tunnel legs do not use a wave total at all — see below.
 
 A leg is a chain of **stretches** — one straight run plus the turn that ends
 it — followed by the **approach**, the straight stare down at the door. A
+**vault** leg replaces one of its turns with a pillared room: one framed
+doorway in, one out on the far side offset laterally so you must cross it,
+four columns down the middle, and no branch lane may reach it. The room is
+its own stretch, so it gets its own share of the wave. A
 stretch's share of the wave is released when you **walk into it**, so the
 fight travels with you and nothing can accumulate in front of the door. The
 approach is worth exactly one group: the final wave you clear with the door
@@ -132,6 +136,10 @@ in frame.
 | \`runServiceRun\` | ${LEG.runServiceRun} + 0–${LEG.runServiceVar - 1} | a service run turns constantly |
 | \`runGauntlet\` | ${LEG.runGauntlet} + 0–${LEG.runGauntletVar - 1} | a gauntlet barely turns at all |
 | \`approach\` | ${LEG.approach} cells (${LEG.approach * LEG.cellM} m) | straight run in front of the door |
+| \`vaultHalfWide\` / \`vaultDeep\` | ${LEG.vaultHalfWide * 2 + 1} × ${LEG.vaultDeep} cells (${(LEG.vaultHalfWide * 2 + 1) * LEG.cellM} × ${LEG.vaultDeep * LEG.cellM} m) | the vault room |
+| \`vaultDoorW\` | ${n(LEG.vaultDoorW)} m | its two framed doorways |
+| \`vaultExitOffset\` | ${LEG.vaultExitOffset} cells | how far the exit sits off the entry line |
+| \`pillarW\` | ${n(LEG.pillarW)} m | column footprint, vault and chamber alike |
 | \`perCell\` | ${n(LEG.perCell)} + ${n(LEG.perCellPerDoor)}·door | bodies per corridor cell, capped at ${n(LEG.perCellCap)} |
 | \`stretchMin\` / \`stretchCap\` | ${LEG.stretchMin} / ${LEG.stretchCap} | no stretch is ever emptier or fuller |
 | \`finaleWave\` | ${LEG.finaleWave} | the one final group waiting at the door |

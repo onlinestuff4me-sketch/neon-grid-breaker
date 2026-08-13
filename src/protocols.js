@@ -17,6 +17,8 @@ export const ELEMENTS = [
     archive: 'Standard service corridor. No deviation logged.' },
   { id: 'serviceRun', name: 'SERVICE RUN', kind: 'form', tier: 1, minDoor: 2, unlockAt: 0, weight: 7, impl: true,
     archive: 'Maintenance route. Frequent turns. Sightlines under four metres.' },
+  { id: 'vault', name: 'VAULT', kind: 'form', tier: 1, minDoor: 2, unlockAt: 0, weight: 8, impl: true,
+    archive: 'Plant hall. One way in, one way out, columns between.' },
   { id: 'atrium', name: 'ATRIUM', kind: 'form', tier: 2, minDoor: 3, unlockAt: 15, weight: 6, impl: true,
     archive: 'Assembly volume. Columns load-bearing. Occupancy unlimited.' },
   { id: 'gauntlet', name: 'GAUNTLET', kind: 'form', tier: 2, minDoor: 4, unlockAt: 40, weight: 5, impl: true,

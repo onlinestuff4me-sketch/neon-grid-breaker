@@ -4800,6 +4800,9 @@ function genHallLeg(sgx, sgz, proto) {
     ? LEG.fwdGauntlet + Math.floor(Math.random() * LEG.fwdGauntletVar)
     : LEG.fwdBase + Math.floor(Math.random() * LEG.fwdVar);
   let f = 0, jogs = 0;
+  const doorways = [];         // interior openings that get a framed jamb
+  const breaks = new Set();    // spine indices that must start a new stretch
+  let vaultDone = false;
   while (f < fwd) {
     const run = form === 'serviceRun'
       ? LEG.runServiceRun + Math.floor(Math.random() * LEG.runServiceVar)
@@ -4808,6 +4811,33 @@ function genHallLeg(sgx, sgz, proto) {
         : LEG.runBase + Math.floor(Math.random() * LEG.runVar);
     for (let i = 0; i < run && f < fwd; i++) { gz++; f++; add(gx, gz); spine.push([gx, gz]); }
     if (f >= fwd - 4) break;   // leave the tail straight for the door sightline
+    // THE VAULT: once per leg, the corridor stops being a corridor. It opens
+    // through one framed doorway into a pillared hall and leaves through one
+    // more on the far side, offset so crossing the room is the only way on.
+    // No branch ever enters it, so there is exactly one way in and one out.
+    if (form === 'vault' && !vaultDone && f >= 5) {
+      const hw = LEG.vaultHalfWide, dp = LEG.vaultDeep;
+      for (let dx = -hw; dx <= hw; dx++) {
+        for (let dz = 1; dz <= dp; dz++) add(gx + dx, gz + dz);
+      }
+      doorways.push([gx, gz, 1]);          // in: the face you walk through
+      breaks.add(spine.length);            // the room is a stretch of its own
+      spine.push([gx, gz + 1]);
+      const side = Math.random() < 0.5 ? -1 : 1;
+      const ex = gx + side * LEG.vaultExitOffset;
+      for (let x = gx + side; side > 0 ? x <= ex : x >= ex; x += side) spine.push([x, gz + 1]);
+      for (let dz = 2; dz <= dp; dz++) spine.push([ex, gz + dz]);
+      // a 2x2 of columns down the middle, clear of both doorways and of the
+      // lane you cross on: cover you have to commit to, not walk past
+      for (const px of [-1, 1]) {
+        for (const pz of [2, dp - 1]) pillars.push([(gx + px) * HALL.cell, (gz + pz) * HALL.cell]);
+      }
+      gx = ex; gz += dp; f += dp;
+      doorways.push([gx, gz, 1]);          // out: the far side of the room
+      breaks.add(spine.length);            // and the corridor beyond is another
+      vaultDone = true;
+      continue;                            // the room replaces this jog
+    }
     const jog = 2 + Math.floor(Math.random() * 2);
     const jd = Math.random() < 0.5 ? 1 : -1;
     for (let i = 0; i < jog; i++) { gx += jd; add(gx, gz); spine.push([gx, gz]); }
@@ -4824,7 +4854,7 @@ function genHallLeg(sgx, sgz, proto) {
   // derived from missing neighbours, so simply owning more cells opens the
   // space up — and the corridor gets a rhythm of tight / open / tight.
   const roomCells = [];
-  const wantsRoom = form === 'atrium' || form === 'corridor';
+  const wantsRoom = form === 'atrium' || form === 'corridor';   // a vault has its own
   const roomWide = form === 'atrium' ? 3 : 2;
   if (wantsRoom && spine.length > 10) {
     const i = 3 + Math.floor(Math.random() * Math.max(1, spine.length - 9));
@@ -4845,7 +4875,10 @@ function genHallLeg(sgx, sgz, proto) {
   for (let i = 0; i < APPROACH; i++) { gz++; add(gx, gz); spine.push([gx, gz]); }
   // Branches: alternate routes that only ever move FORWARD and rejoin the
   // spine further along — a choice of lane, never a detour backwards.
-  const branches = form === 'gauntlet' ? 0 : form === 'serviceRun' ? 3 : 2;
+  // A vault gets none: a branch lane cutting into the room would give it a
+  // second way in, and the whole point is one door in and one door out.
+  const branches = form === 'gauntlet' || form === 'vault' ? 0
+    : form === 'serviceRun' ? 3 : 2;
   for (let b = 0; b < branches; b++) {
     const i = 1 + Math.floor(Math.random() * Math.max(1, spine.length - 9));
     const j = Math.min(spine.length - 1 - APPROACH, i + 4 + Math.floor(Math.random() * 4));
@@ -4861,8 +4894,8 @@ function genHallLeg(sgx, sgz, proto) {
   // at its end, where the final enemies stage so you watch it open as they
   // shatter. approach[0] is where the run begins; the last is at the slab.
   const approach = spine.slice(spine.length - APPROACH);
-  return { cells, spine, approach, stretches: splitStretches(spine, APPROACH),
-    pillars, endGx: gx, endGz: gz };
+  return { cells, spine, approach, stretches: splitStretches(spine, APPROACH, breaks),
+    doorways, pillars, endGx: gx, endGz: gz };
 }
 
 // A STRETCH is one straight run plus the turn that ends it — the unit the
@@ -4871,13 +4904,14 @@ function genHallLeg(sgx, sgz, proto) {
 // finished spine rather than tracked during generation, so every path
 // through genHallLeg (jogs, the no-jog fallback, forms) segments the same.
 // The approach is always the last stretch, however the leg was built.
-function splitStretches(spine, approachLen) {
+function splitStretches(spine, approachLen, breaks) {
   const body = spine.slice(0, Math.max(1, spine.length - approachLen));
   const out = [];
   let cur = [], wasLateral = false;
   for (let i = 0; i < body.length; i++) {
     const lateral = i > 0 && body[i][1] === body[i - 1][1];
-    if (!lateral && wasLateral && cur.length) { out.push(cur); cur = []; }
+    const forced = breaks && breaks.has(i);
+    if ((forced || (!lateral && wasLateral)) && cur.length) { out.push(cur); cur = []; }
     cur.push(body[i]);
     wasLateral = lateral;
   }
@@ -4893,7 +4927,7 @@ function splitStretches(spine, approachLen) {
 }
 
 function buildHallLeg(sgx, sgz, proto) {
-  const { cells, approach, stretches, pillars, endGx, endGz } = genHallLeg(sgx, sgz, proto);
+  const { cells, approach, stretches, doorways, pillars, endGx, endGz } = genHallLeg(sgx, sgz, proto);
   const cond = (proto && proto.condition && proto.condition.id) || null;
   const measures = new Set((proto && proto.measures || []).map((m) => m.id));
   const C = HALL.cell, H = HALL.h, W = HALL.wall;
@@ -4937,12 +4971,31 @@ function buildHallLeg(sgx, sgz, proto) {
   // the lintel is VISUAL only: ground collision is 2D, so a solid lintel
   // would read as an invisible wall filling the open doorway
   walls.push([dx0, 2.8, dz0, 2, 0.6, W]);
+  // Interior doorways (the vault's way in and way out). The corridor cell is
+  // C wide and the room beyond is wider, so the opening between them is
+  // already exactly one cell — these jambs narrow it to a doorway and give it
+  // a frame, which is what makes the room read as a place you ENTER rather
+  // than a wide bit of hallway. The jamb reaches from the opening's edge out
+  // to the corridor's own side wall, so no gap can appear beside it.
+  for (const [dgx, dgz, ddz] of (doorways || [])) {
+    const ox = dgx * C, oz = dgz * C + ddz * (C / 2);
+    const half = LEG.vaultDoorW / 2;
+    const jw = C / 2 - W / 2 - half;        // from opening edge to the side wall
+    if (jw > 0.05) {
+      wallBox(ox - half - jw / 2, oz, jw, W);
+      wallBox(ox + half + jw / 2, oz, jw, W);
+    }
+    // lintel is VISUAL only — ground collision is 2D, so a solid one would
+    // read as an invisible wall filling the opening
+    walls.push([ox, H - 0.42, oz, LEG.vaultDoorW, 0.55, W]);
+  }
   // pillars: solid cover standing in the chamber
   for (const [px, pz] of pillars) {
-    walls.push([px, H / 2, pz, 0.9, H, 0.9]);
+    const pw = LEG.pillarW, ph = pw / 2;
+    walls.push([px, H / 2, pz, pw, H, pw]);
     obs.push({
-      min: new THREE.Vector3(px - 0.45, 0, pz - 0.45),
-      max: new THREE.Vector3(px + 0.45, H, pz + 0.45),
+      min: new THREE.Vector3(px - ph, 0, pz - ph),
+      max: new THREE.Vector3(px + ph, H, pz + ph),
     });
   }
   const meshes = [
@@ -4962,7 +5015,7 @@ function buildHallLeg(sgx, sgz, proto) {
       max: new THREE.Vector3(dx0 + 1, H, dz0 + 0.2),
     },
   };
-  return { cells, approach, stretches, pillars, meshes, obs, door, endGx, endGz, proto,
+  return { cells, approach, stretches, doorways, pillars, meshes, obs, door, endGx, endGz, proto,
     retired: false, nextBuilt: false };
 }
 

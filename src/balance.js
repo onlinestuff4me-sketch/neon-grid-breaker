@@ -89,6 +89,15 @@ export const LEG = {
   runServiceRun: 2, runServiceVar: 2,
   runGauntlet: 6, runGauntletVar: 4,
   approach: 4,                     // straight cells in front of the door
+  // THE VAULT ROOM (form: vault). The corridor opens through ONE doorway
+  // into a pillared hall and leaves through ONE more on the far side, offset
+  // so you have to cross it. It is its own stretch, so it gets its own share
+  // of the wave, and the pillars are the only real cover in the leg.
+  vaultHalfWide: 2,                // cells either side of centre (5 wide)
+  vaultDeep: 4,                    // cells deep
+  vaultDoorW: 2.6,                 // doorway opening (m) — wider than a checkpoint
+  pillarW: 0.9,                    // column footprint (m), vault and chamber alike
+  vaultExitOffset: 2,              // cells the exit sits off the entry line
   // The leg's size comes from how much corridor there is to fight in, not
   // from how many turns it happens to have — otherwise a zig-zagging service
   // run, which is SHORTER to walk, would be the bigger fight. Budget by cell,
