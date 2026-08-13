@@ -84,6 +84,7 @@ export class TrackGen {
         kind,
         fan: kind === 'drone' && rng() < d.fanChance,
         fireEvery: d.fireInterval * (0.85 + rng() * 0.3) * (kind === 'turret' ? 0.8 : 1),
+        telegraph: ramp(TUNING.difficulty.telegraphTime, index),
         engageTime: d.engageTime * (0.8 + rng() * 0.4),
         boltSpeed: d.boltSpeed * (kind === 'turret' ? 0.9 : 1),
         hoverX: (rng() * 2 - 1) * (geo.halfWidth - 1.0),

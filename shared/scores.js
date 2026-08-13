@@ -10,18 +10,24 @@ import { weekId, todayId } from './rng.js';
 export function createScoreStore(gameId) {
   const KEY = `${gameId}.scores.v1`;
 
+  // In-memory cache: when localStorage is unavailable (private mode, quota),
+  // the session still sees its own runs — boards and best-badges stay honest.
+  let cache = null;
   function load() {
+    if (cache) return cache;
     try {
-      return JSON.parse(localStorage.getItem(KEY)) || {};
+      cache = JSON.parse(localStorage.getItem(KEY)) || {};
     } catch {
-      return {};
+      cache = {};
     }
+    return cache;
   }
 
   function save(data) {
+    cache = data;
     try {
       localStorage.setItem(KEY, JSON.stringify(data));
-    } catch { /* private mode etc. — play on without persistence */ }
+    } catch { /* private mode etc. — session continues from cache */ }
   }
 
   // `extra` = optional per-game stats stored alongside the score in history
@@ -31,7 +37,8 @@ export function createScoreStore(gameId) {
     const week = weekId();
     const day = todayId();
 
-    data.allTimeBest = Math.max(data.allTimeBest || 0, score);
+    const prevAllTime = data.allTimeBest || 0;
+    data.allTimeBest = Math.max(prevAllTime, score);
 
     // Run history (most recent first) + all-time top runs. This is the local
     // stand-in for the future leaderboard API's "my runs" + "top runs".
@@ -66,7 +73,7 @@ export function createScoreStore(gameId) {
     return {
       score,
       allTimeBest: data.allTimeBest,
-      isAllTimeBest: score >= data.allTimeBest && score > 0,
+      isAllTimeBest: score > prevAllTime && score > 0,
       weekBest: w.best,
       isWeekBest: newWeekBest,
       weekRuns: w.runs,
@@ -84,7 +91,10 @@ export function createScoreStore(gameId) {
       weekBest: w.best,
       weekRuns: w.runs,
       dayBest: (data.days || {})[todayId()] || 0,
-      streak: data.streak || 0,
+      // a streak is only alive if the last play was today or yesterday
+      streak: (data.lastPlayDay === todayId() ||
+               data.lastPlayDay === todayId(new Date(Date.now() - 86400000)))
+        ? (data.streak || 0) : 0,
       history: data.history || [],
       top: data.top || [],
     };

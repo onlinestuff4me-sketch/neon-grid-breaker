@@ -144,6 +144,19 @@
   .startboard .dim { color: #7fdcff; text-shadow: 0 0 8px rgba(127,220,255,.5); }
   .lowerblock .boardhead { margin-top: 22px; }
 
+  /* short phones: compress the stacked screens instead of clipping them */
+  @media (max-height: 700px) {
+    .bigscore { font-size: clamp(40px, 13vw, 64px); }
+    .stats { margin-top: 12px; gap: 3px 18px; font-size: 13px; }
+    .menubtns { margin-top: 14px; }
+    .boardhead { margin-top: 12px; }
+    .board { font-size: 12px; gap: 2px 20px; }
+    .bestline { margin-top: 10px; }
+    .tap { margin-top: 16px; }
+    .overtitle, .pausetitle { margin-bottom: 6px; }
+    .newbest { margin-top: 4px; }
+  }
+
   /* ------- pause menu ------- */
   .menubtns { margin-top: 26px; display: flex; gap: 12px; }
   button.menubtn {

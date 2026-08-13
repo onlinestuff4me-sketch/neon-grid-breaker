@@ -361,6 +361,7 @@ const S = {
   camX: 0,
   steerX: 0,             // where the drag wants you
   trackHalf: ZONES.open.halfWidth,
+  trackHalfT: ZONES.open.halfWidth,
   zoneIdx: 0,
   speed: TUNING.speed.base,
   targetSpeed: TUNING.speed.base, // speed eases toward this — no sudden jumps
@@ -381,6 +382,11 @@ const S = {
   stats: { shots: 0, kills: 0, deflects: 0, souls: 0, gates: 0 },
 };
 
+// Gameplay randomness (strafe phases, aim jitter) draws from a seeded RNG so
+// enemy behavior is a pure function of the weekly seed + player inputs — the
+// precondition for future replay validation. Cosmetic randomness (shards,
+// sparks) stays on Math.random.
+let runRng = mulberry32(hashString(weeklySeed('timeshard/run') + ''));
 let trackGen = new TrackGen(weeklySeed(weeklyTag()));
 const zones = [];        // {spec, startZ, endZ, meshes[]}
 const panes = [];        // glass walls: shoot them or weave the gap
@@ -452,7 +458,8 @@ function buildZoneMeshes(spec, startZ) {
   // slowly spinning, with a floating GATE N title above it.
   if (spec.index > 0 && spec.index % TUNING.gates.everyZones === 0) {
     const num = spec.index / TUNING.gates.everyZones;
-    const R = Math.min(spec.halfWidth - 0.2, 2.1);
+    const headR = geo.ceiling ? (geo.ceiling - 0.35 - 0.15) / 2 : Infinity;
+    const R = Math.min(spec.halfWidth - 0.2, headR, 2.1);
     const cy = R + 0.35;
     const gz = startZ - 1.2;
     const group = new THREE.Group();
@@ -467,7 +474,7 @@ function buildZoneMeshes(spec, startZ) {
     group.add(label);
     group.position.set(0, cy, gz);
     add(group);
-    gates.push({ z: gz, pos: new THREE.Vector3(0, cy, gz), R, ring, group, passed: false });
+    gates.push({ z: gz, pos: new THREE.Vector3(0, cy, gz), R, ring, group, label, passed: false });
   }
 
   // open plains get off-track crystal pylons streaming past (speed feel)
@@ -538,7 +545,7 @@ function streamZones() {
     S.zoneIdx = cur.spec.index;
     updateSpeed();
     const targetHalf = cur.spec.halfWidth;
-    S.trackHalf += (targetHalf - S.trackHalf) * Math.min(1, 2.5 * (1 / 60));
+    S.trackHalfT = targetHalf; // smoothed toward in tick with real dt
   }
 }
 
@@ -589,7 +596,10 @@ function passGates() {
         updateHUD();
       }
     }
-    if (g.z > S.camZ + TUNING.track.cleanupBehind) gates.splice(i, 1);
+    if (g.z > S.camZ + TUNING.track.cleanupBehind) {
+      disposeGate(g);
+      gates.splice(i, 1);
+    }
   }
 }
 
@@ -605,7 +615,8 @@ function spawnPaneSegment(x0, x1, worldZ) {
   const cx = (x0 + x1) / 2;
   const geo = new THREE.BoxGeometry(w, O.paneH, O.paneThick);
   const mesh = new THREE.Mesh(geo, paneMat);
-  mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo), paneEdgeMat));
+  const edgesGeo = new THREE.EdgesGeometry(geo);
+  mesh.add(new THREE.LineSegments(edgesGeo, paneEdgeMat));
   mesh.position.set(cx, O.paneH / 2, worldZ);
   scene.add(mesh);
   const body = new CANNON.Body({
@@ -616,7 +627,7 @@ function spawnPaneSegment(x0, x1, worldZ) {
     collisionFilterMask: G_SHOT,
   });
   world.addBody(body);
-  const pane = { mesh, geo, body, x0, x1, w, z: worldZ, broken: false };
+  const pane = { mesh, geo, edgesGeo, body, x0, x1, w, z: worldZ, broken: false };
   body.ts = { pane };
   panes.push(pane);
 }
@@ -632,6 +643,7 @@ function shatterPane(pane, impact, vel) {
   pane.broken = true;
   scene.remove(pane.mesh);
   pane.geo.dispose();
+  pane.edgesGeo.dispose();
   queueRemove(pane.body);
   const O = TUNING.obstacles;
   const cw = pane.w / O.shatterCols, ch = O.paneH / O.shatterRows;
@@ -698,27 +710,29 @@ function shatterPylon(pylon, impact, vel) {
   audio.shatter(1.1);
 }
 
-// Smashing through terrain face-first: it breaks, and so does a shield.
+// Smashing through terrain face-first: it breaks — and unless you're in a
+// post-hit grace window, so does a shield. The check covers the exact swept
+// path this frame (pre-move camZ → current camZ), so a frame hitch at max
+// speed can never tunnel silently through a wall.
 const PLAYER_HALF = 0.45;
-function checkTerrainCrash(dt) {
-  if (S.invulnT > 0) return;
-  const reach = 0.5 + S.speed * dt;
+function checkTerrainCrash(prevCamZ) {
+  const invuln = S.invulnT > 0;
   for (const p of panes) {
-    if (p.broken || p.z < S.camZ - reach || p.z > S.camZ + 0.4) continue;
+    if (p.broken || p.z < S.camZ - 0.5 || p.z > prevCamZ + 0.4) continue;
     if (S.camX + PLAYER_HALF > p.x0 && S.camX - PLAYER_HALF < p.x1) {
       const impact = new THREE.Vector3(S.camX, TUNING.track.eyeHeight, p.z);
       shatterPane(p, impact, new THREE.Vector3(0, 0, -S.speed));
-      terrainHit();
+      if (!invuln) terrainHit();
       return;
     }
   }
   const O = TUNING.obstacles;
   for (const p of pylons) {
-    if (p.broken || p.z < S.camZ - reach || p.z > S.camZ + 0.4) continue;
+    if (p.broken || p.z < S.camZ - 0.5 || p.z > prevCamZ + 0.4) continue;
     if (Math.abs(S.camX - p.x) < O.pylonR + PLAYER_HALF - 0.1) {
       const impact = new THREE.Vector3(p.x, TUNING.track.eyeHeight, p.z);
       shatterPylon(p, impact, new THREE.Vector3(0, 0, -S.speed));
-      terrainHit();
+      if (!invuln) terrainHit();
       return;
     }
   }
@@ -745,7 +759,7 @@ function cleanupObstacles() {
   for (let i = panes.length - 1; i >= 0; i--) {
     if (panes[i].z > behind) {
       const p = panes[i];
-      if (!p.broken) { scene.remove(p.mesh); p.geo.dispose(); queueRemove(p.body); }
+      if (!p.broken) { scene.remove(p.mesh); p.geo.dispose(); p.edgesGeo.dispose(); queueRemove(p.body); }
       panes.splice(i, 1);
     }
   }
@@ -849,7 +863,7 @@ function spawnDroneFromEvent(e) {
   if (e.kind === 'turret') {
     // wall-riders read as machinery, not crystal fauna
     mesh.geometry = new THREE.BoxGeometry(0.7, 0.7, 0.7);
-    mesh.material = turretMat;
+    mesh.material = turretMat.clone();
     mesh.scale.set(1, 1, 1);
   }
   scene.add(mesh);
@@ -896,9 +910,11 @@ function spawnDroneFromEvent(e) {
     t: 0,
     start: start.clone(),
     hoverX: hx, hoverY: e.hoverY,
-    strafePhase: Math.random() * Math.PI * 2,
+    strafePhase: runRng() * Math.PI * 2,
     fireEvery: e.fireEvery,
-    nextFire: e.fireEvery * 0.5 + E.telegraph,
+    telegraph: e.telegraph ?? E.telegraph,
+    nextFire: e.fireEvery * 0.5 + (e.telegraph ?? E.telegraph),
+    chargeSound: null,
     engageLeft: e.engageTime,
     boltSpeed: e.boltSpeed,
     hasFired: false, // beat it to the shot and its soul is yours
@@ -930,6 +946,14 @@ function makeDoor(kind, at, side = 0) {
   g.position.copy(at);
   scene.add(g);
   return { group: g, p1, p2, w: W, open: 0 };
+}
+
+// A gate record owns its label sprite (canvas texture + material) and the
+// portal-surface sprite's material; everything else on a gate is shared.
+function disposeGate(g) {
+  g.label.material.map.dispose();
+  g.label.material.dispose();
+  g.ring.children[2].material.dispose(); // portal surface (map is shared)
 }
 
 function makeRingFlat(w, h, t) {
@@ -993,16 +1017,21 @@ function updateDrones(dtGame) {
         d.t = 0.31; // past the door-close grace
         // position set → the energy appears NOW and builds for the full
         // telegraph second before the first shot
-        d.nextFire = E.telegraph;
-        d.chargeSounded = false;
+        d.nextFire = d.telegraph;
+        d.chargeSound = null;
         spawnSpark(d.mesh.position, 2.2, PALETTE.iceEdge);
       }
     } else if (d.state === 'attack') {
       // hover ahead of you, strafing, matching your speed — except turrets,
       // which stay pinned to their wall and slide along it
-      const half = Math.max(1, S.trackHalf - 0.9);
+      // use the zone width at the DRONE's z — the player may still be in a
+      // wider/narrower zone, and hovering by the player's width embeds
+      // drones in walls (and lets turrets float off them)
+      const zAt = zones.find((z) => hoverZ <= z.startZ && hoverZ > z.endZ);
+      const hwAt = zAt ? zAt.spec.halfWidth : S.trackHalf;
+      const half = Math.max(1, Math.min(hwAt, S.trackHalf) - 0.9);
       const x = d.kind === 'turret'
-        ? d.side * (S.trackHalf - 0.45)
+        ? d.side * (hwAt - 0.45)
         : THREE.MathUtils.clamp(
             d.hoverX + Math.sin(S.gameTime * 0.9 + d.strafePhase) * 0.8, -half, half);
       const y = d.kind === 'turret'
@@ -1015,15 +1044,19 @@ function updateDrones(dtGame) {
 
       // fire cycle: the wisp charges up inside the crystal — a shot being born
       d.nextFire -= dtGame;
-      const warn = Math.max(0, 1 - Math.max(0, d.nextFire) / E.telegraph);
+      const warn = Math.max(0, 1 - Math.max(0, d.nextFire) / d.telegraph);
       const shimmer = 1 + Math.sin(S.gameTime * (6 + warn * 12)) * 0.1 * warn;
       d.core.scale.setScalar((0.35 + warn * 1.9) * shimmer);
       d.core.children[0].material.opacity = 0.3 + warn * 0.7;
       d.core.children[1].material.opacity = 0.15 + warn * 0.6;
-      // the charge-up is audible, not just visible
-      if (!d.chargeSounded && warn > 0 && S.mode === 'playing') {
-        d.chargeSounded = true;
-        audio.charge(E.telegraph);
+      // the charge-up is audible, not just visible — and driven by GAME time,
+      // so slow-mo stretches the shimmer exactly with the wisp
+      if (S.mode === 'playing') {
+        if (!d.chargeSound && warn > 0) d.chargeSound = audio.chargeStart();
+        audio.chargeUpdate(d.chargeSound, warn);
+      } else if (d.chargeSound) {
+        audio.chargeEnd(d.chargeSound);
+        d.chargeSound = null;
       }
       // menu (attract mode) drones fire too — bolts just sail past the camera;
       // without this the telegraph wisp sticks at full swell forever
@@ -1036,12 +1069,18 @@ function updateDrones(dtGame) {
           fireBolt(d);
         }
         // a shard can never fire faster than it charges
-        d.nextFire = Math.max(d.fireEvery, E.telegraph);
-        d.chargeSounded = false;
+        d.nextFire = Math.max(d.fireEvery, d.telegraph);
+        audio.chargeEnd(d.chargeSound);
+        d.chargeSound = null;
       }
 
       d.engageLeft -= dtGame;
-      if (d.engageLeft <= 0) { d.state = 'retreat'; d.t = 0; }
+      if (d.engageLeft <= 0) {
+        audio.chargeEnd(d.chargeSound);
+        d.chargeSound = null;
+        d.state = 'retreat';
+        d.t = 0;
+      }
     } else if (d.state === 'retreat') {
       // drones peel off upward; turrets just power down and fall behind
       if (d.kind !== 'turret') d.mesh.position.y += 6 * dtGame;
@@ -1064,8 +1103,12 @@ function updateDrones(dtGame) {
 function removeDrone(d) {
   if (!d.alive) return;
   d.alive = false;
+  audio.chargeEnd(d.chargeSound);
+  d.chargeSound = null;
   scene.remove(d.mesh);
   d.mesh.material.dispose(); // per-drone clone
+  if (d.kind === 'turret') d.mesh.geometry.dispose(); // turrets own their box
+  if (d.shell) d.shell.geometry.dispose(); // un-cracked warden shell
   if (d.streak) scene.remove(d.streak);
   if (d.door && !d.door.closed) disposeDoor(d.door);
   queueRemove(d.body);
@@ -1140,8 +1183,8 @@ function fireBolt(drone, targetOffsetX = 0) {
   // aimLead < 1 aims slightly behind the perfect intercept (dodgeable), and
   // jitter keeps volleys from being a single fair-but-cruel line
   const target = new THREE.Vector3(
-    px + targetOffsetX + (Math.random() - 0.5) * B.aimJitter * 2,
-    py + (Math.random() - 0.5) * B.aimJitter,
+    px + targetOffsetX + (runRng() - 0.5) * B.aimJitter * 2,
+    py + (runRng() - 0.5) * B.aimJitter,
     pz - v * t * B.aimLead
   );
   const vel = target.sub(from).normalize().multiplyScalar(drone.boltSpeed);
@@ -1160,11 +1203,9 @@ function fireBolt(drone, targetOffsetX = 0) {
   const halo = sprite(glowMagenta, PALETTE.wispHalo, 1.5, 0.3);
   group.add(head, halo);
   const trail = [];
-  const cWisp = new THREE.Color(PALETTE.wisp);
-  const cHalo = new THREE.Color(PALETTE.wispHalo);
   for (let i = 0; i < B.trailLen; i++) {
     const k = i / (B.trailLen - 1);
-    const t = sprite(glowWisp, cWisp.clone().lerp(cHalo, k), 0.42 * (1 - k * 0.75), 0.85 * (1 - k * 0.8));
+    const t = sprite(glowWisp, _cWisp.clone().lerp(_cHalo, k), 0.42 * (1 - k * 0.75), 0.85 * (1 - k * 0.8));
     group.add(t);
     trail.push(t);
   }
@@ -1173,22 +1214,34 @@ function fireBolt(drone, targetOffsetX = 0) {
   spawnSpark(from, 1.3, PALETTE.wispHalo);
 }
 
+const _cWisp = new THREE.Color(PALETTE.wisp);
+const _cHalo = new THREE.Color(PALETTE.wispHalo);
+
 function removeBolt(i, sparkColor = null) {
   const b = bolts[i];
   if (sparkColor) spawnSpark(b.pos, 2.0, sparkColor);
   scene.remove(b.group);
+  // sprite materials are per-bolt (textures are shared) — free them
+  for (const c of b.group.children) c.material.dispose();
   bolts.splice(i, 1);
 }
 
 const _perp1 = new THREE.Vector3(), _perp2 = new THREE.Vector3(), _dirN = new THREE.Vector3();
+const _relP0 = new THREE.Vector3(), _relP1 = new THREE.Vector3(), _relSeg = new THREE.Vector3();
+const prevPlayerPos = new THREE.Vector3();
 let lastGrazeMsg = -9;
 function updateBolts(dtGame) {
   const B = TUNING.bolts;
   const playerPos = new THREE.Vector3(S.camX, TUNING.track.eyeHeight, S.camZ);
+  // a teleport (run start, harness hop) must not become a huge swept segment
+  if (playerPos.distanceTo(prevPlayerPos) > S.speed * 0.3 + 3) {
+    prevPlayerPos.copy(playerPos);
+  }
   for (let i = bolts.length - 1; i >= 0; i--) {
     // the mercy blast in playerHit can shrink the array by several entries
     if (i >= bolts.length) { i = bolts.length; continue; }
     const b = bolts[i];
+    const prevBoltX = b.pos.x, prevBoltY = b.pos.y, prevBoltZ = b.pos.z;
     b.pos.addScaledVector(b.vel, dtGame);
 
     // spiral dressing around the (straight, fair) path
@@ -1207,17 +1260,28 @@ function updateBolts(dtGame) {
         .addScaledVector(_perp2, Math.cos(tth) * B.wobbleAmp * 1.3);
     }
 
+    // SWEPT hit test in the player's reference frame: at max speed tiers the
+    // closing speed tops 45 m/s, so a per-frame point sample tunnels straight
+    // through the 0.6m hit sphere (and then pays out a graze!). Sweep the
+    // relative-motion segment instead — frame-rate independent and fair.
+    _relP0.set(prevBoltX - prevPlayerPos.x, prevBoltY - prevPlayerPos.y, prevBoltZ - prevPlayerPos.z);
+    _relP1.copy(b.pos).sub(playerPos);
+    _relSeg.subVectors(_relP1, _relP0);
+    const segLen2 = _relSeg.lengthSq();
+    const tc = segLen2 > 1e-8
+      ? THREE.MathUtils.clamp(-_relP0.dot(_relSeg) / segLen2, 0, 1) : 0;
+    const closest2 = _relP0.addScaledVector(_relSeg, tc).lengthSq(); // reuses _relP0
     if (S.mode === 'playing' && S.invulnT <= 0 &&
-        b.pos.distanceTo(playerPos) < TUNING.player.hitRadius) {
+        closest2 < TUNING.player.hitRadius * TUNING.player.hitRadius) {
       removeBolt(i, PALETTE.wispHalo);
       playerHit();
       continue;
     }
-    // near miss: a bolt crossing your plane inside the graze radius (without
-    // hitting) refunds focus — dodging CLOSE is how you keep slow-mo flowing
+    // near miss: same closest-approach distance, so a swept hit can never
+    // double as a graze — dodging CLOSE is how you keep slow-mo flowing
     if (S.mode === 'playing' && !b.grazed && b.pos.z > S.camZ) {
       b.grazed = true;
-      const d2 = b.pos.distanceTo(playerPos);
+      const d2 = Math.sqrt(closest2);
       if (d2 < TUNING.time.nearMissRadius) {
         S.focus = Math.min(TUNING.time.focusMax, S.focus + TUNING.time.nearMissRefund);
         spawnSpark(b.pos, 1.4, 0xffffff);
@@ -1229,6 +1293,7 @@ function updateBolts(dtGame) {
     }
     if (b.pos.z > S.camZ + 2.5 || b.pos.distanceTo(playerPos) > 90) removeBolt(i);
   }
+  prevPlayerPos.copy(playerPos);
 }
 
 // ---------------------------------------------------------------------------
@@ -1671,9 +1736,14 @@ function renderStartBoard() {
     : '';
   el('startChips').style.display = s.history.length ? 'flex' : 'none';
   const val = (r) => startMetric === 'score' ? r.score : (r[startMetric] ?? 0);
+  // the top list is score-sorted; for other metrics rank against every run
+  // we know about, otherwise ENEMIES/GATES views show false #1s and false —s
+  const pool = startMetric === 'score'
+    ? s.top
+    : [...new Map([...s.top, ...s.history].map((r) => [r.at, r])).values()];
   fillScoreRows(el('startRecent'), s.history.slice(0, 3).map((r) => {
-    const better = s.top.filter((t) => val(t) > val(r)).length;
-    const onBoard = s.top.some((t) => t.at === r.at);
+    const better = pool.filter((t) => val(t) > val(r)).length;
+    const onBoard = startMetric === 'score' ? s.top.some((t) => t.at === r.at) : true;
     return [onBoard ? `#${better + 1}` : '—', String(val(r)), fmtDate(r.at)];
   }));
 }
@@ -1708,16 +1778,17 @@ function pauseGame() {
   S.mode = 'paused';
   clearPointers();
   audio.stopMusic();
+  for (const d of drones) { audio.chargeEnd(d.chargeSound); d.chargeSound = null; }
   el('pauseScore').textContent = `${S.score}m`;
   el('pauseShards').textContent = `ENEMIES ✦${S.stats.kills} · GATES ∩${S.stats.gates}`;
   hideHowto();
   const s = scores.summary();
   const row = (r) => `${r.score} ✦${r.shards ?? 0} ∩${r.gates ?? 0}`;
   fillStats(el('pauseTop'), s.top.length
-    ? s.top.slice(0, 5).map((r, i) => [`#${i + 1}  ${r.week}`, row(r)])
+    ? s.top.slice(0, window.innerHeight < 700 ? 3 : 5).map((r, i) => [`#${i + 1}  ${r.week}`, row(r)])
     : [['NO RUNS YET', '—']]);
   fillStats(el('pauseRecent'), s.history.length
-    ? s.history.slice(0, 5).map((r) => [new Date(r.at).toLocaleDateString(), row(r)])
+    ? s.history.slice(0, window.innerHeight < 700 ? 3 : 5).map((r) => [new Date(r.at).toLocaleDateString(), row(r)])
     : [['NO RUNS YET', '—']]);
   updateSoundLabel();
   el('pauseScreen').classList.add('visible');
@@ -1783,7 +1854,7 @@ function clearWorldObjects() {
   shards.length = 0;
   for (const st of streaks) { scene.remove(st.mesh); st.mesh.material.dispose(); }
   streaks.length = 0;
-  for (const pn of panes) if (!pn.broken) { scene.remove(pn.mesh); pn.geo.dispose(); queueRemove(pn.body); }
+  for (const pn of panes) if (!pn.broken) { scene.remove(pn.mesh); pn.geo.dispose(); pn.edgesGeo.dispose(); queueRemove(pn.body); }
   panes.length = 0;
   for (const py of pylons) if (!py.broken) { scene.remove(py.mesh); py.geo.dispose(); queueRemove(py.body); }
   pylons.length = 0;
@@ -1794,6 +1865,7 @@ function clearWorldObjects() {
     }
   }
   zones.length = 0;
+  for (const g of gates) disposeGate(g);
   gates.length = 0; // gate meshes belong to their zones (already removed)
   pendingEvents.length = 0;
   flushRemovals();
@@ -1804,7 +1876,8 @@ function startRun() {
   Object.assign(S, {
     mode: 'playing', shields: TUNING.player.shields, ammo: TUNING.player.ammoStart,
     score: 0, distance: 0, camZ: 0, camX: 0, steerX: 0,
-    trackHalf: ZONES.open.halfWidth, zoneIdx: 0, speed: TUNING.speed.base,
+    trackHalf: ZONES.open.halfWidth, trackHalfT: ZONES.open.halfWidth,
+    zoneIdx: 0, speed: TUNING.speed.base,
     targetSpeed: TUNING.speed.base, gateGraceT: 0, gateT: -1,
     wind: 0, fogFarT: TUNING.track.fogFar, fogFar: TUNING.track.fogFar,
     timeScale: 1, focus: TUNING.time.focusMax, focusOk: true, holdActive: false,
@@ -1812,6 +1885,7 @@ function startRun() {
     stats: { shots: 0, kills: 0, deflects: 0, souls: 0, gates: 0 },
   });
   trackGen = new TrackGen(weeklySeed(weeklyTag()));
+  runRng = mulberry32(hashString(weeklySeed(weeklyTag()) + ':run'));
   nextZoneZ = -8;
   streamZones();
   el('startScreen').classList.remove('visible');
@@ -1839,11 +1913,22 @@ function clearPointers() {
 
 window.addEventListener('pointerdown', (e) => {
   if (e.target.closest('.cornerbtns') || e.target.closest('button')) return;
+  if (e.button !== 0) return; // right/middle click never gets an 'up' we track
   audio.unlock();
 
-  if (S.mode === 'menu') { startRun(); return; }
-  if (S.mode === 'dead') {
-    if (S.deadTimer <= 0 && performance.now() - overShownAt > 600) startRun();
+  // the press that starts a run keeps living as the primary hold — you can
+  // enter the world already slowing time / steering (fired: true so the
+  // release never spends ammo)
+  if (S.mode === 'menu' || S.mode === 'dead') {
+    const ok = S.mode === 'menu' ||
+      (S.deadTimer <= 0 && performance.now() - overShownAt > 600);
+    if (!ok) return;
+    startRun();
+    primaryId = e.pointerId;
+    pointers.set(e.pointerId, {
+      x0: e.clientX, y0: e.clientY, t0: performance.now(),
+      lastX: e.clientX, hold: false, fired: true,
+    });
     return;
   }
   if (S.mode !== 'playing') return;
@@ -1852,20 +1937,35 @@ window.addEventListener('pointerdown', (e) => {
     primaryId = e.pointerId;
     pointers.set(e.pointerId, {
       x0: e.clientX, y0: e.clientY, t0: performance.now(),
-      lastX: e.clientX, hold: false,
+      lastX: e.clientX, hold: false, fired: false,
     });
   } else {
-    // second finger while one is held: instant aimed shot
+    // second finger while one is held: instant aimed shot. Track it too so
+    // it can inherit the hold if the first finger lifts — and mark the
+    // primary consumed so a near-simultaneous two-finger tap can't double-fire
+    const pp = pointers.get(primaryId);
+    if (pp) pp.fired = true;
+    pointers.set(e.pointerId, {
+      x0: e.clientX, y0: e.clientY, t0: performance.now(),
+      lastX: e.clientX, hold: false, fired: true,
+    });
     fireShot(e.clientX, e.clientY);
   }
 });
 
 window.addEventListener('pointermove', (e) => {
   const p = pointers.get(e.pointerId);
-  if (!p || S.mode !== 'playing') return;
+  if (!p) return;
+  // a mouse with no buttons down lost its pointerup off-window — unstick it
+  if (e.pointerType === 'mouse' && e.buttons === 0) {
+    pointers.delete(e.pointerId);
+    if (e.pointerId === primaryId) primaryId = null;
+    return;
+  }
+  if (S.mode !== 'playing') return;
   const moved = Math.hypot(e.clientX - p.x0, e.clientY - p.y0);
   if (!p.hold && moved > TUNING.tap.maxMovePx) p.hold = true;
-  if (p.hold) {
+  if (p.hold && e.pointerId === primaryId) {
     const dx = e.clientX - p.lastX;
     S.steerX += (dx / window.innerWidth) * TUNING.steer.sense;
   }
@@ -1875,13 +1975,23 @@ window.addEventListener('pointermove', (e) => {
 function onPointerEnd(e, canFire) {
   const p = pointers.get(e.pointerId);
   pointers.delete(e.pointerId);
-  if (e.pointerId === primaryId) primaryId = null;
+  if (e.pointerId === primaryId) {
+    primaryId = null;
+    // promote the oldest remaining finger so a still-held second finger
+    // keeps slow-mo and steering alive
+    const next = pointers.entries().next().value;
+    if (next) {
+      primaryId = next[0];
+      next[1].hold = true;
+    }
+  }
   if (!p || S.mode !== 'playing') return;
-  const quick = performance.now() - p.t0 < TUNING.tap.maxMs && !p.hold;
+  const quick = performance.now() - p.t0 < TUNING.tap.maxMs && !p.hold && !p.fired;
   if (quick && canFire) fireShot(e.clientX, e.clientY);
 }
 window.addEventListener('pointerup', (e) => onPointerEnd(e, true));
 window.addEventListener('pointercancel', (e) => onPointerEnd(e, false));
+window.addEventListener('blur', clearPointers); // focus loss = all fingers gone
 
 // a press becomes a "hold" purely by lasting long enough
 function primaryHoldActive() {
@@ -1994,16 +2104,18 @@ function tick(tNow) {
   // a slowed world is the whole power fantasy) ---
   if (S.mode === 'playing' || S.mode === 'dead') {
     const glide = S.mode === 'dead' ? Math.max(0, S.deadTimer) : 1;
+    const prevCamZ = S.camZ;
     S.camZ -= S.speed * dtGame * glide;
     if (S.mode === 'playing') S.distance += S.speed * dtGame;
     if (S.mode === 'playing' && S.wind) S.steerX += S.wind * dtGame; // crosswind
+    S.trackHalf += (S.trackHalfT - S.trackHalf) * Math.min(1, 2.5 * dt);
     const clampX = Math.max(0.4, S.trackHalf - TUNING.steer.clampPad);
     S.steerX = THREE.MathUtils.clamp(S.steerX, -clampX, clampX);
     S.camX += (S.steerX - S.camX) * Math.min(1, TUNING.steer.lerp * dt);
     streamZones();
     triggerPendingEvents();
     passGates();
-    if (S.mode === 'playing') checkTerrainCrash(dtGame);
+    if (S.mode === 'playing') checkTerrainCrash(prevCamZ);
     cleanupObstacles();
   } else if (S.mode === 'menu') {
     // attract mode: drift down the track behind the title, drones and all

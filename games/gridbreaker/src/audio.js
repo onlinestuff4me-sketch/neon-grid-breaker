@@ -26,7 +26,28 @@ export class TimeshardAudio {
       this.ctx = new AC();
       this.master = this.ctx.createGain();
       this.master.gain.value = 0.8;
-      this.master.connect(this.ctx.destination);
+      // limiter on the bus: gate crash + echoes + whoosh + music stack well
+      // past full scale — squash the sum instead of hard-clipping
+      const limiter = this.ctx.createDynamicsCompressor();
+      limiter.threshold.value = -10;
+      limiter.knee.value = 24;
+      limiter.ratio.value = 12;
+      limiter.attack.value = 0.003;
+      limiter.release.value = 0.25;
+      this.master.connect(limiter);
+      limiter.connect(this.ctx.destination);
+
+      // one shared noise buffer for every SFX (no per-call allocation churn)
+      const rate = this.ctx.sampleRate;
+      this._noiseBuf = this.ctx.createBuffer(1, rate, rate);
+      const nd = this._noiseBuf.getChannelData(0);
+      for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+
+      // Safari can leave the context 'interrupted' (calls, Siri) — heal it
+      // whenever the tab is foreground again
+      this.ctx.addEventListener('statechange', () => {
+        if (this.ctx.state !== 'running' && !document.hidden) this.ctx.resume();
+      });
 
       // long icy echo bus for chimes/shatters
       this.delay = this.ctx.createDelay(0.7);
@@ -62,7 +83,7 @@ export class TimeshardAudio {
         .then((b) => { this.gateBuf = b; })
         .catch(() => { this.gateBuf = null; });
     }
-    if (this.ctx.state === 'suspended') this.ctx.resume();
+    if (this.ctx.state !== 'running') this.ctx.resume();
   }
 
   setMuted(m) {
@@ -84,13 +105,11 @@ export class TimeshardAudio {
     g.exponentialRampToValueAtTime(0.0001, t0 + attack + decay);
   }
 
-  _noise(duration) {
-    const rate = this.ctx.sampleRate;
-    const buf = this.ctx.createBuffer(1, rate * duration, rate);
-    const d = buf.getChannelData(0);
-    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  _noise() {
+    // shared looping buffer; callers bound playback with src.stop(t + …)
     const src = this.ctx.createBufferSource();
-    src.buffer = buf;
+    src.buffer = this._noiseBuf;
+    src.loop = true;
     return src;
   }
 
@@ -229,27 +248,33 @@ export class TimeshardAudio {
     n.start(t); n.stop(t + 0.32);
   }
 
-  // A drone charging its shot: a shimmering rise matching the telegraph time.
-  charge(duration = 1) {
-    if (!this.ctx || this.muted) return;
+  // A drone charging its shot. Driven per-frame from the telegraph progress
+  // (game time!) so slow-mo stretches the shimmer exactly with the wisp, and
+  // fully cancellable — no orphaned whine after the drone dies or fires.
+  chargeStart() {
+    if (!this.ctx || this.muted) return null;
     const t = this.ctx.currentTime;
-    const D = Math.max(0.4, duration);
-    const o = this.ctx.createOscillator();
-    o.type = 'sine';
-    o.frequency.setValueAtTime(520, t);
-    o.frequency.exponentialRampToValueAtTime(1560, t + D * 0.95);
-    const trem = this.ctx.createOscillator(); // flutter that quickens
-    trem.frequency.setValueAtTime(7, t);
-    trem.frequency.linearRampToValueAtTime(18, t + D * 0.95);
+    const o = this.ctx.createOscillator(); o.type = 'sine'; o.frequency.value = 520;
+    const trem = this.ctx.createOscillator(); trem.frequency.value = 7;
     const tg = this.ctx.createGain(); tg.gain.value = 0.03;
-    const g = this.ctx.createGain();
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.075, t + D * 0.85);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + D);
-    trem.connect(tg); tg.connect(g.gain);
-    o.connect(g); g.connect(this.master);
-    o.start(t); o.stop(t + D + 0.05);
-    trem.start(t); trem.stop(t + D + 0.05);
+    const g = this.ctx.createGain(); g.gain.value = 0.0001;
+    trem.connect(tg); tg.connect(g.gain); o.connect(g); g.connect(this.master);
+    o.start(t); trem.start(t);
+    return { o, trem, g };
+  }
+
+  chargeUpdate(h, warn) { // warn = 0..1 telegraph progress
+    if (!h) return;
+    h.o.frequency.value = 520 * Math.pow(3, warn); // 520 → 1560
+    h.trem.frequency.value = 7 + warn * 11;
+    h.g.gain.value = 0.0001 + Math.pow(warn, 1.5) * 0.075;
+  }
+
+  chargeEnd(h) {
+    if (!h || !this.ctx) return;
+    const t = this.ctx.currentTime;
+    h.g.gain.setTargetAtTime(0.0001, t, 0.03);
+    h.o.stop(t + 0.25); h.trem.stop(t + 0.25);
   }
 
   // The release: a laser zap that reads as INCOMING — swells as it drops.
@@ -375,6 +400,7 @@ export class TimeshardAudio {
     ];
     let barIndex = 0;
     let nextBarTime = this.ctx.currentTime + 0.1;
+    this._musicNodes = this._musicNodes || [];
 
     const scheduleBar = () => {
       const t0 = nextBarTime;
@@ -391,6 +417,8 @@ export class TimeshardAudio {
           g.gain.linearRampToValueAtTime(0.0001, t0 + bar * 1.05);
           o.connect(g); g.connect(this.flowFilter);
           o.start(t0); o.stop(t0 + bar * 1.1);
+          this._musicNodes.push({ src: o, g });
+          o.onended = () => { o._done = true; };
         }
       }
       // sparse high bell straight to master (audible even when frozen)
@@ -401,6 +429,8 @@ export class TimeshardAudio {
       this._env(bg, t0 + bar * 0.5, 0.035, 0.01, 1.4);
       bell.connect(bg); bg.connect(this.delay); bg.connect(this.master);
       bell.start(t0 + bar * 0.5); bell.stop(t0 + bar * 0.5 + 1.6);
+      this._musicNodes.push({ src: bell, g: bg });
+      bell.onended = () => { bell._done = true; };
 
       barIndex++;
       nextBarTime += bar;
@@ -409,10 +439,23 @@ export class TimeshardAudio {
     scheduleBar(); scheduleBar();
     this._musicTimer = setInterval(() => {
       while (nextBarTime < this.ctx.currentTime + bar * 1.5) scheduleBar();
+      this._musicNodes = this._musicNodes.filter((n) => !n.src._done);
     }, 300);
   }
 
   stopMusic() {
     if (this._musicTimer) { clearInterval(this._musicTimer); this._musicTimer = null; }
+    // already-scheduled bars would otherwise ring for ~8s over pause/game-over
+    if (this._musicNodes && this.ctx) {
+      const t = this.ctx.currentTime;
+      for (const { src, g } of this._musicNodes) {
+        try {
+          g.gain.cancelScheduledValues(t);
+          g.gain.setTargetAtTime(0.0001, t, 0.08);
+          src.stop(t + 0.4);
+        } catch { /* already stopped */ }
+      }
+      this._musicNodes.length = 0;
+    }
   }
 }
