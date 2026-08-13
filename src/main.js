@@ -62,17 +62,26 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 container.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0xe8eaee);
-scene.fog = new THREE.Fog(0xe8eaee, 24, 58);
+// The world is NOT white. Measured off the reference: its mid-tones sit ~30%
+// darker than ours with a strong cyan cast (B-R about +30), and only the
+// windows and openings reach pure 255. That gap is the entire look — you
+// cannot make a white opening blow out against a near-white wall, because
+// there is no headroom left. So: cool, dropped surfaces; neutral clipped
+// light. The background stays near-white on purpose while the fog goes
+// blue-grey, so distant GEOMETRY hazes but OPENINGS stay pure.
+scene.background = new THREE.Color(0xf6fcff);
+scene.fog = new THREE.Fog(0xa8cadb, 24, 58);
 
 const camera = new THREE.PerspectiveCamera(80, window.innerWidth / window.innerHeight, 0.05, 120);
 
-const hemi = new THREE.HemisphereLight(0xffffff, 0xc9ccd4, 1.05);
+// sky is cyan and does most of the work; the sun is a fraction of what it
+// was, because the reference's shadow bands are only 0.90x their lit floor
+const hemi = new THREE.HemisphereLight(0xcfeeff, 0x9cb4c2, 0.95);
 scene.add(hemi);
-const sun = new THREE.DirectionalLight(0xffffff, 0.9);
+const sun = new THREE.DirectionalLight(0xffffff, 0.5);
 sun.position.set(8, 18, 6);
 scene.add(sun);
-const fill = new THREE.DirectionalLight(0xffffff, 0.4);
+const fill = new THREE.DirectionalLight(0xd6f0ff, 0.18);
 fill.position.set(-6, 10, -8);
 scene.add(fill);
 
@@ -85,7 +94,7 @@ window.addEventListener('resize', () => {
 // ---------------------------------------------------------------------------
 // Arena: floor with a faint grid, four walls, chunky white cover blocks
 // ---------------------------------------------------------------------------
-const MAT_WHITE = new THREE.MeshLambertMaterial({ color: 0xf4f5f7 });
+const MAT_WHITE = new THREE.MeshLambertMaterial({ color: 0xdfe8ec });
 const MAT_RED = new THREE.MeshLambertMaterial({ color: 0xff2d1a });
 const MAT_DARKRED = new THREE.MeshLambertMaterial({ color: 0xc61703 });
 const MAT_BLACK = new THREE.MeshLambertMaterial({ color: 0x16181d });
@@ -120,7 +129,7 @@ const CITY = {
   fogNear: 55, fogFar: 200,
   reach: 4,        // distant rings of 40m city cells
 };
-scene.fog = new THREE.Fog(0xe8eaee, CITY.fogNear, CITY.fogFar);
+scene.fog = new THREE.Fog(0xc2dcea, CITY.fogNear, CITY.fogFar);
 
 function makeStreetTexture() {
   const c = document.createElement('canvas');
@@ -4727,12 +4736,12 @@ function makeHallWallTexture() {
   const c = document.createElement('canvas');
   c.width = c.height = 256;
   const g = c.getContext('2d');
-  g.fillStyle = '#f0f1f4'; g.fillRect(0, 0, 256, 256);
-  g.fillStyle = 'rgba(22,24,29,0.14)';
+  g.fillStyle = '#cfdce2'; g.fillRect(0, 0, 256, 256);
+  g.fillStyle = 'rgba(28,52,66,0.14)';
   for (let i = 0; i < 2; i++) g.fillRect(i * 128 + 62, 0, 4, 256);   // panel seams every 2m
-  g.fillStyle = 'rgba(22,24,29,0.08)';
+  g.fillStyle = 'rgba(28,52,66,0.08)';
   g.fillRect(0, 74, 256, 3);                                          // datum line
-  g.fillStyle = 'rgba(22,24,29,0.35)';
+  g.fillStyle = 'rgba(28,52,66,0.35)';
   g.fillRect(0, 236, 256, 20);                                        // baseboard
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
@@ -4742,8 +4751,8 @@ function makeHallFloorTexture() {
   const c = document.createElement('canvas');
   c.width = c.height = 256;
   const g = c.getContext('2d');
-  g.fillStyle = '#e4e6ea'; g.fillRect(0, 0, 256, 256);
-  g.strokeStyle = 'rgba(22,24,29,0.12)'; g.lineWidth = 3;
+  g.fillStyle = '#c2d2d9'; g.fillRect(0, 0, 256, 256);
+  g.strokeStyle = 'rgba(28,52,66,0.12)'; g.lineWidth = 3;
   for (let i = 0; i <= 4; i++) {                                      // 1m tile grid
     g.beginPath(); g.moveTo(i * 64, 0); g.lineTo(i * 64, 256); g.stroke();
     g.beginPath(); g.moveTo(0, i * 64); g.lineTo(256, i * 64); g.stroke();
@@ -4754,7 +4763,7 @@ function makeHallFloorTexture() {
 }
 const HALL_WALL_MAT = new THREE.MeshLambertMaterial({ map: makeHallWallTexture() });
 // unlit: Lambert undersides get no directional light and go near-black
-const HALL_CEIL_MAT = new THREE.MeshBasicMaterial({ color: 0xd7dade });
+const HALL_CEIL_MAT = new THREE.MeshBasicMaterial({ color: 0x97a9b3 });
 // unlit and bright: the strips read as the light source, not a lit surface
 const HALL_LIGHT_MAT = new THREE.MeshBasicMaterial({ color: 0xffffff });
 const HALL_FLOOR_MAT = new THREE.MeshLambertMaterial({ map: makeHallFloorTexture() });
