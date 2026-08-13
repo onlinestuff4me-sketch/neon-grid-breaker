@@ -816,7 +816,7 @@ const sniperVM = new THREE.Group();
   sniperVM.add(barrel, body, scope, grip);
   // canted slightly inward so the long barrel shows in profile at rest —
   // dead-straight it foreshortens to almost nothing and looks unequipped
-  sniperVM.rotation.y = 0.16;
+  sniperVM.rotation.y = 0;      // group yaw supplies the flank reveal
   sniperVM.rotation.x = -0.02;
 }
 sniperVM.visible = false;
@@ -869,7 +869,7 @@ const rocketVM = new THREE.Group();
   grip.position.set(0, -0.05, 0.02);
   grip.rotation.x = 0.28;
   rocketVM.add(tube, mouth, rear, sight, grip);
-  rocketVM.rotation.y = 0.14;
+  rocketVM.rotation.y = 0;      // group yaw supplies the flank reveal
 }
 rocketVM.visible = false;
 
@@ -885,7 +885,7 @@ const knifeVM = new THREE.Group();
   const handle = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.045, 0.13), MAT_BLACK);
   handle.position.set(0, -0.01, 0.06);
   knifeVM.add(blade, tip, guard, handle);
-  knifeVM.rotation.y = 0.1;
+  knifeVM.rotation.y = -0.04;   // a blade wants less reveal than a slide
   knifeVM.rotation.z = -0.12;
 }
 knifeVM.visible = false;
@@ -900,9 +900,22 @@ const muzzle = new THREE.Mesh(
 );
 muzzle.position.set(0, 0.02, -0.3);
 gun.add(muzzle);
-gun.scale.setScalar(0.45);
-gun.rotation.y = -0.06;
-gun.position.set(0.055, -0.115, -0.5);   // centred and lifted: clear of the time button
+// THE VIEWMODEL BASE POSE, in one place: it is read by the init and by both
+// branches of the per-frame rig, and three hand-copied literals drift.
+//
+// The reference gun looks canted about 42 degrees, and the obvious reading —
+// that the model is rolled — is wrong. Measured, its roll and yaw are both
+// effectively ZERO; the cant is pure perspective, from sitting 16 degrees
+// off-axis inside a 91-degree field. We cannot buy that offset in portrait:
+// 16 degrees of our 42-degree horizontal field puts the gun on top of the
+// time button. So we fake the same reveal with yaw — and the old -0.06
+// yawed it the wrong way, cancelling what little our 5.7-degree offset gave
+// and projecting the pistol as a featureless slab. Turning it inward widens
+// the silhouette by 116% with nothing else changed.
+const VM = { x: 0.045, y: -0.215, z: -0.5, s: 0.66, yaw: 0.2 };
+gun.scale.setScalar(VM.s);
+gun.rotation.y = VM.yaw;
+gun.position.set(VM.x, VM.y, VM.z);   // anchored low: the reference's is clipped by the frame edge
 camera.add(gun);
 scene.add(camera);
 let gunKick = 0;
@@ -5595,6 +5608,14 @@ function frame(now) {
     camera.updateProjectionMatrix();
   }
 
+  // The viewmodel is parented to the camera, so the bullet-time zoom
+  // magnifies it: uncompensated, the pistol goes from 22% of the frame
+  // width to 29% and its grip drops off the bottom of the screen through
+  // the ammo readout. Scaling it (and its x/y offset, but never z) by the
+  // tangent ratio holds the framing identical at every FOV.
+  const vmK = Math.tan(camera.fov * Math.PI / 360) / Math.tan(FOV_NORMAL * Math.PI / 360);
+  gun.scale.setScalar(VM.s * vmK);
+
   // gun kick + sway
   gunKick = Math.max(0, gunKick - dt * 8);
   jabT = Math.max(0, jabT - dt * 4.4);   // ~0.23s stroke
@@ -5616,17 +5637,17 @@ function frame(now) {
     const out = jabT > 0 ? (p < 0.3 ? p / 0.3 : 1 - (p - 0.3) / 0.7) : 0;
     const push = out * out * (3 - 2 * out);            // smoothstep out and back
     gun.position.set(
-      0.055 + sway - push * 0.055,
-      -0.115 + bob + push * 0.055,
-      -0.5 - push * 0.34
+      (VM.x + sway - push * 0.055) * vmK,
+      (VM.y + bob + push * 0.055) * vmK,
+      VM.z - push * 0.34
     );
     gun.rotation.x = -push * 0.36;    // tip drops level with the throat
     gun.rotation.z = -push * 0.2;     // the wrist rolls over with the thrust
   } else {
     gun.position.set(
-      0.055 + sway + fold * 0.06,
-      -0.115 + bob + gunKick * 0.03 - fold * 0.42,
-      -0.5 + gunKick * 0.06 + fold * 0.12
+      (VM.x + sway + fold * 0.06) * vmK,
+      (VM.y + bob + gunKick * 0.03 - fold * 0.42) * vmK,
+      VM.z + gunKick * 0.06 + fold * 0.12
     );
     gun.rotation.x = gunKick * 0.22 - fold * 1.15;
     gun.rotation.z = 0;

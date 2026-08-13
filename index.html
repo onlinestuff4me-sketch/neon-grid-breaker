@@ -40,11 +40,20 @@
   /* edge arrows: enemies in that direction, off-screen */
   .edgearrow { position:absolute; display:none; font-size:26px; font-weight:900; color:#ff2d1a;
                text-shadow:0 0 6px rgba(255,45,26,.35); pointer-events:none; }
-  #crosshair { position:absolute; left:50%; top:50%; width:26px; height:26px; transform:translate(-50%,-50%); opacity:.85; }
-  #crosshair::before, #crosshair::after { content:""; position:absolute; background:#111; }
-  #crosshair::before { left:50%; top:0; width:2px; height:100%; transform:translateX(-50%); }
-  #crosshair::after  { top:50%; left:0; height:2px; width:100%; transform:translateY(-50%); }
-  #crosshair.hot::before, #crosshair.hot::after { background:#ff2d1a; }
+  /* Four bars around an open centre, not a solid cross: a solid one covers
+     the thing you are aiming at. Built from two elements with a gradient so
+     the gap costs no extra nodes. */
+  #crosshair { position:absolute; left:50%; top:50%; width:20px; height:20px; transform:translate(-50%,-50%); }
+  #crosshair::before, #crosshair::after { content:""; position:absolute; }
+  #crosshair::before { left:50%; top:0; width:3px; height:100%; transform:translateX(-50%);
+                       background:linear-gradient(180deg,#111 0 35%,transparent 35% 65%,#111 65% 100%); }
+  #crosshair::after  { top:50%; left:0; height:3px; width:100%; transform:translateY(-50%);
+                       background:linear-gradient(90deg,#111 0 35%,transparent 35% 65%,#111 65% 100%); }
+  /* In bullet time the canvas is hue-rotated toward red, so a red crosshair
+     disappeared into it exactly when aiming matters most. It flips light
+     with the rest of the HUD instead. */
+  body.slowmo #crosshair::before { background:linear-gradient(180deg,#eef0f3 0 35%,transparent 35% 65%,#eef0f3 65% 100%); }
+  body.slowmo #crosshair::after  { background:linear-gradient(90deg,#eef0f3 0 35%,transparent 35% 65%,#eef0f3 65% 100%); }
 
   #topbar { position:absolute; top:calc(env(safe-area-inset-top, 0px) + 10px); left:14px; right:14px;
             display:flex; justify-content:space-between; align-items:flex-start;
