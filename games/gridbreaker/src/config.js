@@ -22,7 +22,7 @@ export const TUNING = {
     base: 9.5,          // m/s at run start
     perZone: 0.25,      // gentle creep per zone crossed
     perGate: 2.0,       // the REAL jumps happen at gateways — and they stick
-    max: 27,
+    max: 34,            // high enough that ~10 gates all pay out before capping
   },
 
   // --- Gateways: pass through to shift up a speed tier ----------------------------
@@ -153,6 +153,7 @@ export const TUNING = {
     concurrent:     { from: 1,   to: 3,   at: 14 }, // max drones attacking at once
     boltSpeed:      { from: 8,   to: 15,  at: 16 }, // …but their fire is meaner
     fireInterval:   { from: 2.4, to: 1.2, at: 18 },
+    telegraphTime:  { from: 2.0, to: 1.2, at: 18 }, // charge time shortens with the interval
     engageTime:     { from: 5,   to: 8,   at: 15 }, // how long a drone harasses you
     tunnelChance:   { from: 0.15,to: 0.45,at: 10 }, // zones get more claustrophobic
     obstacleChance: { from: 0.2, to: 0.85,at: 14 }, // zones carrying terrain
@@ -166,7 +167,7 @@ export const TUNING = {
   // --- Weekly level ------------------------------------------------------------------------------
   weekly: {
     // Bump to invalidate old generated layouts when the generator changes.
-    generatorVersion: 2,
+    generatorVersion: 3,
   },
 };
 
