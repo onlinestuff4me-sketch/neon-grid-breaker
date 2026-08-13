@@ -95,6 +95,7 @@ window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  resizeRippleFX();
 });
 
 // ---------------------------------------------------------------------------
@@ -915,6 +916,44 @@ gun.add(muzzle);
 // and projecting the pistol as a featureless slab. Turning it inward widens
 // the silhouette by 116% with nothing else changed.
 const VM = { x: 0.045, y: -0.215, z: -0.5, s: 0.66, yaw: 0.2 };
+// The held weapon gets its own materials so it can be reflective without
+// making every gun in the world reflective. Phong rather than Lambert: a
+// gun needs a moving highlight, and Lambert has no specular term at all.
+// The env map is a tiny painted equirect — bright ceiling, mid walls, dark
+// floor, with two hot bands where the strips are. Because the viewmodel is
+// parented to the camera, its world normals swing as you look around, so
+// the reflection sweeps across the slide instead of sitting still on it.
+const vmEnv = (() => {
+  const c = document.createElement('canvas');
+  c.width = 64; c.height = 32;
+  const g = c.getContext('2d');
+  const grad = g.createLinearGradient(0, 0, 0, 32);
+  grad.addColorStop(0, '#ffffff');      // straight up: the strips
+  grad.addColorStop(0.34, '#cfe6f2');
+  grad.addColorStop(0.52, '#93acb7');   // horizon: the walls
+  grad.addColorStop(0.75, '#6c8490');
+  grad.addColorStop(1, '#43555e');      // straight down: the floor
+  g.fillStyle = grad; g.fillRect(0, 0, 64, 32);
+  g.fillStyle = 'rgba(255,255,255,0.9)';
+  g.fillRect(0, 3, 64, 3); g.fillRect(0, 10, 64, 2);
+  const t = new THREE.CanvasTexture(c);
+  t.mapping = THREE.EquirectangularReflectionMapping;
+  return t;
+})();
+const VM_BLACK = new THREE.MeshPhongMaterial({
+  color: 0x0b161c, specular: 0xbfe0ef, shininess: 70,
+  envMap: vmEnv, reflectivity: 0.42, combine: THREE.MixOperation,
+});
+const VM_GUNMETAL = new THREE.MeshPhongMaterial({
+  color: 0x27424e, specular: 0xd6f0ff, shininess: 95,
+  envMap: vmEnv, reflectivity: 0.55, combine: THREE.MixOperation,
+});
+gun.traverse((o) => {
+  if (!o.isMesh) return;
+  if (o.material === MAT_BLACK) o.material = VM_BLACK;
+  else if (o.material === MAT_GUNMETAL) o.material = VM_GUNMETAL;
+});
+
 gun.scale.setScalar(VM.s);
 gun.rotation.y = VM.yaw;
 gun.position.set(VM.x, VM.y, VM.z);   // anchored low: the reference's is clipped by the frame edge
@@ -1134,6 +1173,188 @@ function killBullet(i, sparkAt) {
 // ---------------------------------------------------------------------------
 const rippleGeo = new THREE.RingGeometry(0.82, 1, 24);
 const ripples = [];   // {mesh, life, maxLife, grow}
+
+// ---------------------------------------------------------------------------
+// RIPPLE REFRACTION
+//
+// The wake rings are shockwaves in air, so they should bend what is behind
+// them, not just draw over it. That needs the frame as a texture, which
+// means one post pass — the only one in the game, and the project's rule
+// against postprocessing was written about BLOOM, which we still fake with
+// emissive geometry and still will.
+//
+// It pays for itself only when there is something to refract: with no live
+// ripples the scene renders straight to the screen and this costs nothing
+// at all. When it is on, it is a single full-screen quad — the scene is
+// rendered once, into a target, never twice.
+//
+// The distortion is deliberately NOT depth-aware. Making it so would need a
+// depth texture and a second sampler; at our scale a ring bending a wall
+// slightly in front of it is invisible, and the cost is not.
+// Four, not more: rings grow, and a ring near the camera can cover half the
+// screen on its own, so the cost here is FILL, not ring count.
+const RIPPLE_FX_MAX = 4;          // strongest N rings; the rest just draw
+let rippleRT = null, fxScene = null, fxCam = null, fxBlit = null;
+let fxQuads = [], fxOn = true, fxSlowT = 0;
+// The canvas is sRGB; the render target is not. Every pass that draws the
+// target to the screen has to do this conversion itself.
+const LINEAR_TO_SRGB = `
+  vec3 toSRGB(vec3 c) {
+    return mix(c * 12.92, 1.055 * pow(max(c, vec3(0.0)), vec3(0.41666)) - 0.055,
+               step(vec3(0.0031308), c));
+  }
+`;
+const RIPPLE_FX_SRC = `
+  precision mediump float;
+  uniform sampler2D tDiffuse;
+  uniform vec2 uRes;
+  uniform float uAspect;
+  uniform vec4 uR;            // xy = screen centre (0..1), z = radius, w = strength
+  ${LINEAR_TO_SRGB}
+  void main() {
+    vec2 uv = gl_FragCoord.xy / uRes;
+    vec2 d = vec2((uv.x - uR.x) * uAspect, uv.y - uR.y);
+    float dist = length(d);
+    float w = uR.z * 0.42 + 0.012;
+    float band = 1.0 - smoothstep(0.0, w, abs(dist - uR.z));
+    vec2 n = dist > 1e-5 ? d / dist : vec2(0.0, 1.0);
+    // outward ahead of the crest, inward behind it: a real wavefront, not a bulge
+    float lobe = sin(clamp((dist - uR.z) / w, -1.0, 1.0) * 3.14159);
+    vec2 suv = uv + vec2(n.x / uAspect, n.y) * lobe * band * uR.w;
+    vec4 c = texture2D(tDiffuse, suv);
+    float blur = band * uR.w;
+    if (blur > 0.0005) {   // air you cannot quite focus through
+      float o = blur * 0.8;
+      c += texture2D(tDiffuse, suv + vec2(o, o));
+      c += texture2D(tDiffuse, suv - vec2(o, o));
+      c *= 0.3333;
+    }
+    gl_FragColor = vec4(toSRGB(c.rgb), 1.0);
+  }
+`;
+function initRippleFX() {
+  const size = new THREE.Vector2();
+  renderer.getDrawingBufferSize(size);
+  rippleRT = new THREE.WebGLRenderTarget(size.x, size.y, {
+    minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
+    format: THREE.RGBAFormat, depthBuffer: true, stencilBuffer: false,
+  });
+  // The render target holds LINEAR light — three only applies the output
+  // colour transform when it draws to the canvas, not into a target. So both
+  // of our passes below encode it themselves on the way out. Doing it here
+  // by tagging the texture does not work: it makes the sampler DECODE on
+  // read instead, which darkens the frame a second time.
+  fxCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  fxScene = new THREE.Scene();
+  const quadGeo = new THREE.PlaneGeometry(2, 2);
+  // the base image: one texture fetch per pixel, nothing else
+  fxBlit = new THREE.Mesh(quadGeo, new THREE.ShaderMaterial({
+    uniforms: { tDiffuse: { value: rippleRT.texture } },
+    vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+    fragmentShader: `
+      precision mediump float;
+      varying vec2 vUv;
+      uniform sampler2D tDiffuse;
+      ${LINEAR_TO_SRGB}
+      void main() { gl_FragColor = vec4(toSRGB(texture2D(tDiffuse, vUv).rgb), 1.0); }
+    `,
+    depthTest: false, depthWrite: false,
+  }));
+  fxBlit.frustumCulled = false;
+  fxBlit.renderOrder = 0;
+  fxScene.add(fxBlit);
+  // ...then one small quad per ring, covering ONLY that ring's annulus. The
+  // first version ran the whole ring set as a loop over every pixel on the
+  // screen, and measured twice the cost of the render target itself.
+  for (let i = 0; i < RIPPLE_FX_MAX; i++) {
+    const m = new THREE.Mesh(quadGeo, new THREE.ShaderMaterial({
+      uniforms: {
+        tDiffuse: { value: rippleRT.texture },
+        uRes: { value: new THREE.Vector2(size.x, size.y) },
+        uAspect: { value: size.x / size.y },
+        uR: { value: new THREE.Vector4() },
+      },
+      vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }',
+      fragmentShader: RIPPLE_FX_SRC,
+      depthTest: false, depthWrite: false,
+    }));
+    m.frustumCulled = false;
+    m.renderOrder = 1 + i;
+    m.visible = false;
+    fxScene.add(m);
+    fxQuads.push(m);
+  }
+}
+function resizeRippleFX() {
+  if (!rippleRT) return;
+  const size = new THREE.Vector2();
+  renderer.getDrawingBufferSize(size);
+  rippleRT.setSize(size.x, size.y);
+  for (const q of fxQuads) {
+    q.material.uniforms.uRes.value.set(size.x, size.y);
+    q.material.uniforms.uAspect.value = size.x / size.y;
+  }
+}
+const _vFx = new THREE.Vector3();
+// Project the live rings to screen space and hand the strongest few to their
+// own quads. Strength follows remaining life and size on screen, so a ring in
+// your face bends hard and a distant one barely at all.
+function collectRippleFX() {
+  if (!fxQuads.length) return 0;
+  const out = [];
+  for (const r of ripples) {
+    _vFx.copy(r.mesh.position).project(camera);
+    if (_vFx.z > 1) continue;                      // behind the camera
+    const sx = _vFx.x * 0.5 + 0.5, sy = _vFx.y * 0.5 + 0.5;
+    if (sx < -0.35 || sx > 1.35 || sy < -0.35 || sy > 1.35) continue;
+    const dist = camera.position.distanceTo(r.mesh.position);
+    if (dist < 0.25) continue;
+    const world = r.mesh.scale.x;                  // ring radius in metres
+    // radius as a fraction of screen HEIGHT: world size over distance, through the FOV
+    const rad = world / (dist * Math.tan(camera.fov * Math.PI / 360)) * 0.5;
+    // A ring bigger than half the screen is no longer a shockwave you can
+    // read, it is a full-screen warp — and it is where all the fill goes.
+    if (rad < 0.012 || rad > 0.5) continue;
+    const fade = Math.max(0, r.life / r.maxLife);
+    const strength = 0.030 * fade * Math.min(1, rad / 0.22);
+    if (strength < 0.0016) continue;
+    out.push({ sx, sy, rad, strength });
+  }
+  out.sort((a, b) => b.strength - a.strength);
+  const n = Math.min(out.length, RIPPLE_FX_MAX);
+  for (let i = 0; i < fxQuads.length; i++) {
+    const q = fxQuads[i];
+    if (i >= n) { q.visible = false; continue; }
+    const o = out[i];
+    const w = o.rad * 0.42 + 0.012;
+    const ax = q.material.uniforms.uAspect.value;
+    q.material.uniforms.uR.value.set(o.sx, o.sy, o.rad, o.strength);
+    // cover only the annulus, in NDC: a fraction f of screen height is 2f of NDC
+    q.scale.set(Math.min(1, (o.rad + w) * 2 / ax), Math.min(1, (o.rad + w) * 2), 1);
+    q.position.set(o.sx * 2 - 1, o.sy * 2 - 1, 0);
+    q.visible = true;
+  }
+  return n;
+}
+function renderFrame(dt) {
+  if (!rippleRT) initRippleFX();
+  // Self-limiting: if frames are consistently long while the pass is on, it
+  // turns itself off for the rest of the run. I cannot profile a real phone
+  // from here, so the effect has to be able to get out of the way.
+  if (fxOn && dt > 0.028) { fxSlowT += dt; if (fxSlowT > 2.5) fxOn = false; }
+  else fxSlowT = Math.max(0, fxSlowT - dt);
+  const n = (fxOn && ripples.length) ? collectRippleFX() : 0;
+  if (n === 0) {                     // nothing to bend: straight to the screen
+    renderer.setRenderTarget(null);
+    renderer.render(scene, camera);
+    return;
+  }
+  renderer.setRenderTarget(rippleRT);
+  renderer.clear();
+  renderer.render(scene, camera);
+  renderer.setRenderTarget(null);
+  renderer.render(fxScene, fxCam);
+}
 
 function spawnRipple(pos, vel, big) {
   const mat = new THREE.MeshBasicMaterial({
@@ -5550,7 +5771,7 @@ function frame(now) {
   lastT = now;
 
   if (game.state === 'paused') {   // hard freeze: just keep the frame up
-    renderer.render(scene, camera);
+    renderFrame(dt);
     return;
   }
 
@@ -5883,7 +6104,7 @@ function frame(now) {
   sfx.update(playing || game.state === 'clear' ? timeScale : 1, dt);
   el.crosshair.classList.toggle('hot', player.fireCd > 0);
 
-  renderer.render(scene, camera);
+  renderFrame(dt);
 }
 requestAnimationFrame(frame);
 
@@ -5919,6 +6140,9 @@ window.__ts = {
       stretches: (L.stretches || []).map((s) => ({ z0: s.z0, z1: s.z1, n: s.cells.length })),
       doorZ: L.door.z };
   },
+  fx: () => ({ on: fxOn, slowT: +fxSlowT.toFixed(2),
+    active: fxQuads.filter((q) => q.visible).length }),
+  setFx: (v) => { fxOn = !!v; fxSlowT = 0; },
   progress: () => ({ lifetimeDoors, archive: [...archive] }),
   banner: showBanner,
   diff: () => ({ speed: enemyBulletSpeed(), aim: aimSpeedFactor(), t: diffT() }),
