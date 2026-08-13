@@ -70,7 +70,37 @@ export const COMP = {
   rusherFrac: 0.4,     // share of the wave once rushers debut
   debutFrac: 0.2,      // share for the type debuting this wave
   gunnerFloor: 0.25,   // minimum share reserved for plain gunners
-  hallDoor1: 12, hallDoor2: 15, hallBase: 12, hallPerDoor: 2, hallCap: 24,
+};
+
+// THE TUNNEL LEG, stretch by stretch.
+//
+// A leg is a chain of STRETCHES — one straight run plus the turn that ends
+// it — followed by the APPROACH, the straight stare down at the door. The
+// leg's enemy count is not a number picked per door and then dribbled out on
+// a clock: it is the sum of what each stretch is worth. A stretch's share is
+// released when you WALK INTO it, so the fight travels with you and nothing
+// can pile up in front of the door. The approach is worth exactly one group:
+// the final wave you clear with the door in frame.
+export const LEG = {
+  cellM: 4,            // metres per corridor cell — stretch lengths are in these
+  fwdBase: 16, fwdVar: 6,          // forward cells in a normal leg
+  fwdGauntlet: 22, fwdGauntletVar: 5,
+  runBase: 3, runVar: 3,           // cells between turns: one stretch's straight
+  runServiceRun: 2, runServiceVar: 2,
+  runGauntlet: 6, runGauntletVar: 4,
+  approach: 4,                     // straight cells in front of the door
+  // The leg's size comes from how much corridor there is to fight in, not
+  // from how many turns it happens to have — otherwise a zig-zagging service
+  // run, which is SHORTER to walk, would be the bigger fight. Budget by cell,
+  // then split it between the stretches in proportion to their length.
+  perCell: 0.5,                    // bodies per corridor cell at door 1
+  perCellPerDoor: 0.05,            // ...growing this much per door
+  perCellCap: 0.9,                 // ...to this ceiling
+  stretchMin: 2, stretchCap: 4,    // no stretch is ever emptier or fuller
+  finaleWave: 3,                   // the one final group waiting at the door
+  lookahead: 1,                    // stretches past yours that may also spawn
+  spawnMin: 9,                     // nearest a corridor spawn may appear (m)
+  spawnMax: 40,                    // and the furthest
 };
 
 // How fast the room refills. `fill` is live enemies / alive cap.
@@ -81,7 +111,6 @@ export const PACING = {
   hallFullGap: 1.4, hallFillGap: 2.2,
   cityBaseGap: 0.7, cityFillGap: 2.6,
   killPullMin: 0.5, killPullRange: 0.9,   // a kill pulls the next spawn in
-  finale: 2,           // last N of a leg stage on the door approach
   aheadMin: 4,         // never spawn closer than this in front (m)
 };
 

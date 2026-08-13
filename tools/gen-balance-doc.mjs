@@ -8,7 +8,7 @@ import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
-  WEAPONS, TYPE_INTRO, TYPE_SHARE, TYPE_DROP, DROPS, RAMP, COMP, PACING, TIME,
+  WEAPONS, TYPE_INTRO, TYPE_SHARE, TYPE_DROP, DROPS, RAMP, COMP, LEG, PACING, TIME,
 } from '../src/balance.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -112,8 +112,37 @@ a flat ${n(RAMP.rushDrain)}×. An enemy must be in view for
 - **Rushers** (once debuted) = \`min(round(total × ${n(COMP.rusherFrac)}), 2 + n)\`
 - **Debut type** gets \`max(2, round(total × ${n(COMP.debutFrac)}))\`
 - **Gunners** keep at least ${n(COMP.gunnerFloor * 100)} % of the wave
-- **Tunnel legs**: ${COMP.hallDoor1} at door 1, ${COMP.hallDoor2} at door 2,
-  then \`min(${COMP.hallBase} + ${COMP.hallPerDoor}n, ${COMP.hallCap})\`
+
+Tunnel legs do not use a wave total at all — see below.
+
+## The tunnel leg, stretch by stretch
+
+A leg is a chain of **stretches** — one straight run plus the turn that ends
+it — followed by the **approach**, the straight stare down at the door. A
+stretch's share of the wave is released when you **walk into it**, so the
+fight travels with you and nothing can accumulate in front of the door. The
+approach is worth exactly one group: the final wave you clear with the door
+in frame.
+
+| Knob | Value | Meaning |
+|---|---|---|
+| \`fwdBase\` / \`fwdVar\` | ${LEG.fwdBase} + 0–${LEG.fwdVar - 1} cells | forward length of a normal leg (${LEG.fwdBase * LEG.cellM}–${(LEG.fwdBase + LEG.fwdVar - 1) * LEG.cellM} m before jogs) |
+| \`fwdGauntlet\` | ${LEG.fwdGauntlet} + 0–${LEG.fwdGauntletVar - 1} cells | ...and of a gauntlet |
+| \`runBase\` / \`runVar\` | ${LEG.runBase} + 0–${LEG.runVar - 1} cells | one stretch's straight, ${LEG.runBase * LEG.cellM}–${(LEG.runBase + LEG.runVar - 1) * LEG.cellM} m |
+| \`runServiceRun\` | ${LEG.runServiceRun} + 0–${LEG.runServiceVar - 1} | a service run turns constantly |
+| \`runGauntlet\` | ${LEG.runGauntlet} + 0–${LEG.runGauntletVar - 1} | a gauntlet barely turns at all |
+| \`approach\` | ${LEG.approach} cells (${LEG.approach * LEG.cellM} m) | straight run in front of the door |
+| \`perCell\` | ${n(LEG.perCell)} + ${n(LEG.perCellPerDoor)}·door | bodies per corridor cell, capped at ${n(LEG.perCellCap)} |
+| \`stretchMin\` / \`stretchCap\` | ${LEG.stretchMin} / ${LEG.stretchCap} | no stretch is ever emptier or fuller |
+| \`finaleWave\` | ${LEG.finaleWave} | the one final group waiting at the door |
+| \`lookahead\` | ${LEG.lookahead} | stretches past yours that may also spawn |
+| \`spawnMin\` / \`spawnMax\` | ${LEG.spawnMin}–${LEG.spawnMax} m | how far ahead a corridor spawn may appear |
+
+**Leg total** = \`round(bodyCells × perCell(door)) + ${LEG.finaleWave}\`, split
+between the stretches in proportion to their length. A longer corridor is a
+bigger fight because there is more of it — not because a number went up, and
+not because it happens to turn more often. Budgeting by stretch *count* would
+make a zig-zagging service run, which is shorter to walk, the bigger fight.
 
 ## Spawn pacing
 
@@ -126,8 +155,9 @@ a flat ${n(RAMP.rushDrain)}×. An enemy must be in view for
 
 All gaps are multiplied by a 0.85–1.15 jitter. Spawns are suppressed while a
 message card is on screen, and in the tunnel they are hard-gated to at least
-**${n(PACING.aheadMin)} m ahead** of the player. The last **${PACING.finale}**
-of a leg stage on the door approach so the door opens in view.
+**${n(PACING.aheadMin)} m ahead** of the player, and to the stretch the player
+is in (plus ${LEG.lookahead}). The last **${LEG.finaleWave}** of a leg stage on
+the door approach, in line of sight of the slab, so the door opens in view.
 
 ## Time control
 

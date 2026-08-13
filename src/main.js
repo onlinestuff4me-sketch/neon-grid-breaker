@@ -12,7 +12,7 @@
 // speed while the world crawls.
 
 import * as THREE from '../lib/three.module.min.js';
-import { WEAPONS, TYPE_INTRO, TYPE_SHARE, TYPE_DROP, DROPS, RAMP, COMP, PACING, TIME }
+import { WEAPONS, TYPE_INTRO, TYPE_SHARE, TYPE_DROP, DROPS, RAMP, COMP, PACING, TIME, LEG }
   from './balance.js';
 import { composeProtocol, newRunMemory, enemyRoster, ELEMENTS } from './protocols.js';
 
@@ -1901,12 +1901,25 @@ function spawnEnemy(type = 'gunner') {
     // the door in frame, so the opening lands as visible payoff and you are
     // never left hunting for where to go next.
     const finale = game.spawnQueue.length < HALL_FINALE && L.approach && L.approach.length;
-    // Everyone else comes out of the corridor the player still has to walk:
-    // cells ahead of them but short of the door approach, so the hallway
-    // leads you forward instead of stacking bodies at the exit.
+    // Everyone else comes out of the stretch the player is walking THROUGH,
+    // or the next one — never the whole remaining corridor. Bodies therefore
+    // travel with you down the leg instead of accumulating in whatever is
+    // still ahead, which is what stacked a whole wave in front of the door.
     const approachZ = L.approach && L.approach.length ? L.approach[0][1] * HALL.cell : 1e9;
-    const pool = finale ? L.approach
-      : L.cells.filter(([, cgz]) => cgz * HALL.cell < approachZ - 2);
+    let pool;
+    if (finale) pool = L.approach;
+    else if (L.stretches && L.stretches.length > 1) {
+      const body = L.stretches.length - 2;   // last stretch before the approach
+      const k = Math.min(playerStretch(L), body);
+      const hi = Math.min(k + LEG.lookahead, body);
+      const z0 = L.stretches[k].z0, z1 = L.stretches[hi].z1;
+      pool = L.cells.filter(([, cgz]) =>
+        cgz * C >= z0 - C && cgz * C <= z1 + C && cgz * C < approachZ - 2);
+    }
+    if (!pool || !pool.length) {
+      pool = L.cells.filter(([, cgz]) => cgz * HALL.cell < approachZ - 2);
+    }
+    if (!pool.length) pool = L.cells;
     // The door's own sightline: the last approach cell, which the slab sits
     // at the end of. Anything that can see this cell can see the door open.
     const doorView = finale
@@ -1932,7 +1945,7 @@ function spawnEnemy(type = 'gunner') {
           _v3.set(doorView[0] * C, 1.4, doorView[1] * C))) continue;
         x = px; z = pz; placed = true; break;
       }
-      if (d < 12 || d > 40) continue;
+      if (d < LEG.spawnMin || d > LEG.spawnMax) continue;
       if (!hasLineOfSight(_v2.set(px, 1.4, pz), _v3.set(player.pos.x, EYE_HEIGHT, player.pos.z))) {
         x = px; z = pz; placed = true;   // prefer stepping out from cover
         break;
@@ -1941,14 +1954,23 @@ function spawnEnemy(type = 'gunner') {
     }
     if (!placed && fbOk) { x = fbX; z = fbZ; placed = true; }
     if (!placed) {
-      // last resort: on the approach spine, ahead of the player but never
-      // past the doorway itself
-      const app = L.approach && L.approach.length ? L.approach : null;
-      const [cgx, cgz] = (app && app[0]) || L.cells[L.cells.length - 1];
-      const cap = app ? app[app.length - 1][1] * C : cgz * C;
-      x = cgx * C;
-      z = Math.min(cap, Math.max(cgz * C, player.pos.z + 6));
+      // Last resort: the furthest-ahead cell of THIS spawn's own pool. It
+      // used to fall back to the door approach, which is how a whole wave
+      // ended up waiting at the exit once the player outwalked its release.
+      let bx = null, bz = -1e9;
+      for (const [cgx, cgz] of pool) {
+        if (cgz * C > bz && cgz * C >= player.pos.z + PACING.aheadMin) { bz = cgz * C; bx = cgx * C; }
+      }
+      if (bx !== null) { x = bx; z = bz; }
+      else {   // nothing ahead at all: hand it to the approach, clamped short
+        const app = L.approach && L.approach.length ? L.approach : null;
+        const [cgx, cgz] = (app && app[0]) || L.cells[L.cells.length - 1];
+        const cap = app ? app[app.length - 1][1] * C : cgz * C;
+        x = cgx * C;
+        z = Math.min(cap, Math.max(cgz * C, player.pos.z + 6));
+      }
     }
+    L.released = (L.released || 0) + 1;   // the stretch budget is spent here
   } else {
     // valid ground = ON a street (never a block-interior pocket the player
     // can't reach), inside the live world, and clear of buildings
@@ -4699,8 +4721,8 @@ function recordMet(ids) {
   if (fresh) saveProgress();
 }
 
-const HALL = { cell: 4, h: 3.1, wall: 0.3 };
-const HALL_FINALE = PACING.finale;   // last of a leg stage on the door approach
+const HALL = { cell: LEG.cellM, h: 3.1, wall: 0.3 };
+const HALL_FINALE = LEG.finaleWave;   // the one final group staged at the door
 function makeHallWallTexture() {
   const c = document.createElement('canvas');
   c.width = c.height = 256;
@@ -4774,13 +4796,16 @@ function genHallLeg(sgx, sgz, proto) {
   const form = (proto && proto.form && proto.form.id) || 'corridor';
   // FORM decides the skeleton: a service run turns constantly, a gauntlet is
   // one long straight with nowhere to hide, an atrium is mostly chamber.
-  const fwd = form === 'gauntlet' ? 17 + Math.floor(Math.random() * 4)
-    : 12 + Math.floor(Math.random() * 5);
+  const fwd = form === 'gauntlet'
+    ? LEG.fwdGauntlet + Math.floor(Math.random() * LEG.fwdGauntletVar)
+    : LEG.fwdBase + Math.floor(Math.random() * LEG.fwdVar);
   let f = 0, jogs = 0;
   while (f < fwd) {
-    const run = form === 'serviceRun' ? 2 + Math.floor(Math.random() * 2)
-      : form === 'gauntlet' ? 6 + Math.floor(Math.random() * 4)
-      : 3 + Math.floor(Math.random() * 3);
+    const run = form === 'serviceRun'
+      ? LEG.runServiceRun + Math.floor(Math.random() * LEG.runServiceVar)
+      : form === 'gauntlet'
+        ? LEG.runGauntlet + Math.floor(Math.random() * LEG.runGauntletVar)
+        : LEG.runBase + Math.floor(Math.random() * LEG.runVar);
     for (let i = 0; i < run && f < fwd; i++) { gz++; f++; add(gx, gz); spine.push([gx, gz]); }
     if (f >= fwd - 4) break;   // leave the tail straight for the door sightline
     const jog = 2 + Math.floor(Math.random() * 2);
@@ -4816,7 +4841,7 @@ function genHallLeg(sgx, sgz, proto) {
   }
 
   // the approach: a clean straight run so the door is visible from it
-  const APPROACH = 4;
+  const APPROACH = LEG.approach;
   for (let i = 0; i < APPROACH; i++) { gz++; add(gx, gz); spine.push([gx, gz]); }
   // Branches: alternate routes that only ever move FORWARD and rejoin the
   // spine further along — a choice of lane, never a detour backwards.
@@ -4836,11 +4861,39 @@ function genHallLeg(sgx, sgz, proto) {
   // at its end, where the final enemies stage so you watch it open as they
   // shatter. approach[0] is where the run begins; the last is at the slab.
   const approach = spine.slice(spine.length - APPROACH);
-  return { cells, spine, approach, pillars, endGx: gx, endGz: gz };
+  return { cells, spine, approach, stretches: splitStretches(spine, APPROACH),
+    pillars, endGx: gx, endGz: gz };
+}
+
+// A STRETCH is one straight run plus the turn that ends it — the unit the
+// fight is budgeted in. Walking the spine, a new stretch begins wherever the
+// corridor straightens out again after a lateral jog. Derived from the
+// finished spine rather than tracked during generation, so every path
+// through genHallLeg (jogs, the no-jog fallback, forms) segments the same.
+// The approach is always the last stretch, however the leg was built.
+function splitStretches(spine, approachLen) {
+  const body = spine.slice(0, Math.max(1, spine.length - approachLen));
+  const out = [];
+  let cur = [], wasLateral = false;
+  for (let i = 0; i < body.length; i++) {
+    const lateral = i > 0 && body[i][1] === body[i - 1][1];
+    if (!lateral && wasLateral && cur.length) { out.push(cur); cur = []; }
+    cur.push(body[i]);
+    wasLateral = lateral;
+  }
+  if (cur.length) out.push(cur);
+  out.push(spine.slice(spine.length - approachLen));
+  // z span per stretch: what counts as "you are in it", and which cells of
+  // the leg (branch lanes and chambers included) may spawn for it
+  return out.map((c) => ({
+    cells: c,
+    z0: Math.min(...c.map((p) => p[1])) * HALL.cell,
+    z1: Math.max(...c.map((p) => p[1])) * HALL.cell,
+  }));
 }
 
 function buildHallLeg(sgx, sgz, proto) {
-  const { cells, approach, pillars, endGx, endGz } = genHallLeg(sgx, sgz, proto);
+  const { cells, approach, stretches, pillars, endGx, endGz } = genHallLeg(sgx, sgz, proto);
   const cond = (proto && proto.condition && proto.condition.id) || null;
   const measures = new Set((proto && proto.measures || []).map((m) => m.id));
   const C = HALL.cell, H = HALL.h, W = HALL.wall;
@@ -4909,7 +4962,7 @@ function buildHallLeg(sgx, sgz, proto) {
       max: new THREE.Vector3(dx0 + 1, H, dz0 + 0.2),
     },
   };
-  return { cells, approach, pillars, meshes, obs, door, endGx, endGz, proto,
+  return { cells, approach, stretches, pillars, meshes, obs, door, endGx, endGz, proto,
     retired: false, nextBuilt: false };
 }
 
@@ -4924,6 +4977,71 @@ function rebuildHallObstacles() {
 
 // corridor-safe cast: no lasers (the beam ignores walls) and no snipers /
 // rocketeers / bombers (they want open air) — their slots become fighters
+// Which stretch of the leg the player is standing in. Stretches run in
+// walking order, so it is simply the last one whose start is behind you.
+function playerStretch(L) {
+  if (!L || !L.stretches) return 0;
+  let k = 0;
+  for (let i = 0; i < L.stretches.length; i++) {
+    if (L.stretches[i].z0 <= player.pos.z + 2) k = i;
+  }
+  return k;
+}
+
+// What each stretch of this leg is worth, and therefore what the whole leg
+// is worth: a longer corridor is a bigger fight because it has more rooms to
+// have it in, not because a number went up. The approach is always exactly
+// one final group.
+function stretchQuota(L, n) {
+  const per = Math.min(LEG.perCellCap, LEG.perCell + n * LEG.perCellPerDoor);
+  const body = L.stretches.slice(0, -1);          // everything but the approach
+  if (!body.length) return [LEG.finaleWave];
+  const cells = body.reduce((a, s) => a + s.cells.length, 0) || 1;
+  const budget = Math.max(body.length * LEG.stretchMin, Math.round(cells * per));
+  const q = body.map((s) => Math.max(LEG.stretchMin, Math.min(LEG.stretchCap,
+    Math.round(budget * s.cells.length / cells))));
+  q.push(LEG.finaleWave);
+  return q;
+}
+
+// How many more bodies the corridor may release right now: the share of the
+// stretch you are standing in plus the next one, and nothing else. The window
+// REBASES when you walk into a new stretch, which is the load-bearing part —
+// a cumulative allowance would let three stretches' worth of backlog drain
+// into whichever room you happened to stop in, and the last of it would
+// arrive at the door. What you walk past, you walk past: the leftover is
+// dropped from the queue (never the head, which carries the leg's debut, and
+// never the finale tail waiting at the door), so the count on the HUD stays
+// honest and pushing forward genuinely trades kills for ground.
+function hallAllowance() {
+  if (game.mode !== 'hall' || !hall) return Infinity;
+  const L = hall.legs[hall.cur];
+  if (!L || !L.quota) return Infinity;
+  const k = playerStretch(L);
+  if (L.markK === undefined || k > L.markK) {
+    // Only what is genuinely BEHIND you is forfeited. The old window reached
+    // one stretch past where you were standing, and that stretch may be the
+    // one you have just walked into — charging it as skipped would punish you
+    // for arriving. So keep the part of the window still ahead of you.
+    let ahead = 0;
+    if (L.markK !== undefined) {
+      for (let i = k; i <= Math.min(L.markK + LEG.lookahead, L.quota.length - 1); i++) ahead += L.quota[i];
+    }
+    const leftover = L.markK === undefined ? 0
+      : Math.max(0, (L.budget - L.released) - ahead);
+    if (leftover > 0) {
+      const tail = LEG.finaleWave;
+      const n = Math.min(leftover, Math.max(0, game.spawnQueue.length - tail));
+      if (n > 0) game.spawnQueue.splice(game.spawnQueue.length - tail - n, n);
+    }
+    let win = 0;
+    for (let i = k; i <= Math.min(k + LEG.lookahead, L.quota.length - 1); i++) win += L.quota[i];
+    L.markK = k;
+    L.budget = (L.released || 0) + win;
+  }
+  return L.budget - (L.released || 0);
+}
+
 function hallWave(n) {
   const sub = { laser: 'rusher', sniper: 'gunner', rocketeer: 'heavy', bomber: 'shotgunner' };
   // Only types this player has actually unlocked may appear — the same two
@@ -4931,15 +5049,22 @@ function hallWave(n) {
   const roster = new Set(enemyRoster(n, lifetimeDoors).map((t) => sub[t] || t));
   roster.add('gunner');
   const q = composeWave(n).map((t) => sub[t] || t).filter((t) => roster.has(t));
-  // the first two legs are the game teaching itself — give them enough
-  // bodies to actually feel like a fight before the door
-  const want = n === 1 ? COMP.hallDoor1 : n === 2 ? COMP.hallDoor2
-    : Math.min(COMP.hallBase + n * COMP.hallPerDoor, COMP.hallCap);
+  // The leg's size comes from the leg itself: every stretch is worth a few
+  // bodies and the approach is worth one last group. A wave is therefore
+  // always exactly as big as there is corridor to fight it in.
+  const leg = hall && hall.legs[hall.cur];
+  let want = COMP.baseTotal + n * COMP.perWave;
+  if (leg && leg.stretches) {
+    leg.quota = stretchQuota(leg, n);
+    leg.released = 0;
+    leg.markK = undefined;   // the release window re-arms with the wave
+    leg.budget = 0;
+    want = leg.quota.reduce((a, b) => a + b, 0);
+  }
   const filler = roster.has('rusher') ? ['gunner', 'rusher'] : ['gunner'];
   while (q.length < want) q.push(filler[Math.floor(Math.random() * filler.length)]);
   q.length = Math.min(q.length, want);
   // the leg's debut enemy leads the wave, so the introduction actually lands
-  const leg = hall && hall.legs[hall.cur];
   const debut = leg && leg.proto && leg.proto.enemyDebut;
   if (debut) {
     const mapped = sub[debut.id] || debut.id;
@@ -5078,7 +5203,15 @@ function unstickHallEnemies(dt) {
     // the last few of a wave get rescued sooner: they gate the door
     const limit = game.spawnQueue.length === 0 ? 4 : 8;
     if (e.stuckT < limit) continue;
-    const pool = (L.approach && L.approach.length ? L.approach : L.cells);
+    // Re-place them in the player's own stretch, not at the door: dropping a
+    // mid-leg straggler onto the approach is exactly the pile-up the stretch
+    // budget exists to prevent. Only the last group falls back to the door.
+    const k = playerStretch(L);
+    const body = L.stretches ? L.stretches.length - 2 : -1;
+    const pool = (game.spawnQueue.length === 0 && enemies.length <= HALL_FINALE)
+        || !L.stretches || k > body
+      ? (L.approach && L.approach.length ? L.approach : L.cells)
+      : L.stretches[Math.min(k + LEG.lookahead, body)].cells;
     let best = null, bestScore = -1e9;
     for (const [cgx, cgz] of pool) {
       const px = cgx * C, pz = cgz * C;
@@ -5402,7 +5535,12 @@ function frame(now) {
         game.introLen = 1.2;   // only the guided first wave has a long intro
       }
     }
-    if (game.state === 'play' && game.spawnQueue.length > 0 && enemies.length < maxAlive()) {
+    // The corridor releases by POSITION as well as by clock: a stretch's
+    // share of the wave unlocks when you walk into it. Push forward and the
+    // fights come sooner; hang back and the rest of the leg waits for you.
+    const room = hallAllowance();
+    if (game.state === 'play' && game.spawnQueue.length > 0 &&
+        enemies.length < maxAlive() && room > 0) {
       game.spawnTimer -= sdt;
       // hold entrances while a card is on screen: one thing to read at a time
       if (game.spawnTimer <= 0 && performance.now() >= messageBusyUntil) {
@@ -5418,7 +5556,7 @@ function frame(now) {
           // rushers hunt in packs of 3-4: pull the rest of the pack from
           // anywhere in the wave and send them out the same alley together
           let extra = Math.min(2 + (Math.random() < 0.5 ? 1 : 0),
-            maxAlive() - enemies.length);
+            maxAlive() - enemies.length, room - 1);
           for (let i = 0; i < game.spawnQueue.length && extra > 0;) {
             if (game.spawnQueue[i] === 'rusher') {
               game.spawnQueue.splice(i, 1);
@@ -5430,7 +5568,7 @@ function frame(now) {
           // corridors fight in clusters: 1-3 round the corner together
           let extra = Math.min(
             (Math.random() < 0.65 ? 1 : 0) + (Math.random() < 0.3 ? 1 : 0),
-            game.spawnQueue.length, maxAlive() - enemies.length);
+            game.spawnQueue.length, maxAlive() - enemies.length, room - 1);
           while (extra-- > 0) spawnEnemy(game.spawnQueue.shift());
         }
         // the fuller the street (a fresh pack fills it fast), the longer
@@ -5552,6 +5690,14 @@ window.__ts = {
   audio: () => sfx.debug(), sfx,
   slow: () => ({ bank: +slowBank.toFixed(2), locked: timeLocked, mode: timeMode }),
   hall: () => hall,
+  leg: () => {
+    if (!hall) return null;
+    const L = hall.legs[hall.cur];
+    return { k: playerStretch(L), room: hallAllowance(), released: L.released || 0,
+      quota: L.quota || null, form: L.proto && L.proto.form && L.proto.form.id,
+      stretches: (L.stretches || []).map((s) => ({ z0: s.z0, z1: s.z1, n: s.cells.length })),
+      doorZ: L.door.z };
+  },
   progress: () => ({ lifetimeDoors, archive: [...archive] }),
   banner: showBanner,
   diff: () => ({ speed: enemyBulletSpeed(), aim: aimSpeedFactor(), t: diffT() }),

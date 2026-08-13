@@ -82,8 +82,37 @@ a flat 0.4×. An enemy must be in view for
 - **Rushers** (once debuted) = `min(round(total × 0.4), 2 + n)`
 - **Debut type** gets `max(2, round(total × 0.2))`
 - **Gunners** keep at least 25 % of the wave
-- **Tunnel legs**: 12 at door 1, 15 at door 2,
-  then `min(12 + 2n, 24)`
+
+Tunnel legs do not use a wave total at all — see below.
+
+## The tunnel leg, stretch by stretch
+
+A leg is a chain of **stretches** — one straight run plus the turn that ends
+it — followed by the **approach**, the straight stare down at the door. A
+stretch's share of the wave is released when you **walk into it**, so the
+fight travels with you and nothing can accumulate in front of the door. The
+approach is worth exactly one group: the final wave you clear with the door
+in frame.
+
+| Knob | Value | Meaning |
+|---|---|---|
+| `fwdBase` / `fwdVar` | 16 + 0–5 cells | forward length of a normal leg (64–84 m before jogs) |
+| `fwdGauntlet` | 22 + 0–4 cells | ...and of a gauntlet |
+| `runBase` / `runVar` | 3 + 0–2 cells | one stretch's straight, 12–20 m |
+| `runServiceRun` | 2 + 0–1 | a service run turns constantly |
+| `runGauntlet` | 6 + 0–3 | a gauntlet barely turns at all |
+| `approach` | 4 cells (16 m) | straight run in front of the door |
+| `perCell` | 0.5 + 0.05·door | bodies per corridor cell, capped at 0.9 |
+| `stretchMin` / `stretchCap` | 2 / 4 | no stretch is ever emptier or fuller |
+| `finaleWave` | 3 | the one final group waiting at the door |
+| `lookahead` | 1 | stretches past yours that may also spawn |
+| `spawnMin` / `spawnMax` | 9–40 m | how far ahead a corridor spawn may appear |
+
+**Leg total** = `round(bodyCells × perCell(door)) + 3`, split
+between the stretches in proportion to their length. A longer corridor is a
+bigger fight because there is more of it — not because a number went up, and
+not because it happens to turn more often. Budgeting by stretch *count* would
+make a zig-zagging service run, which is shorter to walk, the bigger fight.
 
 ## Spawn pacing
 
@@ -96,8 +125,9 @@ a flat 0.4×. An enemy must be in view for
 
 All gaps are multiplied by a 0.85–1.15 jitter. Spawns are suppressed while a
 message card is on screen, and in the tunnel they are hard-gated to at least
-**4 m ahead** of the player. The last **2**
-of a leg stage on the door approach so the door opens in view.
+**4 m ahead** of the player, and to the stretch the player
+is in (plus 1). The last **3** of a leg stage on
+the door approach, in line of sight of the slab, so the door opens in view.
 
 ## Time control
 
