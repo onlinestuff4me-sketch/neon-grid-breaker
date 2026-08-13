@@ -67,9 +67,9 @@ it is a real decision — which is the whole point of collecting on foot.
 
 | | Bullet speed (m/s) | Telegraph scale | Slow-mo cost |
 |---|---|---|---|
-| wave 1 | 6.05 | 1.15× | 0.55× |
-| wave 6 | 8.3 | 0.864× | 0.755× |
-| wave 12 | 11 | 0.52× | 1× |
+| wave 1 | 7.7 | 1.15× | 0.55× |
+| wave 6 | 10.564 | 0.864× | 0.755× |
+| wave 12 | 14 | 0.52× | 1× |
 
 Past wave 12, speed creeps 2 % per
 wave to a hard cap of 1.35× base. Rush Hour drains the bank at

@@ -30,7 +30,9 @@ const TIME_EASE = 14;             // easing rate between the two
 
 const PLAYER_BULLET_SPEED = 46;
 const ENEMY_BULLET_SPEED = 11;    // base; creeps up slightly with each wave
-const BULLET_GRAVITY = 4;         // gentle drop, visible on long shots
+// Was 4, which bows a 30 m shot by 0.85 m. Once the tracer is a visible
+// ribbon rather than a hairline, a curve that size reads as a bug.
+const BULLET_GRAVITY = 1.2;       // barely there, but long shots still settle
 
 // The ammo economy: `mag` bullets per clip, at most `maxClips` clips held.
 // The pistol is the only weapon with a deep clip (5); everything heavier
@@ -1005,6 +1007,48 @@ function updateReload(dt) {
 // ---------------------------------------------------------------------------
 const bullets = [];   // {mesh, trail, pos, vel, prev, fromPlayer, life}
 const bulletGeo = new THREE.SphereGeometry(0.04, 8, 8);
+// A ROUND, not a ball. Lathed ogive profile — flat base, straight shank,
+// curved nose — spun about Y, then tipped so its axis is +Z, which is the
+// axis we align to velocity every frame.
+const bulletShapeGeo = (() => {
+  const pts = [];
+  pts.push(new THREE.Vector2(0, -0.5));
+  pts.push(new THREE.Vector2(1, -0.5));
+  pts.push(new THREE.Vector2(1, 0.05));
+  for (let i = 1; i <= 5; i++) {          // the nose
+    const t = i / 5;
+    pts.push(new THREE.Vector2(Math.cos(t * Math.PI / 2) * 1, 0.05 + t * 0.45));
+  }
+  const g = new THREE.LatheGeometry(pts, 10);
+  g.rotateX(Math.PI / 2);                 // axis +Y -> +Z
+  return g;
+})();
+const AXIS_Z = new THREE.Vector3(0, 0, 1);
+// its own scratch: spawnBullet's callers pass _v2/_v3-derived vectors
+const _vBul = new THREE.Vector3();
+// one shared head-to-tail alpha ramp for every tracer ribbon
+const trailTex = (() => {
+  const c = document.createElement('canvas');
+  c.width = 64; c.height = 1;
+  const g = c.getContext('2d');
+  const grad = g.createLinearGradient(0, 0, 64, 0);
+  grad.addColorStop(0, 'rgba(255,255,255,0)');      // tail
+  grad.addColorStop(0.55, 'rgba(255,255,255,0.55)');
+  grad.addColorStop(1, 'rgba(255,255,255,1)');      // head
+  g.fillStyle = grad; g.fillRect(0, 0, 64, 1);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+  return t;
+})();
+function makeTrailGeo() {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(12), 3));
+  g.setAttribute('uv', new THREE.BufferAttribute(
+    new Float32Array([1, 0, 1, 1, 0, 0, 0, 1]), 2));   // u=1 head, u=0 tail
+  g.setIndex([0, 2, 1, 1, 2, 3]);
+  g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e4);   // never cull
+  return g;
+}
 const bulletMatP = new THREE.MeshBasicMaterial({ color: 0x16181d });
 
 // bullet scars: temporary marks where rounds strike walls and cover
@@ -1036,23 +1080,31 @@ const bulletMatHalo = new THREE.MeshBasicMaterial({
 // fromPlayer: opt = absolute speed (m/s), pierce = enemies it can pass through
 // enemy fire: opt = multiplier on the wave-scaled base speed
 function spawnBullet(pos, dir, fromPlayer, opt = 0, pierce = 0) {
-  const mesh = new THREE.Mesh(bulletGeo, fromPlayer ? bulletMatP : bulletMatE);
+  const mesh = new THREE.Mesh(bulletShapeGeo, fromPlayer ? bulletMatP : bulletMatE);
   mesh.position.copy(pos);
-  if (!fromPlayer) {
-    // enemy shots are the thing you dodge — make them impossible to miss:
-    // a big red orb with a white-hot core and a soft halo
-    mesh.scale.setScalar(3.2);
-    const core = new THREE.Mesh(bulletGeo, bulletMatCore);
-    core.scale.setScalar(0.45);
-    const halo = new THREE.Mesh(bulletGeo, bulletMatHalo);
-    halo.scale.setScalar(2.2);
+  mesh.quaternion.setFromUnitVectors(AXIS_Z, _vBul.copy(dir).normalize());
+  if (fromPlayer) mesh.scale.set(0.05, 0.05, 0.13);
+  else {
+    // enemy shots are the thing you dodge — keep them big enough to read at
+    // arm's length on a phone, with a white-hot nose and a soft halo
+    mesh.scale.set(0.085, 0.085, 0.3);
+    const core = new THREE.Mesh(bulletShapeGeo, bulletMatCore);
+    core.scale.set(0.45, 0.45, 0.5);
+    core.position.z = 0.18;                  // the nose, not the whole round
+    const halo = new THREE.Mesh(bulletShapeGeo, bulletMatHalo);
+    halo.scale.set(1.9, 1.9, 1.25);
     mesh.add(core, halo);
   }
   scene.add(mesh);
-  // tracer line so hanging bullets are legible in frozen time
-  const trailGeo = new THREE.BufferGeometry().setFromPoints([pos.clone(), pos.clone()]);
-  const trail = new THREE.Line(trailGeo, new THREE.LineBasicMaterial({
-    color: fromPlayer ? 0x16181d : 0xff2d1a, transparent: true, opacity: fromPlayer ? 0.35 : 0.85,
+  // TRACER RIBBON. This was a THREE.Line, and linewidth is a documented
+  // no-op in WebGL — it drew a single device pixel, half a CSS pixel at
+  // DPR 2, which is why incoming fire was so hard to read. It is now a
+  // camera-facing quad that tapers head to tail, so a lane of fire is a
+  // shape on screen rather than a hairline.
+  const trail = new THREE.Mesh(makeTrailGeo(), new THREE.MeshBasicMaterial({
+    color: fromPlayer ? 0x16181d : 0xf41111,
+    map: trailTex, transparent: true, depthWrite: false,
+    side: THREE.DoubleSide, opacity: fromPlayer ? 0.5 : 0.95,
   }));
   scene.add(trail);
   const speed = fromPlayer
@@ -2357,9 +2409,13 @@ function killEnemy(i, impulseDir) {
   const drop = ENEMY_TYPES[e.type].drop;
   const kind = TYPE_DROP[e.type];
   const r = Math.random();
+  // Only someone who was carrying a gun can leave ammo behind. A rusher
+  // comes at you with his hands, so a pistol clip dropping off his body was
+  // loot appearing from nowhere.
+  const armed = e.type !== 'rusher';
   if (typeof drop === 'string') spawnPickup(e.pos, drop);           // named loot
   else if (kind && r < drop) spawnPickup(e.pos, kind);               // his own weapon
-  else if (r < DROPS.clipRate) spawnPickup(e.pos, CLIP);                       // pistol ammo
+  else if (armed && r < DROPS.clipRate) spawnPickup(e.pos, CLIP);    // pistol ammo
   scene.remove(e.g);
   enemies.splice(i, 1);
   game.kills++;
@@ -2372,6 +2428,16 @@ function killEnemy(i, impulseDir) {
   sfx.shatter();
   vibrate(30);
 }
+
+// The last moment ANY enemy pulled a trigger. Two of them resolving their
+// telegraphs on the same frame reads as one loud event you cannot parse;
+// the same two shots a beat apart read as a room reacting to you. So the
+// room holds a single floor: whoever is second waits his turn.
+let lastEnemyShotAt = -1e9;
+let worldT = 0;
+// measured in WORLD seconds, not real ones: in bullet time the gap has to
+// stretch with everything else or the stagger collapses the moment you freeze
+const ENEMY_SHOT_GAP = 0.28;
 
 function enemyFire(e, toPlayer) {
   const spec = ENEMY_TYPES[e.type];
@@ -2395,6 +2461,7 @@ function enemyFire(e, toPlayer) {
     e.fireCd = 0.25;   // still coming round: hold
     return;
   }
+  lastEnemyShotAt = worldT;   // the room's shot floor: everyone else waits
   const origin = _v2.set(e.pos.x, 1.35, e.pos.z).addScaledVector(toPlayer, 0.45);
   // shots go where you ARE — if you don't slide out of the way, they connect
   const target = _v3.set(
@@ -2602,14 +2669,24 @@ function updateEnemy(e, sdt) {
       if (!e.armRLock) e.armR.rotation.x = -t * (Math.PI / 2 - 0.06);
       setEgunFlash(e, e.stateT > aimT * 0.7 ? MAT_WHITEFLASH : MAT_BLACK);
       if (e.stateT >= aimT) {
-        enemyFire(e, toPlayer);
-        setEgunFlash(e, MAT_BLACK);
-        if (spec.burst) {   // heavies always fire exactly spec.burst rounds
-          e.state = 'burst'; e.stateT = 0;
-          e.burstLeft = spec.burst - 1; e.burstT = 0.22;
+        // Someone else just pulled a trigger? Hold, arm still up, and take
+        // your turn a beat later. Two shots on the same frame read as one
+        // loud event you cannot parse. The 0.6 s ceiling stops a crowd from
+        // deadlocking each other into never firing at all.
+        const held = e.holdFireT || 0;
+        if (worldT - lastEnemyShotAt < ENEMY_SHOT_GAP && held < 0.6) {
+          e.holdFireT = held + sdt;
         } else {
-          e.state = 'recover'; e.stateT = 0;
-          e.fireCd = (spec.cd[0] + Math.random() * spec.cd[1]) * aimSpeedFactor();
+          e.holdFireT = 0;
+          enemyFire(e, toPlayer);
+          setEgunFlash(e, MAT_BLACK);
+          if (spec.burst) {   // heavies always fire exactly spec.burst rounds
+            e.state = 'burst'; e.stateT = 0;
+            e.burstLeft = spec.burst - 1; e.burstT = 0.22;
+          } else {
+            e.state = 'recover'; e.stateT = 0;
+            e.fireCd = (spec.cd[0] + Math.random() * spec.cd[1]) * aimSpeedFactor();
+          }
         }
       }
       break;
@@ -2897,11 +2974,21 @@ function updateBullets(sdt) {
 
     // trail stretches behind the bullet, longer at speed (enemy tracers extra
     // long so incoming fire reads instantly in frozen time)
+    const dir = _v1.copy(b.vel).normalize();
+    b.mesh.quaternion.setFromUnitVectors(AXIS_Z, dir);
+    const len = Math.min(b.vel.length() * (b.fromPlayer ? 0.05 : 0.2), b.fromPlayer ? 1.2 : 2.6);
+    // billboard the ribbon: its lateral axis is perpendicular to both the
+    // flight path and the line of sight, so it keeps its width from anywhere
+    const side = _v2.copy(dir).cross(_v3.copy(camera.position).sub(b.pos));
+    if (side.lengthSq() < 1e-8) side.set(1, 0, 0); else side.normalize();
+    const hw = b.fromPlayer ? 0.035 : 0.09;    // head half-width
+    const tw = b.fromPlayer ? 0.008 : 0.022;   // tail half-width
     const tp = b.trail.geometry.attributes.position.array;
-    const back = _v1.copy(b.vel).normalize()
-      .multiplyScalar(-Math.min(b.vel.length() * (b.fromPlayer ? 0.05 : 0.2), b.fromPlayer ? 1.2 : 2.6));
-    tp[0] = b.pos.x + back.x; tp[1] = b.pos.y + back.y; tp[2] = b.pos.z + back.z;
-    tp[3] = b.pos.x; tp[4] = b.pos.y; tp[5] = b.pos.z;
+    const tx = b.pos.x - dir.x * len, ty = b.pos.y - dir.y * len, tz = b.pos.z - dir.z * len;
+    tp[0] = b.pos.x + side.x * hw; tp[1] = b.pos.y + side.y * hw; tp[2] = b.pos.z + side.z * hw;
+    tp[3] = b.pos.x - side.x * hw; tp[4] = b.pos.y - side.y * hw; tp[5] = b.pos.z - side.z * hw;
+    tp[6] = tx + side.x * tw; tp[7] = ty + side.y * tw; tp[8] = tz + side.z * tw;
+    tp[9] = tx - side.x * tw; tp[10] = ty - side.y * tw; tp[11] = tz - side.z * tw;
     b.trail.geometry.attributes.position.needsUpdate = true;
 
     // whoosh: volume follows your live distance to the round; pitch rides the
@@ -3980,7 +4067,7 @@ const sfx = (() => {
       h.g.gain.value += (want - h.g.gain.value) * k;
       // doppler on the WORLD-frame radial speed (not the slowed clock), so the
       // pitch drop is just as audible in bullet time as at full speed
-      const dopp = receding ? Math.max(0.35, 1 + vr / 18) : 1;
+      const dopp = receding ? Math.max(0.35, 1 + vr / 23) : 1;   // divisor tracks bulletBase
       const rate = (0.4 + 0.6 * timeScale) * dopp;
       h.src.playbackRate.value += (rate - h.src.playbackRate.value) * k;
       h.send.gain.value += ((receding ? 1.6 : 0.2) - h.send.gain.value) * k;
@@ -4790,7 +4877,11 @@ const HALL_BEAM_MAT = new THREE.MeshBasicMaterial({ color: 0x7c8d97 });
 // unlit and bright: the strips read as the light source, not a lit surface
 const HALL_LIGHT_MAT = new THREE.MeshBasicMaterial({ color: 0xffffff });
 const HALL_FLOOR_MAT = new THREE.MeshLambertMaterial({ map: makeHallFloorTexture() });
-const DOOR_RED_MAT = new THREE.MeshBasicMaterial({ color: 0xff2d1a });
+// The door was the largest red mass on screen and it competed with the
+// enemies for the eye — in a world this pale, red should mean threat and
+// nothing else. Black, not white: white would compete with the ceiling
+// strips, which are the one thing that should blow out.
+const DOOR_RED_MAT = new THREE.MeshBasicMaterial({ color: 0x101418 });
 const DOOR_SEAL_MAT = new THREE.MeshLambertMaterial({ color: 0x24262c });
 let hall = null;
 
@@ -5494,6 +5585,7 @@ function frame(now) {
   if (game.state === 'menu') target = 0.5;   // dreamy half-speed attract mode
   timeScale += (target - timeScale) * Math.min(dt * TIME_EASE, 1);
   const sdt = dt * timeScale;   // scaled dt: the world's clock
+  worldT += sdt;                // ...and its running total, for world-time gaps
 
   // --- player (real time)
   player.fireCd -= dt;

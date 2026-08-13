@@ -93,8 +93,10 @@
 
   /* button-mode time control: 96px hit zone, 64px visual — misses forgive.
      Tap toggles bullet time; press-and-hold slows only while held. */
-  #timebtn { display:none; position:fixed; right:-2px;
-             bottom:calc(env(safe-area-inset-bottom, 0px) + 5.2vh); z-index:8;
+  /* tucked further into the corner: the viewmodel is much larger now and
+     its grip was passing behind the ring */
+  #timebtn { display:none; position:fixed; right:-14px;
+             bottom:calc(env(safe-area-inset-bottom, 0px) + 3.4vh); z-index:8;
              width:146px; height:146px; border-radius:50%;
              align-items:center; justify-content:center;
              pointer-events:auto; }

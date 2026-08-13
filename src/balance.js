@@ -51,7 +51,10 @@ export const DROPS = {
 // speed, telegraph length and slow-mo cost all read from it.
 export const RAMP = {
   rampWaves: 11,       // waves until full heat (wave 12)
-  bulletBase: 11,      // reference enemy bullet speed, m/s
+  // Superhot runs these at 19-34 m/s while you move; we deliberately do NOT
+  // match that. This is a nudge (+27%), not a conversion — the power
+  // fantasy depends on rounds you can still read and walk out of.
+  bulletBase: 14,      // reference enemy bullet speed, m/s
   bulletFloor: 0.55,   // fraction of reference on wave 1
   bulletRange: 0.45,   // added across the ramp
   bulletCap: 1.35,     // hard ceiling including the late-game creep
