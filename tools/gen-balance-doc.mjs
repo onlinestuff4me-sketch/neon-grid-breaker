@@ -122,7 +122,22 @@ it — followed by the **approach**, the straight stare down at the door. A
 **vault** leg replaces one of its turns with a pillared room: one framed
 doorway in, one out on the far side offset laterally so you must cross it,
 four columns down the middle, and no branch lane may reach it. The room is
-its own stretch, so it gets its own share of the wave. A
+its own stretch, so it gets its own share of the wave.
+
+**Cover comes in grades.** Everything in the tunnel used to be
+floor-to-ceiling, so every occluder was binary. \`coverLowH\` is not a taste
+value: the enemy's sight ray and his muzzle both sit at **1.35 m** and the
+player's eye at **1.6 m**, so a **1.45 m** block hides him from you
+completely while you see over it and shoot down. \`segAABB\` is 3D so bullets
+and line of sight respect the height with no engine change, and
+\`pointInObstacle\` is 2D so you still cannot walk over it.
+
+**Width is the axis a portrait phone cannot show.** The camera is 80° in
+three.js, which is *vertical* — at 390×844 that is only **42.4° horizontal**,
+under half the reference's 90°. Visible width is \`0.776 × distance\`, so from
+the entry of a 16 m-deep room you frame 12.4 m of the far wall. A 20 m room
+would hide 8 m of itself permanently. Budget that would have gone into floor
+area goes into height (\`beamDrop\`) and cover grading instead. A
 stretch's share of the wave is released when you **walk into it**, so the
 fight travels with you and nothing can accumulate in front of the door. The
 approach is worth exactly one group: the final wave you clear with the door
@@ -136,10 +151,15 @@ in frame.
 | \`runServiceRun\` | ${LEG.runServiceRun} + 0–${LEG.runServiceVar - 1} | a service run turns constantly |
 | \`runGauntlet\` | ${LEG.runGauntlet} + 0–${LEG.runGauntletVar - 1} | a gauntlet barely turns at all |
 | \`approach\` | ${LEG.approach} cells (${LEG.approach * LEG.cellM} m) | straight run in front of the door |
-| \`vaultHalfWide\` / \`vaultDeep\` | ${LEG.vaultHalfWide * 2 + 1} × ${LEG.vaultDeep} cells (${(LEG.vaultHalfWide * 2 + 1) * LEG.cellM} × ${LEG.vaultDeep * LEG.cellM} m) | the vault room |
+| \`vaultWide\` / \`vaultDeep\` | ${LEG.vaultWide} × ${LEG.vaultDeep} cells (${LEG.vaultWide * LEG.cellM} × ${LEG.vaultDeep * LEG.cellM} m) | the vault room |
 | \`vaultDoorW\` | ${n(LEG.vaultDoorW)} m | its two framed doorways |
-| \`vaultExitOffset\` | ${LEG.vaultExitOffset} cells | how far the exit sits off the entry line |
-| \`pillarW\` | ${n(LEG.pillarW)} m | column footprint, vault and chamber alike |
+| \`vaultExitOffset\` | ${LEG.vaultExitOffset} cells (${LEG.vaultExitOffset * LEG.cellM} m) | how far the exit sits off the entry line |
+| \`vaultSpawnMin\` | ${LEG.vaultSpawnMin} m | \`spawnMin\` would push refills out of a 16 m room |
+| \`pillarW\` × \`pillarD\` | ${n(LEG.pillarW)} × ${n(LEG.pillarD)} m | columns are rectangular, wide face across the crossing |
+| \`pillarsChamber\` | ${LEG.pillarsChamber} | two rows, not one — each row is a spawn shadow |
+| \`coverLowH\` | ${n(LEG.coverLowH)} m | LOW cover: see over, cannot shoot through |
+| \`coverLowW\` × \`coverLowD\` | ${n(LEG.coverLowW)} × ${n(LEG.coverLowD)} m | its footprint |
+| \`beamDrop\` / \`beamW\` | ${n(LEG.beamDrop)} / ${n(LEG.beamW)} m | ceiling beams — soffit lands at ${n(3.1 - LEG.beamDrop)} m |
 | \`perCell\` | ${n(LEG.perCell)} + ${n(LEG.perCellPerDoor)}·door | bodies per corridor cell, capped at ${n(LEG.perCellCap)} |
 | \`stretchMin\` / \`stretchCap\` | ${LEG.stretchMin} / ${LEG.stretchCap} | no stretch is ever emptier or fuller |
 | \`finaleWave\` | ${LEG.finaleWave} | the one final group waiting at the door |

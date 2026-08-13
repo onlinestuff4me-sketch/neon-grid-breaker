@@ -76,10 +76,14 @@ const camera = new THREE.PerspectiveCamera(80, window.innerWidth / window.innerH
 
 // sky is cyan and does most of the work; the sun is a fraction of what it
 // was, because the reference's shadow bands are only 0.90x their lit floor
-const hemi = new THREE.HemisphereLight(0xcfeeff, 0x9cb4c2, 0.95);
+const hemi = new THREE.HemisphereLight(0xcfeeff, 0x9cb4c2, 1.05);
 scene.add(hemi);
-const sun = new THREE.DirectionalLight(0xffffff, 0.5);
-sun.position.set(8, 18, 6);
+const sun = new THREE.DirectionalLight(0xffffff, 0.6);
+// Nearly overhead (0.37,0.83,0.28) lit all four faces of a column almost
+// identically, so our pillars read as flat silhouettes. Swung to the side
+// they get a 2.75x ratio between adjacent vertical faces — which is what
+// makes a column read as a volume you can put yourself behind.
+sun.position.set(14, 9, 5);
 scene.add(sun);
 const fill = new THREE.DirectionalLight(0xd6f0ff, 0.18);
 fill.position.set(-6, 10, -8);
@@ -1954,7 +1958,11 @@ function spawnEnemy(type = 'gunner') {
           _v3.set(doorView[0] * C, 1.4, doorView[1] * C))) continue;
         x = px; z = pz; placed = true; break;
       }
-      if (d < LEG.spawnMin || d > LEG.spawnMax) continue;
+      // a vault room is only 16 m deep: the normal 9 m floor would push
+      // every refill clean out of it and back into the corridor
+      const minD = (L.proto && L.proto.form && L.proto.form.id === 'vault')
+        ? LEG.vaultSpawnMin : LEG.spawnMin;
+      if (d < minD || d > LEG.spawnMax) continue;
       if (!hasLineOfSight(_v2.set(px, 1.4, pz), _v3.set(player.pos.x, EYE_HEIGHT, player.pos.z))) {
         x = px; z = pz; placed = true;   // prefer stepping out from cover
         break;
@@ -4764,6 +4772,8 @@ function makeHallFloorTexture() {
 const HALL_WALL_MAT = new THREE.MeshLambertMaterial({ map: makeHallWallTexture() });
 // unlit: Lambert undersides get no directional light and go near-black
 const HALL_CEIL_MAT = new THREE.MeshBasicMaterial({ color: 0x97a9b3 });
+// beams must be their own value or they vanish into the ceiling they hang from
+const HALL_BEAM_MAT = new THREE.MeshBasicMaterial({ color: 0x7c8d97 });
 // unlit and bright: the strips read as the light source, not a lit surface
 const HALL_LIGHT_MAT = new THREE.MeshBasicMaterial({ color: 0xffffff });
 const HALL_FLOOR_MAT = new THREE.MeshLambertMaterial({ map: makeHallFloorTexture() });
@@ -4793,6 +4803,7 @@ function setEnvironment(env) {
 function genHallLeg(sgx, sgz, proto) {
   const cells = [];
   const pillars = [];
+  const covers = [];   // low blocks: see over, cannot shoot through
   const add = (gx, gz) => {
     const k = gx + ',' + gz;
     if (!hall.grid.has(k)) { hall.grid.add(k); cells.push([gx, gz]); }
@@ -4825,22 +4836,31 @@ function genHallLeg(sgx, sgz, proto) {
     // more on the far side, offset so crossing the room is the only way on.
     // No branch ever enters it, so there is exactly one way in and one out.
     if (form === 'vault' && !vaultDone && f >= 5) {
-      const hw = LEG.vaultHalfWide, dp = LEG.vaultDeep;
-      for (let dx = -hw; dx <= hw; dx++) {
-        for (let dz = 1; dz <= dp; dz++) add(gx + dx, gz + dz);
+      const C = HALL.cell, dp = LEG.vaultDeep;
+      // The room does not straddle the entry: it reaches one cell back and
+      // the rest toward the exit, so it is an even 4 cells wide with the
+      // entry and exit at opposite ends of it.
+      const side = Math.random() < 0.5 ? -1 : 1;
+      const near = -1, far = LEG.vaultWide - 2;          // -1 .. +2 in exit units
+      for (let i = near; i <= far; i++) {
+        for (let dz = 1; dz <= dp; dz++) add(gx + side * i, gz + dz);
       }
       doorways.push([gx, gz, 1]);          // in: the face you walk through
       breaks.add(spine.length);            // the room is a stretch of its own
       spine.push([gx, gz + 1]);
-      const side = Math.random() < 0.5 ? -1 : 1;
       const ex = gx + side * LEG.vaultExitOffset;
       for (let x = gx + side; side > 0 ? x <= ex : x >= ex; x += side) spine.push([x, gz + 1]);
       for (let dz = 2; dz <= dp; dz++) spine.push([ex, gz + dz]);
-      // a 2x2 of columns down the middle, clear of both doorways and of the
-      // lane you cross on: cover you have to commit to, not walk past
-      for (const px of [-1, 1]) {
-        for (const pz of [2, dp - 1]) pillars.push([(gx + px) * HALL.cell, (gz + pz) * HALL.cell]);
-      }
+      // Room centre in metres — 2 m toward the exit side of the entry cell.
+      const rcx = gx * C + side * (C / 2), rcz = (gz + (dp + 1) / 2) * C;
+      // Four columns 6 m apart, well clear of both doorways and of the lane
+      // you cross on: cover you commit to, not cover you walk past.
+      for (const ox of [-3, 3]) for (const oz of [-3, 3]) pillars.push([rcx + ox, rcz + oz]);
+      // and two LOW blocks in the quadrants the crossing diagonal misses —
+      // the first cover in the game you can see over but cannot be shot
+      // through, which is a different decision from a column
+      covers.push([rcx - 5.5, rcz + 5, LEG.coverLowW, LEG.coverLowD, LEG.coverLowH]);
+      covers.push([rcx + 5.5, rcz - 5, LEG.coverLowW, LEG.coverLowD, LEG.coverLowH]);
       gx = ex; gz += dp; f += dp;
       doorways.push([gx, gz, 1]);          // out: the far side of the room
       breaks.add(spine.length);            // and the corridor beyond is another
@@ -4875,8 +4895,15 @@ function genHallLeg(sgx, sgz, proto) {
         roomCells.push([rx + dx, rz + dz]);
       }
     }
-    // two pillars: cover to fight around, and something to break the volume
-    for (const px of [-1, 1]) pillars.push([(rx + px) * HALL.cell, (rz + 1) * HALL.cell]);
+    // Four columns in TWO rows, not two in one. A single row of two on a
+    // 320 m2 floor was 0.5% cover — decoration. Two rows also give the
+    // spawner two separate shadows to bring enemies out of, since placement
+    // prefers a spot with no line of sight to you.
+    for (const px of [-1.5, 1.5]) {
+      for (const pz of [0.75, 2.25]) {
+        pillars.push([(rx + px) * HALL.cell, (rz + pz) * HALL.cell]);
+      }
+    }
   }
 
   // the approach: a clean straight run so the door is visible from it
@@ -4904,7 +4931,7 @@ function genHallLeg(sgx, sgz, proto) {
   // shatter. approach[0] is where the run begins; the last is at the slab.
   const approach = spine.slice(spine.length - APPROACH);
   return { cells, spine, approach, stretches: splitStretches(spine, APPROACH, breaks),
-    doorways, pillars, endGx: gx, endGz: gz };
+    doorways, pillars, covers, endGx: gx, endGz: gz };
 }
 
 // A STRETCH is one straight run plus the turn that ends it — the unit the
@@ -4936,11 +4963,11 @@ function splitStretches(spine, approachLen, breaks) {
 }
 
 function buildHallLeg(sgx, sgz, proto) {
-  const { cells, approach, stretches, doorways, pillars, endGx, endGz } = genHallLeg(sgx, sgz, proto);
+  const { cells, approach, stretches, doorways, pillars, covers, endGx, endGz } = genHallLeg(sgx, sgz, proto);
   const cond = (proto && proto.condition && proto.condition.id) || null;
   const measures = new Set((proto && proto.measures || []).map((m) => m.id));
   const C = HALL.cell, H = HALL.h, W = HALL.wall;
-  const walls = [], floors = [], ceils = [], lights = [], ribs = [];
+  const walls = [], floors = [], ceils = [], lights = [], ribs = [], beams = [];
   const obs = [];
   const wallBox = (px, pz, w, d) => {
     walls.push([px, H / 2, pz, w, H, d]);
@@ -4958,6 +4985,11 @@ function buildHallLeg(sgx, sgz, proto) {
     // DIM STRIPS halves the lighting; otherwise every other cell is lit
     const lit = cond === 'dimStrips' ? (gx + gz) % 4 === 0 : (gx + gz) % 2 === 0;
     if (lit) lights.push([x, H - 0.04, z, 1.5, 0.08, 2.6]);
+    // Half the portrait frame is ceiling, and it was one flat slab. A drop
+    // beam on every cell the strips skip gives it a 4 m rhythm and puts the
+    // soffit at 2.80 m — the clear height measured off the reference. Visual
+    // only: it never goes through wallBox(), so it adds no collision.
+    else beams.push([x, H - LEG.beamDrop / 2, z, C, LEG.beamDrop, LEG.beamW]);
     for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
       if (hall.grid.has((gx + dx) + ',' + (gz + dz))) continue;
       if (gx === endGx && gz === endGz && dz === 1) continue;   // the doorway
@@ -4998,13 +5030,26 @@ function buildHallLeg(sgx, sgz, proto) {
     // read as an invisible wall filling the opening
     walls.push([ox, H - 0.42, oz, LEG.vaultDoorW, 0.55, W]);
   }
+  // LOW COVER: see over it, cannot shoot or be shot through it. The height
+  // is exact rather than a taste call — the enemy's sight ray and his muzzle
+  // both sit at 1.35 m and the player's eye at 1.6 m, so 1.45 m blocks him
+  // outright while you shoot down over the top. segAABB is 3D so bullets and
+  // line of sight respect the height for free; pointInObstacle is 2D so you
+  // still cannot walk over it, which is what makes it cover and not a step.
+  for (const [cx, cz, cw, cd, ch] of (covers || [])) {
+    walls.push([cx, ch / 2, cz, cw, ch, cd]);
+    obs.push({
+      min: new THREE.Vector3(cx - cw / 2, 0, cz - cd / 2),
+      max: new THREE.Vector3(cx + cw / 2, ch, cz + cd / 2),
+    });
+  }
   // pillars: solid cover standing in the chamber
   for (const [px, pz] of pillars) {
-    const pw = LEG.pillarW, ph = pw / 2;
-    walls.push([px, H / 2, pz, pw, H, pw]);
+    const pw = LEG.pillarW, pd = LEG.pillarD;
+    walls.push([px, H / 2, pz, pw, H, pd]);
     obs.push({
-      min: new THREE.Vector3(px - ph, 0, pz - ph),
-      max: new THREE.Vector3(px + ph, H, pz + ph),
+      min: new THREE.Vector3(px - pw / 2, 0, pz - pd / 2),
+      max: new THREE.Vector3(px + pw / 2, H, pz + pd / 2),
     });
   }
   const meshes = [
@@ -5013,6 +5058,7 @@ function buildHallLeg(sgx, sgz, proto) {
     mergedCityMesh(ceils, HALL_CEIL_MAT),
     mergedCityMesh(lights, HALL_LIGHT_MAT),
     mergedCityMesh(ribs, HALL_CEIL_MAT),   // ribs read a shade darker
+    mergedCityMesh(beams, HALL_BEAM_MAT),
   ];
   const slab = new THREE.Mesh(new THREE.BoxGeometry(2, 2.72, 0.18), DOOR_RED_MAT);
   slab.position.set(dx0, 1.36, dz0);

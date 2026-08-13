@@ -93,11 +93,34 @@ export const LEG = {
   // into a pillared hall and leaves through ONE more on the far side, offset
   // so you have to cross it. It is its own stretch, so it gets its own share
   // of the wave, and the pillars are the only real cover in the leg.
-  vaultHalfWide: 2,                // cells either side of centre (5 wide)
-  vaultDeep: 4,                    // cells deep
+  // Width is the axis a portrait phone cannot show. Our camera is 80 deg
+  // VERTICAL, which at 390x844 is only 42.4 deg horizontal — a third of the
+  // reference's 90. Visible width is 0.776*distance, so from the entry of a
+  // 16 m-deep room you frame 12.4 m of the far wall: a 20 m room hides 8 m of
+  // itself permanently. So the room is 4 cells, and the budget that would
+  // have gone into floor area goes into HEIGHT and COVER instead, which are
+  // the two axes portrait actually shows.
+  vaultWide: 4,                    // cells across (16 m), offset toward the exit
+  vaultDeep: 4,                    // cells deep (16 m)
   vaultDoorW: 2.6,                 // doorway opening (m) — wider than a checkpoint
-  pillarW: 0.9,                    // column footprint (m), vault and chamber alike
   vaultExitOffset: 2,              // cells the exit sits off the entry line
+  vaultSpawnMin: 6,                // spawnMin would push refills out of the room
+  // Columns are RECTANGULAR, wide face across the crossing axis. A 0.9 m
+  // square at 3 m gives +/-0.29 m of lateral slack — you are not actually
+  // hidden. 1.3 m wide gives +/-0.56 m, which is cover you can use.
+  pillarW: 1.3, pillarD: 0.7,      // column footprint (m), x by z
+  pillarsChamber: 4,               // two rows, not one: each row is a spawn shadow
+  // GRADED COVER. Everything in the tunnel was floor-to-ceiling, so every
+  // occluder was binary. These are not. The height is exact, not a taste
+  // call: the enemy's sight ray and his muzzle both sit at 1.35 m and the
+  // player's eye at 1.6 m, so 1.45 m blocks him completely while you see
+  // over it and shoot down. segAABB is 3D so this needs no engine change,
+  // and pointInObstacle is 2D so you still cannot walk over it.
+  coverLowH: 1.45, coverLowW: 3.2, coverLowD: 1.6,
+  // Half the portrait frame is ceiling and it was one flat slab. Drop beams
+  // between the light strips: the soffit lands at 2.80 m, which is exactly
+  // the clear height measured off the reference.
+  beamDrop: 0.3, beamW: 0.45,
   // The leg's size comes from how much corridor there is to fight in, not
   // from how many turns it happens to have — otherwise a zig-zagging service
   // run, which is SHORTER to walk, would be the bigger fight. Budget by cell,

@@ -92,7 +92,22 @@ it — followed by the **approach**, the straight stare down at the door. A
 **vault** leg replaces one of its turns with a pillared room: one framed
 doorway in, one out on the far side offset laterally so you must cross it,
 four columns down the middle, and no branch lane may reach it. The room is
-its own stretch, so it gets its own share of the wave. A
+its own stretch, so it gets its own share of the wave.
+
+**Cover comes in grades.** Everything in the tunnel used to be
+floor-to-ceiling, so every occluder was binary. `coverLowH` is not a taste
+value: the enemy's sight ray and his muzzle both sit at **1.35 m** and the
+player's eye at **1.6 m**, so a **1.45 m** block hides him from you
+completely while you see over it and shoot down. `segAABB` is 3D so bullets
+and line of sight respect the height with no engine change, and
+`pointInObstacle` is 2D so you still cannot walk over it.
+
+**Width is the axis a portrait phone cannot show.** The camera is 80° in
+three.js, which is *vertical* — at 390×844 that is only **42.4° horizontal**,
+under half the reference's 90°. Visible width is `0.776 × distance`, so from
+the entry of a 16 m-deep room you frame 12.4 m of the far wall. A 20 m room
+would hide 8 m of itself permanently. Budget that would have gone into floor
+area goes into height (`beamDrop`) and cover grading instead. A
 stretch's share of the wave is released when you **walk into it**, so the
 fight travels with you and nothing can accumulate in front of the door. The
 approach is worth exactly one group: the final wave you clear with the door
@@ -106,10 +121,15 @@ in frame.
 | `runServiceRun` | 2 + 0–1 | a service run turns constantly |
 | `runGauntlet` | 6 + 0–3 | a gauntlet barely turns at all |
 | `approach` | 4 cells (16 m) | straight run in front of the door |
-| `vaultHalfWide` / `vaultDeep` | 5 × 4 cells (20 × 16 m) | the vault room |
+| `vaultWide` / `vaultDeep` | 4 × 4 cells (16 × 16 m) | the vault room |
 | `vaultDoorW` | 2.6 m | its two framed doorways |
-| `vaultExitOffset` | 2 cells | how far the exit sits off the entry line |
-| `pillarW` | 0.9 m | column footprint, vault and chamber alike |
+| `vaultExitOffset` | 2 cells (8 m) | how far the exit sits off the entry line |
+| `vaultSpawnMin` | 6 m | `spawnMin` would push refills out of a 16 m room |
+| `pillarW` × `pillarD` | 1.3 × 0.7 m | columns are rectangular, wide face across the crossing |
+| `pillarsChamber` | 4 | two rows, not one — each row is a spawn shadow |
+| `coverLowH` | 1.45 m | LOW cover: see over, cannot shoot through |
+| `coverLowW` × `coverLowD` | 3.2 × 1.6 m | its footprint |
+| `beamDrop` / `beamW` | 0.3 / 0.45 m | ceiling beams — soffit lands at 2.8 m |
 | `perCell` | 0.5 + 0.05·door | bodies per corridor cell, capped at 0.9 |
 | `stretchMin` / `stretchCap` | 2 / 4 | no stretch is ever emptier or fuller |
 | `finaleWave` | 3 | the one final group waiting at the door |
