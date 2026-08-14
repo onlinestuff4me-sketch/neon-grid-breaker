@@ -929,24 +929,33 @@ const vmEnv = (() => {
   const g = c.getContext('2d');
   const grad = g.createLinearGradient(0, 0, 0, 32);
   grad.addColorStop(0, '#ffffff');      // straight up: the strips
-  grad.addColorStop(0.34, '#cfe6f2');
-  grad.addColorStop(0.52, '#93acb7');   // horizon: the walls
-  grad.addColorStop(0.75, '#6c8490');
-  grad.addColorStop(1, '#43555e');      // straight down: the floor
+  grad.addColorStop(0.26, '#6b8794');
+  grad.addColorStop(0.46, '#1a2329');   // horizon: near black, so the only
+  grad.addColorStop(0.8, '#0a0e11');    // thing that reflects is the LIGHT
+  grad.addColorStop(1, '#050708');      // straight down: the floor
   g.fillStyle = grad; g.fillRect(0, 0, 64, 32);
-  g.fillStyle = 'rgba(255,255,255,0.9)';
-  g.fillRect(0, 3, 64, 3); g.fillRect(0, 10, 64, 2);
+  // hard bright bands where the ceiling strips are: these are what actually
+  // sweep across the slide as you turn
+  g.fillStyle = '#ffffff';
+  g.fillRect(0, 2, 64, 4); g.fillRect(0, 9, 64, 2);
   const t = new THREE.CanvasTexture(c);
   t.mapping = THREE.EquirectangularReflectionMapping;
   return t;
 })();
+// The gun stays BLACK. Mixing the environment into the base colour lifted
+// it to a grey slab and lost the silhouette, which is the thing that made it
+// readable in the first place. AddOperation instead: black stays black
+// everywhere the reflection is dark, and only the bright parts of the
+// environment — the ceiling strips — actually land on the metal. Reflectivity
+// is lower and the specular is pure white and tighter, so what you see is a
+// hard highlight sliding over a black shape, not a tinted one.
 const VM_BLACK = new THREE.MeshPhongMaterial({
-  color: 0x0b161c, specular: 0xbfe0ef, shininess: 70,
-  envMap: vmEnv, reflectivity: 0.42, combine: THREE.MixOperation,
+  color: 0x0c1014, specular: 0xffffff, shininess: 140,
+  envMap: vmEnv, reflectivity: 0.34, combine: THREE.AddOperation,
 });
 const VM_GUNMETAL = new THREE.MeshPhongMaterial({
-  color: 0x27424e, specular: 0xd6f0ff, shininess: 95,
-  envMap: vmEnv, reflectivity: 0.55, combine: THREE.MixOperation,
+  color: 0x1d2126, specular: 0xffffff, shininess: 170,
+  envMap: vmEnv, reflectivity: 0.46, combine: THREE.AddOperation,
 });
 gun.traverse((o) => {
   if (!o.isMesh) return;
@@ -2827,13 +2836,18 @@ function updateEnemy(e, sdt) {
       const strafeDir = _v2.set(-toPlayer.z, 0, toPlayer.x)
         .multiplyScalar(e.strafe * (flow ? 0.12 : 0.55));
       const dir = _v3.copy(flow || toPlayer).add(strafeDir).normalize();
-      // steer around cover
+      // Steer around cover, pushing away from the NEAREST POINT on each box
+      // rather than its centre. A wall segment is 4 m long, so its centre can
+      // be metres away along the wall — the repulsion pointed sideways
+      // instead of outwards, and at a corner two segments pushed in
+      // contradicting directions. That is the jitter against walls.
       for (const o of obstacles) {
-        const cx = (o.min.x + o.max.x) / 2, cz = (o.min.z + o.max.z) / 2;
-        const dx = e.pos.x - cx, dz = e.pos.z - cz;
+        const nx = Math.min(Math.max(e.pos.x, o.min.x), o.max.x);
+        const nz = Math.min(Math.max(e.pos.z, o.min.z), o.max.z);
+        const dx = e.pos.x - nx, dz = e.pos.z - nz;
         const d2 = dx * dx + dz * dz;
-        if (d2 < 9) {
-          const inv = 1.6 / Math.max(Math.sqrt(d2), 0.3);
+        if (d2 < 4) {
+          const inv = 0.9 / Math.max(Math.sqrt(d2), 0.35);
           dir.x += dx * inv * 0.4; dir.z += dz * inv * 0.4;
         }
       }
@@ -2848,6 +2862,12 @@ function updateEnemy(e, sdt) {
         }
       }
       dir.normalize();
+      // Smooth the heading. Flow fields snap between cells and repulsion
+      // fights itself in corners; without this an enemy can shiver in place
+      // instead of walking. Fast enough to still turn on a corner.
+      if (!e.dirS) e.dirS = dir.clone();
+      else e.dirS.lerp(dir, Math.min(1, sdt * 9)).normalize();
+      dir.copy(e.dirS);
       // The last few of a wave hold the door approach. They may close on you
       // and they may strafe, but they never walk back down the corridor and
       // round a corner — so the fight that opens the door is always fought
@@ -3537,18 +3557,40 @@ function onPointerMove(ev) {
   const p = input.pointers.get(ev.pointerId);
   if (!p) return;
   ev.preventDefault();
+  // Every sample the browser had, not just the latest. Phones deliver touch
+  // at a higher rate than they fire pointermove, and Chrome hands the skipped
+  // ones over here; using them turns a coarse staircase into a smooth arc.
+  const samples = ev.getCoalescedEvents ? ev.getCoalescedEvents() : null;
+  if (samples && samples.length > 1) {
+    for (const c of samples) movePointer(p, c.clientX, c.clientY);
+  } else {
+    movePointer(p, ev.clientX, ev.clientY);
+  }
+}
+
+// The look control used to do NOTHING for the first TAP_PX (18) of thumb
+// travel, because the role was not assigned until the gesture cleared the
+// tap dead-zone — and then it replayed the whole swallowed distance in one
+// step. That is the "I move my thumb, nothing happens, then it jumps" feel:
+// it was ours, not the browser's. The role is now decided on the first real
+// movement and look is applied from the first pixel. Tap-to-fire is
+// unaffected, because that test was always about NET displacement at
+// release, which a tap still passes.
+const ROLE_PX = 2;   // just enough not to assign a role to a still thumb
+
+function movePointer(p, cx, cy) {
   // a stale entry (mobile browsers sometimes lose a pointerup at the screen
   // edge) makes the NEXT touch look like a huge instant swipe — the camera
   // "jumps". Any implausible single-event hop is a re-plant, not a move:
   // carry the anchors along with it so nothing is applied.
-  if (Math.hypot(ev.clientX - p.x, ev.clientY - p.y) > 140) {
-    p.ox += ev.clientX - p.x; p.oy += ev.clientY - p.y;
-    p.sx += ev.clientX - p.x; p.sy += ev.clientY - p.y;
-    p.x = ev.clientX; p.y = ev.clientY;
+  if (Math.hypot(cx - p.x, cy - p.y) > 140) {
+    p.ox += cx - p.x; p.oy += cy - p.y;
+    p.sx += cx - p.x; p.sy += cy - p.y;
+    p.x = cx; p.y = cy;
   }
-  const dx = ev.clientX - p.x, dy = ev.clientY - p.y;
-  p.x = ev.clientX; p.y = ev.clientY;
-  if (!p.role && Math.hypot(p.x - p.sx, p.y - p.sy) > TAP_PX) {
+  const dx = cx - p.x, dy = cy - p.y;
+  p.x = cx; p.y = cy;
+  if (!p.role && Math.hypot(p.x - p.sx, p.y - p.sy) > ROLE_PX) {
     // if the other thumb is already steering, this finger is LOOK no matter
     // where it landed — two-handed play shouldn't care about screen halves
     let hasMove = false;
@@ -3556,8 +3598,8 @@ function onPointerMove(ev) {
     p.role = hasMove ? 'look' : (p.sx < window.innerWidth * 0.5 ? 'move' : 'look');
     p.ox = p.x; p.oy = p.y;         // the stick anchors where the drag begins
     if (p.role === 'move') sprintTo = null;   // manual move cancels a sprint
-    // the tap dead-zone swallowed the first ~18px of the gesture; replay it
-    // (minus this event's dx/dy, applied below) so fast flicks aren't blunted
+    // apply the couple of pixels that assigned the role, so even the very
+    // first sample of a flick counts
     if (p.role === 'look') applyLook(p.x - dx - p.sx, p.y - dy - p.sy);
   }
   if (p.role === 'move') {
@@ -3588,7 +3630,9 @@ function releasePointer(ev, isTapEligible) {
   const p = input.pointers.get(ev.pointerId);
   if (!p) return;
   ev.preventDefault();
-  if (isTapEligible && !p.role && performance.now() - p.downT < TAP_MS &&
+  // NOT gated on p.role any more: the role is now assigned after 2 px, so a
+  // real tap almost always has one. Net displacement is the honest test.
+  if (isTapEligible && performance.now() - p.downT < TAP_MS &&
       Math.hypot(p.x - p.sx, p.y - p.sy) <= TAP_PX) {
     playerFire();   // a tap is always a shot: weapons are collected on foot
   }
@@ -5719,15 +5763,19 @@ function updateHallFlow() {
 function hallSteer(e) {
   if (!hall || !hall.toPlayer) return null;
   const C = HALL.cell;
-  // Not clearly IN FRONT of the player? Head for the rally up the corridor,
-  // not their back. The threshold sits slightly ahead of the player on
-  // purpose: anyone level with you is already halfway to attacking from
-  // behind, and looping them forward costs a couple of seconds of walking.
-  // Close-quarters attackers are exempt — turning tail at 3m looks absurd,
-  // and a rusher at that range is committed anyway.
-  const behind = e.pos.z < player.pos.z + 1.5 &&
-    Math.hypot(e.pos.x - player.pos.x, e.pos.z - player.pos.z) > 4;
-  const field = behind && hall.toRally ? hall.toRally : hall.toPlayer;
+  // Only someone GENUINELY behind you loops around to re-engage from the
+  // front. The previous rule counted anyone within 1.5 m of your own z as
+  // behind, which in a 16 m-wide room is half the fight — so enemies level
+  // with you turned and ran up the corridor. That is the bug that looked
+  // like rushers fleeing.
+  //
+  // Hysteresis, or an enemy sitting on the boundary flips every frame and
+  // jitters on the spot. And rushers never rally at all: a close-quarters
+  // attacker turning tail reads as broken however far away he is.
+  const behindBy = player.pos.z - e.pos.z;        // positive = behind you
+  if (e.type === 'rusher') e.rally = false;
+  else e.rally = e.rally ? behindBy > 1 : behindBy > 4;
+  const field = e.rally && hall.toRally ? hall.toRally : hall.toPlayer;
   const here = cellKeyOf(e.pos.x, e.pos.z);
   const d0 = field.get(here);
   if (d0 === undefined) return null;
