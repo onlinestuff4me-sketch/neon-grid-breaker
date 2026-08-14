@@ -67,12 +67,13 @@ standing. See `docs/TUNNEL_META.md`.
 
 ## 4. Protocol elements, cheapest first
 
-Ten are designed, registered and gated but not built. `impl: false` keeps the
-composer from picking them, so each one ships by flipping a flag.
+Nine left. They are designed, registered and gated but not built; `impl:
+false` keeps the composer from picking them, so each ships by flipping a flag
+once the geometry exists.
 
 | Element | Kind | Why it's worth building |
 |---|---|---|
-| **One-way seal** | measure | Cheapest. A door that shuts behind you mid-leg, committing you to the second half. Real tension for very little code. |
+| ~~One-way seal~~ | measure | **Shipped.** A bulkhead halfway to the door that comes up behind you. Placed only where the row it spans — and the row before it — hold a single cell, so no branch lane can walk around the thing that just shut; about a quarter of corridors offer no such spot past the halfway mark and simply get no seal, which is better than one that shuts eight metres in. Anyone still on the far side is **redeployed**, not trapped and not shattered: pulled out and pushed to the front of the spawn queue with their release refunded. Trapping would soft-lock the door, which waits on an empty floor, and killing them would pay you kills and time bank for walking forward. |
 | **Blackout** | condition | Emergency lighting, visibility ~8 m. Freezing time becomes a torch as well as a shield — it changes what the mechanic is *for*. |
 | **Breach walls** | measure | Marked panels enemies come *through* mid-leg, using the shatter language we already have on architecture. Turns a cleared corridor live again. |
 | **Grinder** | measure | Your idea. A slab that seals the leg behind you and advances — and **does not stop while time is frozen**, because it is the building, not a person. The first element that attacks the slow-mo mechanic itself. |

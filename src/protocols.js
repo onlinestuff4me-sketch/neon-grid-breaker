@@ -45,7 +45,7 @@ export const ELEMENTS = [
   // --- measures: what the building DOES ------------------------------------
   { id: 'alcoves', name: 'ALCOVES', kind: 'measure', tier: 1, minDoor: 2, unlockAt: 0, weight: 7, impl: true,
     archive: 'Recessed bays. Not designed as cover. Usable as cover.' },
-  { id: 'oneWaySeal', name: 'ONE-WAY SEAL', kind: 'measure', tier: 2, minDoor: 4, unlockAt: 40, weight: 5, impl: false,
+  { id: 'oneWaySeal', name: 'ONE-WAY SEAL', kind: 'measure', tier: 2, minDoor: 4, unlockAt: 40, weight: 5, impl: true,
     archive: 'Section closed behind you. Return is not authorised.' },
   { id: 'breachWalls', name: 'BREACH WALLS', kind: 'measure', tier: 2, minDoor: 5, unlockAt: 40, weight: 5, impl: false,
     archive: 'Panels rated for personnel egress. From either side.' },

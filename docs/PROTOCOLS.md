@@ -1,6 +1,10 @@
 # Protocols — the content system
 
-Design spec. Not built yet; this is the thing to build against.
+Design spec, and now partly built: the registry, the composer, the archive
+screen and the corridor / service run / vault / atrium / gauntlet / alcoves /
+dim strips / fog / **one-way seal** elements all ship. Everything still
+carrying `impl: false` in `src/protocols.js` is design only, and the composer
+never picks it — so this document can keep running ahead of the game.
 
 Every number here is adjustable in the **Protocol Pacing** artifact, which
 holds the same registry, simulates a run at any level of player experience,
@@ -242,9 +246,9 @@ of where the run breaks down.
    plumbing is in.
 2. **`lifetimeDoors` + eligibility** — and re-gate the enemy cast through
    the same two keys, which fixes the burn-through immediately.
-3. **Archive screen** — reads the registry; empty slots appear the moment
-   the registry has entries.
-4. **New protocols**, cheapest first: blackout, one-way door, breach walls,
-   then grinder.
+3. ~~**Archive screen**~~ — built. Reads the registry, and a locked row keeps
+   its designation so the empty slots are visible from the first run.
+4. **New protocols**, cheapest first: ~~one-way seal~~ (built), then
+   blackout, breach walls, then grinder.
 5. **Fragments** on personal-record doors, once there is a place to read
    them.

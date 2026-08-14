@@ -5733,6 +5733,7 @@ function setEnvironment(env) {
       if (!L) continue;
       for (const m of L.meshes) scene.remove(m);
       scene.remove(L.door.slab);
+      if (L.seal) scene.remove(L.seal.slab);
     }
     hall = null;
     setLayout();   // restore the city's obstacles
@@ -5993,6 +5994,48 @@ function buildHallLeg(sgx, sgz, proto) {
       max: new THREE.Vector3(px + pw / 2, H, pz + pd / 2),
     });
   }
+  // ONE-WAY SEAL. A bulkhead sitting in the floor halfway down the leg; walk
+  // past it and it comes up behind you. It is placed at a straight forward
+  // step whose row — and the row before it — hold exactly one cell of the
+  // leg, so no branch lane can walk around the thing that just shut.
+  let seal = null;
+  if (measures.has('oneWaySeal') && stretches.length > 1) {
+    const spine = stretches.slice(0, -1).reduce((a, s) => a.concat(s.cells), []);
+    const rows = new Map();
+    for (const [, cgz] of cells) rows.set(cgz, (rows.get(cgz) || 0) + 1);
+    // Halfway to the DOOR, measured in z rather than in spine index: a leg
+    // with lateral jogs spends indices without gaining ground, so the index
+    // midpoint lands a third of the way along and the seal shuts too early
+    // to commit you to anything.
+    const midZ = (spine[0][1] + endGz) / 2;
+    const cand = [];
+    for (let i = 1; i < spine.length; i++) {
+      const [gx, gz] = spine[i], [px, pz] = spine[i - 1];
+      if (gx !== px || gz !== pz + 1) continue;             // a straight step
+      if (rows.get(gz) !== 1 || rows.get(pz) !== 1) continue;   // no bypass
+      cand.push(i);
+    }
+    // The first candidate at or past halfway, so it never shuts before you
+    // have committed to anything. Branch lanes veto whole rows, so roughly a
+    // quarter of corridors offer none past the mark — those legs simply get
+    // no seal. A bulkhead that shuts eight metres in commits you to nothing
+    // and is worse than not having one.
+    let best = -1;
+    for (const i of cand) if (spine[i][1] >= midZ) { best = i; break; }
+    if (best > 0) {
+      const [gx, gz] = spine[best];
+      const sx = gx * C, sz = gz * C - C / 2;
+      wallBox(sx - 1.35, sz, 0.7, W);   // jambs, exactly the exit door's
+      wallBox(sx + 1.35, sz, 0.7, W);
+      walls.push([sx, 2.8, sz, 2, 0.6, W]);   // lintel: visual only, as above
+      const sl = new THREE.Mesh(new THREE.BoxGeometry(2, 2.72, 0.18), DOOR_SEAL_MAT);
+      sl.position.set(sx, -1.55, sz);         // waiting in the floor
+      scene.add(sl);
+      seal = { slab: sl, x: sx, z: sz, shut: false,
+        ob: { min: new THREE.Vector3(sx - 1, 0, sz - 0.2),
+          max: new THREE.Vector3(sx + 1, H, sz + 0.2) } };
+    }
+  }
   const meshes = [
     mergedCityMesh(walls, HALL_WALL_MAT),
     mergedCityMesh(floors, HALL_FLOOR_MAT),
@@ -6011,7 +6054,7 @@ function buildHallLeg(sgx, sgz, proto) {
       max: new THREE.Vector3(dx0 + 1, H, dz0 + 0.2),
     },
   };
-  return { cells, approach, stretches, doorways, pillars, meshes, obs, door, endGx, endGz, proto,
+  return { cells, approach, stretches, doorways, pillars, meshes, obs, door, seal, endGx, endGz, proto,
     retired: false, nextBuilt: false };
 }
 
@@ -6134,7 +6177,7 @@ function initHall() {
   setEnvironment('hall');
   hall = { legs: [], grid: new Set(), cur: 0, doorsPassed: 0, checkpoint: { x: 0, z: 0 },
     mem: newRunMemory(archive) };
-  hall.legs.push(buildHallLeg(0, 0, composeProtocol(1, lifetimeDoors, hall.mem)));
+  hall.legs.push(buildHallLeg(0, 0, forced(composeProtocol(1, lifetimeDoors, hall.mem))));
   recordMetProto(hall.legs[0].proto);   // leg 1 counts too; only 2+ used to
   recordMet(['pistol']);                // it is already in your hand
   rebuildHallObstacles();
@@ -6188,12 +6231,23 @@ function retryHall() {
   showBanner(`DOOR ${hall.doorsPassed + 1}<small>AGAIN.</small>`, 1600);
 }
 
+// Test hook only: `__ts.forceMeasures([...])` pins a leg's measures so a
+// rarely-composed element can be reached without playing to door 8. Null in
+// every real run, which is why it can sit in the composer's path.
+let forcedMeasures = null;
+function forced(proto) {
+  if (forcedMeasures) {
+    proto.measures = forcedMeasures.map((id) => ELEMENTS.find((e) => e.id === id)).filter(Boolean);
+  }
+  return proto;
+}
+
 function openHallDoor() {
   const L = hall.legs[hall.cur];
   L.door.open = true;
   if (!L.nextBuilt) {   // the corridor beyond appears as the door opens
     L.nextBuilt = true;
-    const proto = composeProtocol(hall.doorsPassed + 2, lifetimeDoors, hall.mem);
+    const proto = forced(composeProtocol(hall.doorsPassed + 2, lifetimeDoors, hall.mem));
     hall.legs.push(buildHallLeg(L.endGx, L.endGz + 1, proto));
   }
   rebuildHallObstacles();
@@ -6219,6 +6273,7 @@ function crossHallDoor() {
     old.retired = true;
     for (const m of old.meshes) scene.remove(m);
     scene.remove(old.door.slab);
+    if (old.seal) scene.remove(old.seal.slab);
   }
   rebuildHallObstacles();
   game.spawnQueue = hallWave(game.wave);
@@ -6379,7 +6434,44 @@ function updateHall(dt) {
   if (L.door.open && L.door.slab.position.y > -1.55) {
     L.door.slab.position.y -= dt * 3.5;   // slides into the floor
   }
+  if (L.seal) {
+    if (!L.seal.shut && game.state === 'play' && player.pos.z > L.seal.z + 0.7) closeSeal(L);
+    if (L.seal.shut && L.seal.slab.position.y < 1.36) {
+      L.seal.slab.position.y = Math.min(1.36, L.seal.slab.position.y + dt * 4.2);
+    }
+  }
   if (L.door.open && player.pos.z > L.door.z + 0.5) crossHallDoor();
+}
+
+// The bulkhead comes up behind you. Anything still on the far side is
+// neither trapped nor free: it is REDEPLOYED — pulled out of the world and
+// pushed back to the front of the spawn queue, with its release refunded so
+// the stretch budget will let it out again. Trapping would soft-lock the
+// door, which waits on an empty floor; shattering them would hand you kills
+// and time bank for walking forward. Neither is what a closed door means.
+function closeSeal(L) {
+  const S = L.seal;
+  S.shut = true;
+  L.obs.push(S.ob);
+  rebuildHallObstacles();
+  const back = [];
+  for (let i = enemies.length - 1; i >= 0; i--) {
+    const e = enemies[i];
+    if (e.pos.z > S.z) continue;
+    removeEnemyShards(e);
+    removeBeam(e);
+    scene.remove(e.g);
+    enemies.splice(i, 1);
+    back.push(e.type);
+  }
+  if (back.length) {
+    game.spawnQueue.unshift(...back);
+    L.released = Math.max(0, (L.released || 0) - back.length);
+    game.spawnTimer = Math.min(game.spawnTimer, 1.2);
+  }
+  sfx.airlock();
+  vibrate([20, 40, 20]);
+  showBanner('SECTION SEALED<small>THE WAY BACK IS CLOSED</small>', 1800);
 }
 
 // ---------------------------------------------------------------------------
@@ -6777,6 +6869,14 @@ window.__ts = {
   progress: () => ({ lifetimeDoors, archive: [...archive], runFiled }),
   die: (ended) => hitPlayer(!!ended),
   // shards spawned but not yet released: the per-part cascade in one number
+  seal: () => {
+    const L = hall && hall.legs[hall.cur];
+    return L && L.seal
+      ? { x: L.seal.x, z: L.seal.z, shut: L.seal.shut, y: +L.seal.slab.position.y.toFixed(2) }
+      : null;
+  },
+  forceMeasures: (ids) => { forcedMeasures = ids || null; },
+  restartHall: () => { setEnvironment('city'); clearField(); initHall(); },
   breaking: () => breaking.map((b) => ({ left: b.items.filter((x) => !x.done).length,
     shown: b.items.reduce((n, x) => n + (x.done ? 0 : x.meshes.length), 0) })),
   shatterHeld: () => (debrisPool
