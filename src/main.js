@@ -928,17 +928,32 @@ const vmEnv = (() => {
   const c = document.createElement('canvas');
   c.width = 64; c.height = 32;
   const g = c.getContext('2d');
-  const grad = g.createLinearGradient(0, 0, 0, 32);
-  grad.addColorStop(0, '#ffffff');      // straight up: the strips
-  grad.addColorStop(0.26, '#6b8794');
-  grad.addColorStop(0.46, '#1a2329');   // horizon: near black, so the only
-  grad.addColorStop(0.8, '#0a0e11');    // thing that reflects is the LIGHT
-  grad.addColorStop(1, '#050708');      // straight down: the floor
-  g.fillStyle = grad; g.fillRect(0, 0, 64, 32);
-  // hard bright bands where the ceiling strips are: these are what actually
-  // sweep across the slide as you turn
+  // A HARD horizon, not a gradient. A smooth falloff lifted every side face
+  // of the gun toward grey, which is what made it read as a solid slab: the
+  // slab was the SIDES, not the top. Above the line is ceiling and it is
+  // white; below it is corridor and it is essentially black. So an up-facing
+  // surface — the top of the slide, the top of the grip — catches a hard
+  // white glint that slides across it as you turn, and every other face on
+  // the weapon stays black.
+  g.fillStyle = '#05070a'; g.fillRect(0, 0, 64, 32);
+  g.fillStyle = '#c8dae2'; g.fillRect(0, 0, 64, 8);       // the ceiling plane
+  // ...but the real ceiling is STRIPS with dark between them, and that is
+  // what makes the glint move. A uniform white band reflects as a painted
+  // stripe that never changes; broken bands sweep across the slide as you
+  // turn, which is the difference between a highlight and a decal.
   g.fillStyle = '#ffffff';
-  g.fillRect(0, 2, 64, 4); g.fillRect(0, 9, 64, 2);
+  for (let i = 0; i < 4; i++) g.fillRect(i * 16 + 2, 0, 9, 8);
+  g.fillStyle = '#5d7480';
+  for (let i = 0; i < 4; i++) g.fillRect(i * 16 + 12, 1, 4, 6);
+  g.fillStyle = '#7e939e'; g.fillRect(0, 8, 64, 2);       // the wall tops
+  g.fillStyle = '#151d23'; g.fillRect(0, 10, 64, 5);      // wall
+  // Two bright strips just under the horizon so a NEARLY-level face can also
+  // catch something — that is the light running away down the corridor, and
+  // it is what keeps the barrel from going dead when you look level.
+  g.fillStyle = '#e8f4f8';
+  g.fillRect(0, 11, 64, 1);
+  g.fillStyle = 'rgba(255,255,255,0.55)';
+  for (let i = 0; i < 8; i++) g.fillRect(i * 8, 13, 5, 1);
   const t = new THREE.CanvasTexture(c);
   t.mapping = THREE.EquirectangularReflectionMapping;
   return t;
@@ -950,13 +965,17 @@ const vmEnv = (() => {
 // environment — the ceiling strips — actually land on the metal. Reflectivity
 // is lower and the specular is pure white and tighter, so what you see is a
 // hard highlight sliding over a black shape, not a tinted one.
+// Black bodies, white glints. AddOperation means the environment can only
+// ever ADD light, so the gun cannot be tinted grey — it stays black wherever
+// what it reflects is dark, and the reflectivity can be pushed hard because
+// the only bright thing in the map is the ceiling.
 const VM_BLACK = new THREE.MeshPhongMaterial({
-  color: 0x0c1014, specular: 0xffffff, shininess: 140,
-  envMap: vmEnv, reflectivity: 0.34, combine: THREE.AddOperation,
+  color: 0x07090b, specular: 0xffffff, shininess: 260,
+  envMap: vmEnv, reflectivity: 0.95, combine: THREE.AddOperation,
 });
 const VM_GUNMETAL = new THREE.MeshPhongMaterial({
-  color: 0x1d2126, specular: 0xffffff, shininess: 170,
-  envMap: vmEnv, reflectivity: 0.46, combine: THREE.AddOperation,
+  color: 0x0e1216, specular: 0xffffff, shininess: 300,
+  envMap: vmEnv, reflectivity: 1.0, combine: THREE.AddOperation,
 });
 gun.traverse((o) => {
   if (!o.isMesh) return;
@@ -1509,22 +1528,29 @@ debrisPool = makeShardPool(SHATTER.pool, MAT_SHARD);
 // buffer with the debris would let a busy fight eat it alive.
 assemblePool = makeShardPool(SHATTER.assemblePool, MAT_SHARD);
 
-// a shard's colour class: mostly dark, a hot minority that STAYS hot as it
-// flies, and the odd near-white fleck
+// Three shades of the same red, and nothing else. The amber and near-white
+// flecks came off the reference, but there they are a fire TELEGRAPH burning
+// on the body at the instant it breaks — not a property of the debris. We
+// have no such telegraph, so hot pieces were just confetti.
 function shardColor() {
   const r = Math.random();
-  if (r < SHATTER.ratioDark) return SHATTER.colDark;
-  if (r < SHATTER.ratioDark + SHATTER.ratioMid) return SHATTER.colMid;
-  if (r < SHATTER.ratioDark + SHATTER.ratioMid + SHATTER.ratioHot) return SHATTER.colHot;
-  return SHATTER.colFleck;
+  if (r < SHATTER.ratioBright) return SHATTER.colBright;
+  if (r < SHATTER.ratioBright + SHATTER.ratioDark) return SHATTER.colDark;
+  return SHATTER.colDeep;
 }
 
 function spawnShatter(center, impulseDir, count) {
   const n = count || SHATTER.perKill;
   for (let i = 0; i < n; i++) {
     const it = claimShard(debrisPool, shardColor());
-    // weighted small: the median piece is ~4.5 cm, and only a tenth are big
-    it.s = SHATTER.sizeMin + SHATTER.sizeVar * Math.pow(Math.random(), SHATTER.sizeCurve);
+    // TWO CLASSES. A third are the original big chunks — pieces large enough
+    // to follow with your eye as they tumble — and the rest is grit around
+    // them. All-grit read as sand; all-chunks read as meat. Both together is
+    // a body coming apart.
+    const chunk = Math.random() < SHATTER.chunkFrac;
+    it.s = chunk
+      ? SHATTER.chunkMin + Math.random() * SHATTER.chunkVar
+      : SHATTER.gritMin + SHATTER.gritVar * Math.pow(Math.random(), SHATTER.gritCurve);
     it.px = center.x + (Math.random() - 0.5) * 0.5;
     it.py = 0.25 + Math.random() * 1.5;
     it.pz = center.z + (Math.random() - 0.5) * 0.5;

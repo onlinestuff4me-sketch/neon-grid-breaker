@@ -110,3 +110,31 @@ veterans a reason to keep starting over. Each has its own depth record.
 4. **Sealed doors** — once there is content worth hiding behind them.
 5. **Lights-out legs / breach walls** — set-piece variety.
 6. **Modifiers** — last; they need a full archive to mean anything.
+
+---
+
+## Backlog: per-part shatter and where you hit
+
+Bookmarked, not built. The shatter currently breaks a body as one object: the
+pieces spawn from the body's centre regardless of where the round landed.
+
+**The build:** give each body part its own fracture. A round that hits the
+head shatters the head and leaves the body standing for a beat before the
+rest goes — which is what the reference does, and is most of why its deaths
+read as simulated rather than animated. The hit region already exists, since
+`spawnShatter` is handed an impulse direction; what it lacks is the impact
+POINT and a mapping from that point to a part.
+
+**Why it is worth doing:** it turns aiming into a decision. Right now every
+hit is the same hit. Once parts break separately, a headshot is visibly
+different from a body shot, and that difference can carry a reward.
+
+**The reward is the time bank, not points.** Different parts pay different
+slow-mo bonuses — a head worth more than a torso. That plugs straight into
+the scarcity loop: as ammo tightens and time-per-kill falls, precision
+becomes the way to keep the bank alive, which is exactly the progression
+from spraying to choosing that the whole balance model is built around. It
+also makes the knife's reach meaningful, since a jab is always a body hit.
+
+Values would live in `SHATTER` alongside the rest, and in `SCARCITY` if the
+bonus should scale with depth.

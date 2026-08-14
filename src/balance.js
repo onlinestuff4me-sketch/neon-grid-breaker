@@ -217,20 +217,28 @@ export const SHATTER = {
   pool: 512,           // instanced slots; oldest is recycled on overflow
   assemblePool: 768,   // materialising enemies get their own, so a big fight
                        // cannot starve the effect the game opens with
-  perKill: 56,
+  perKill: 52,
   sparkBody: 14, sparkWall: 6,
-  sizeMin: 0.15, sizeVar: 0.36, sizeCurve: 2.2,   // -> 3-10 cm, median ~4.5
-  speedBase: 1.4, speedVar: 3.0, speedCurve: 3,   // most slow, a few fast
-  impulse: 0.8, impulseVar: 1.6,                  // along the killing blow
-  rise: 1.6,           // upward bias: the cloud sits above the wound
-  drag: 1.8,           // per second — without it the cloud expands forever
-  spin: 14,            // rad/s per axis
+  // TWO SIZE CLASSES IN ONE BURST. The all-small version read as sand; the
+  // all-big original read as chunks of meat. A body throws both: recognisable
+  // pieces you can follow, inside a spray of grit.
+  chunkFrac: 0.34,                                // share that are big pieces
+  chunkMin: 0.5, chunkVar: 0.9,                   // the original 10-27 cm
+  gritMin: 0.15, gritVar: 0.36, gritCurve: 2.2,   // 3-10 cm, weighted small
+  speedBase: 2.2, speedVar: 3.2, speedCurve: 2,   // the original's looser spray
+  impulse: 1.6, impulseVar: 2.0,                  // along the killing blow
+  rise: 1.5,           // upward bias: the cloud sits above the wound
+  drag: 0.6,           // enough to settle, not enough to stop it dead
+  spin: 10,            // rad/s per axis
   life: 2.8, lifeVar: 1.0,
-  breakWindow: 0.06,   // seconds of WORLD time the body crumbles over
+  breakWindow: 0.05,   // seconds of WORLD time the body crumbles over
   restitution: 0.32, friction: 0.6, angDamp: 0.5,
-  // ~90% dark, a hot minority that stays hot, a couple of near-white
-  colDark: 0x8f3028, colMid: 0xc6302a, colHot: 0xf2d820, colFleck: 0xfff4e0,
-  ratioDark: 0.72, ratioMid: 0.2, ratioHot: 0.07,   // remainder = fleck
+  // RED ONLY. The amber and near-white flecks were read off the reference,
+  // but in the reference they are a FIRE TELEGRAPH burning on the body at the
+  // moment it breaks — not a property of the debris. Ours have no such
+  // telegraph, so hot pieces were just confetti.
+  colBright: 0xff2d1a, colDark: 0xc61703, colDeep: 0x8f2018,
+  ratioBright: 0.55, ratioDark: 0.32,   // remainder = deep
 };
 
 // The slow-mo bank.
