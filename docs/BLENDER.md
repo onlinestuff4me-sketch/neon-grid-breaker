@@ -19,10 +19,9 @@ So the whole job is **silhouette and motion**, not surface. A 900-triangle
 figure with a real walk cycle will look dramatically better than a
 20,000-triangle sculpt that slides around stiffly.
 
-The game paints every enemy's colour at runtime — it has to, because the fire
-telegraph drives `emissive` on four material slots per body. **Any material
-you assign will be replaced.** What matters is that the mesh is *split into
-the right groups* so those four slots exist.
+The game assigns every enemy's colour at runtime. **Any material you assign
+will be replaced.** What it cannot do is invent groups that are not there, so
+what matters is that the mesh is *split into the right four slots*.
 
 ---
 
@@ -41,21 +40,24 @@ Get these wrong and the model cannot be loaded without rework.
 | **Influences** | **Max 4 bones per vertex** (Blender: Limit Total → 4) | More than 4 is silently dropped by glTF and deforms wrongly. |
 | **Modifiers** | **Apply all** except Armature | Un-applied modifiers do not export. |
 | **Transforms** | **Apply all** (Ctrl+A → All Transforms) | A non-uniform scale on an armature breaks skinning. |
-| **Materials** | Exactly **four**, named below | The telegraph drives emissive per group. |
+| **Materials** | Exactly **four**, named below | The game shades each group separately, per enemy type. |
 
 ### The four material slots — this is the part people miss
 
 Name them exactly. The game looks them up by name and replaces them.
 
-| Slot name | Covers | Telegraph heat |
-|---|---|---|
-| `MAT_CHEST` | torso, shoulders | **full** — carries the glow |
-| `MAT_PELVIS` | hips, upper legs | **0.95** |
-| `MAT_BODY` | arms, forearms, hands, lower legs, feet | 0.7 |
-| `MAT_HEAD` | head, neck | 0.25 — stays dark so the silhouette survives |
+| Slot name | Covers |
+|---|---|
+| `MAT_HEAD` | head, neck |
+| `MAT_CHEST` | torso, shoulders |
+| `MAT_PELVIS` | hips, upper legs |
+| `MAT_BODY` | arms, forearms, hands, lower legs, feet |
 
-That weighting is not arbitrary. It is what keeps a glowing enemy *readable*
-as a shape rather than a blob, and it is what the reference does.
+Four rather than one because the game shades them separately per enemy type —
+the sniper is darker, the rusher hotter — and because on the **armored unit
+the head is a bright red weak point on an otherwise grey body**, which is the
+only way a player knows where to shoot it. A single-material figure makes
+that enemy look unkillable.
 
 ---
 
@@ -102,7 +104,7 @@ first two alone would transform the game.
 | # | Clip name | Length | What it is |
 |---|---|---|---|
 | 1 | `walk` | 1.0 s, **looping** | The advance. Most-seen animation by an order of magnitude. Keep the arms low and the stride short — a *stalk*, not a march. |
-| 2 | `aim` | 0.6 s, **not looping** | Gun comes up to the shoulder. This plays under the fire telegraph, so the pose must read clearly from the front at 8–20 m. |
+| 2 | `aim` | 0.6 s, **not looping** | Gun comes up to the shoulder. This is the game's **primary warning that a shot is coming**, so the pose must read clearly from the front at 8–20 m on a phone. |
 | 3 | `idle` | 2.0 s, looping | A breathing shift, very subtle. Plays when they hold position. |
 | 4 | `fire` | 0.25 s | Recoil kick from the aim pose. Additive on top of `aim` if you can; a standalone clip is fine. |
 | 5 | `lunge` | 0.5 s | The rusher's attack. Needs an unmistakable **wind-up** in the first 60% — the player reads that windup to dodge, so exaggerate it beyond what looks natural. |
@@ -113,8 +115,8 @@ Two notes that matter more than they sound:
 - **`walk` must loop seamlessly.** First and last keyframe identical, and no
   root translation — the game moves the body, the animation only cycles the
   limbs. Root motion would fight the movement code and double the speed.
-- **`aim` must end in a pose that holds.** The game freezes at the last frame
-  while the telegraph burns; if the final pose is mid-motion it will look
+- **`aim` must end in a pose that holds.** The game freezes on the last frame
+  while the enemy waits its turn to fire; a final pose caught mid-motion looks
   stuck rather than held.
 
 ---
