@@ -1892,6 +1892,48 @@ const enemyMatCache = {};
 function EM(hex) {
   return enemyMatCache[hex] || (enemyMatCache[hex] = new THREE.MeshLambertMaterial({ color: hex }));
 }
+// THE FIRE TELEGRAPH needs to heat ONE body, and the cache above hands the
+// same material to every enemy of a type — tinting it would light up the
+// whole room. So each enemy builds its own set. This costs a handful of
+// material objects and NO extra draw calls, because every body part is
+// already its own mesh; the cache was only ever saving allocations.
+function enemyMatSet(C) {
+  const mk = (hex) => new THREE.MeshLambertMaterial({ color: hex });
+  return { body: mk(C.body), chest: mk(C.chest), pelvis: mk(C.pelvis), head: mk(C.head) };
+}
+// Ramped emissive along the measured heat: red, through orange and amber, to
+// a near-yellow at the moment of the shot.
+const TELL_RAMP = [
+  [0.00, 0x000000],   // cold: no glow at all
+  [0.45, 0x5a1a08],
+  [0.75, 0xa8481a],
+  [1.00, 0xd8901c],
+];
+const _tellA = new THREE.Color(), _tellB = new THREE.Color();
+function tellColor(out, t) {
+  t = Math.max(0, Math.min(1, t));
+  for (let i = 1; i < TELL_RAMP.length; i++) {
+    if (t <= TELL_RAMP[i][0]) {
+      const [t0, c0] = TELL_RAMP[i - 1], [t1, c1] = TELL_RAMP[i];
+      _tellA.setHex(c0); _tellB.setHex(c1);
+      return out.copy(_tellA).lerp(_tellB, (t - t0) / (t1 - t0));
+    }
+  }
+  return out.setHex(TELL_RAMP[TELL_RAMP.length - 1][1]);
+}
+const _tellOut = new THREE.Color();
+// The reference concentrates the heat on chest, hips and legs rather than
+// spreading it evenly — the head stays dark, which is what keeps the
+// silhouette readable while the body is glowing.
+const TELL_WEIGHT = { chest: 1, pelvis: 0.95, body: 0.7, head: 0.25 };
+function setTelegraph(e, t) {
+  if (!e.mats) return;
+  e.tell = t;
+  for (const k in e.mats) {
+    tellColor(_tellOut, t * (TELL_WEIGHT[k] || 0.6));
+    e.mats[k].emissive.copy(_tellOut);
+  }
+}
 const MAT_SASH = new THREE.MeshLambertMaterial({ color: 0x16181d, side: THREE.DoubleSide });
 
 function rnd01(s) { const x = Math.sin(s * 127.1) * 43758.5453; return x - Math.floor(x); }
@@ -1975,6 +2017,7 @@ function buildEnemyMesh(type) {
     : type === 'sniper' ? { body: 0xb81205, chest: 0xa21507, pelvis: 0x8c1004, head: 0xc8281a }
     : type === 'rusher' ? { body: 0xe0321f, chest: 0xe83a26, pelvis: 0xc8281a, head: 0xf5533f }
     : { body: 0xc8281a, chest: 0xd3291b, pelvis: 0xa21507, head: 0xe03222 };
+  const M = enemyMatSet(C);   // this body's own materials — see setTelegraph
   const lean = P.lean + (type === 'rusher' ? 0.22 : 0);   // the rusher stalks hunched
   const headH = P.head * 1.08;
   const headBot = 1.62 - headH / 2;
@@ -1998,14 +2041,14 @@ function buildEnemyMesh(type) {
   const collar = new THREE.Group();
   collar.position.y = th;
   chestG.add(collar);
-  const chest = new THREE.Mesh(loftGeo(chestProf, 1, jit, seed), EM(C.chest));
+  const chest = new THREE.Mesh(loftGeo(chestProf, 1, jit, seed), M.chest);
   collar.add(chest);
 
   if (P.neck > 0.005) {
     const neck = new THREE.Mesh(loftGeo([
       { y: -(P.neck + 0.02), rx: P.head * 0.24, rz: P.head * 0.24 },
       { y: 0, rx: P.head * 0.21, rz: P.head * 0.22 },
-    ], 2, jit * 0.6, seed), EM(C.body));
+    ], 2, jit * 0.6, seed), M.body);
     neck.position.y = P.neck + 0.01;
     collar.add(neck);
   }
@@ -2025,7 +2068,7 @@ function buildEnemyMesh(type) {
     { y: -hh * 0.12, rx: hr * 0.44, rz: hr * 0.48, jm: 0.3 },
     { y: 0, rx: hr * 0.26, rz: hr * 0.3, jm: 0.15 },
   ];
-  const head = new THREE.Mesh(loftGeo(headProf, 3, jit, seed), EM(C.head));
+  const head = new THREE.Mesh(loftGeo(headProf, 3, jit, seed), M.head);
   head.position.y = 1.62 + hh / 2 - torsoTop;   // head center stays at 1.62
   collar.add(head);
 
@@ -2034,7 +2077,7 @@ function buildEnemyMesh(type) {
     { y: -ph2, rx: P.hip / 2 * 0.8, rz: P.chest * 0.36 },
     { y: -ph2 * 0.45, rx: P.hip / 2, rz: P.chest * 0.4 },
     { y: 0, rx: P.hip / 2 * 0.9, rz: P.chest * 0.43 },
-  ], 4, jit, seed), EM(C.pelvis));
+  ], 4, jit, seed), M.pelvis);
   pelvis.position.y = hipTop;
   g.add(pelvis);
 
@@ -2044,15 +2087,15 @@ function buildEnemyMesh(type) {
   const mkLeg = (side) => {
     const leg = new THREE.Group();
     leg.position.set(side * (P.hip / 2 - P.legt / 2 + 0.01), 0.86, 0);
-    leg.add(new THREE.Mesh(loftGeo(limbProf2(thighL, P.legt * 0.62, P.legt * (0.58 + 0.22 * m), P.legt * 0.42), 5 + side, jit, seed), EM(C.body)));
+    leg.add(new THREE.Mesh(loftGeo(limbProf2(thighL, P.legt * 0.62, P.legt * (0.58 + 0.22 * m), P.legt * 0.42), 5 + side, jit, seed), M.body));
     const shin = new THREE.Group();
     shin.position.y = -thighL;
     shin.rotation.x = EP.knee;
-    shin.add(new THREE.Mesh(loftGeo(limbProf2(shinLen, P.legt * 0.46, P.legt * (0.48 + 0.26 * m), P.legt * 0.3), 7 + side, jit, seed), EM(C.body)));
+    shin.add(new THREE.Mesh(loftGeo(limbProf2(shinLen, P.legt * 0.46, P.legt * (0.48 + 0.26 * m), P.legt * 0.3), 7 + side, jit, seed), M.body));
     const fw = P.legt, ft = fw * 0.72;
     const foot = new THREE.Mesh(facesToGeo([
       [-fw / 2, 0, -0.11], [fw / 2, 0, -0.11], [fw / 2, 0.085, -0.11], [-fw / 2, 0.085, -0.11],
-      [-ft / 2, 0, 0.23], [ft / 2, 0, 0.23], [ft / 2, 0.028, 0.23], [-ft / 2, 0.028, 0.23]], BOXF), EM(C.pelvis));
+      [-ft / 2, 0, 0.23], [ft / 2, 0, 0.23], [ft / 2, 0.028, 0.23], [-ft / 2, 0.028, 0.23]], BOXF), M.pelvis);
     foot.position.y = -shinLen - 0.02;
     shin.add(foot);
     leg.add(shin);
@@ -2076,11 +2119,11 @@ function buildEnemyMesh(type) {
       { y: -upperL * 0.42, rx: P.armt * (0.56 + 0.3 * m), rz: P.armt * (0.56 + 0.3 * m) * 0.92 },
       { y: -upperL * 0.85, rx: (P.armt * (0.56 + 0.3 * m) + P.armt * 0.42) * 0.42, rz: (P.armt * (0.56 + 0.3 * m) + P.armt * 0.42) * 0.4 },
       { y: -upperL, rx: P.armt * 0.42, rz: P.armt * 0.42 * 0.92, jm: 0.4 },
-    ], 11 + side, jit, seed), EM(C.body)));
+    ], 11 + side, jit, seed), M.body));
     const fore = new THREE.Group();
     fore.position.y = -upperL;
     fore.rotation.x = -(side > 0 ? 0.12 : EP.elbow);
-    fore.add(new THREE.Mesh(loftGeo(limbProf2(foreL + 0.06, P.armt * 0.46, P.armt * (0.48 + 0.2 * m), P.armt * 0.3), 13 + side, jit, seed), EM(C.body)));
+    fore.add(new THREE.Mesh(loftGeo(limbProf2(foreL + 0.06, P.armt * 0.46, P.armt * (0.48 + 0.2 * m), P.armt * 0.3), 13 + side, jit, seed), M.body));
     arm.add(fore);
     return { arm, fore };
   };
@@ -2093,13 +2136,13 @@ function buildEnemyMesh(type) {
   // interpenetrates red — barrels still run along -y for the aim raise.
   const addHand = (fa, side, fist) => {
     if (fist) {
-      const f = new THREE.Mesh(tboxGeo(P.armt * 0.95, P.armt * 0.85, 0.11, P.armt * 0.95, P.armt * 0.85), EM(C.body));
+      const f = new THREE.Mesh(tboxGeo(P.armt * 0.95, P.armt * 0.85, 0.11, P.armt * 0.95, P.armt * 0.85), M.body);
       f.position.set(0, -foreL - 0.04, -0.055);
       fa.add(f);
     } else {
-      const palm = new THREE.Mesh(tboxGeo(P.armt * 0.82, P.armt * 0.62, 0.14, P.armt * 0.52, P.armt * 0.4), EM(C.body));
+      const palm = new THREE.Mesh(tboxGeo(P.armt * 0.82, P.armt * 0.62, 0.14, P.armt * 0.52, P.armt * 0.4), M.body);
       palm.position.set(0, -foreL - 0.02, 0.008);
-      const thumb = new THREE.Mesh(tboxGeo(0.032, 0.026, 0.07, 0.04, 0.032), EM(C.body));
+      const thumb = new THREE.Mesh(tboxGeo(0.032, 0.026, 0.07, 0.04, 0.032), M.body);
       thumb.position.set(-side * P.armt * 0.5, -foreL - 0.03, 0.025);
       fa.add(palm, thumb);
     }
@@ -2147,7 +2190,7 @@ function buildEnemyMesh(type) {
   if (type === 'rusher') {   // crystal claws past each open hand
     for (const fa of [AL.fore, AR.fore]) {
       for (const off of [-0.026, 0.026]) {
-        const claw = new THREE.Mesh(tboxGeo(0.018, 0.06, 0.22, 0.018, 0.052), EM(C.head));
+        const claw = new THREE.Mesh(tboxGeo(0.018, 0.06, 0.22, 0.018, 0.052), M.head);
         claw.position.set(off, -foreL - 0.17, 0.01);
         fa.add(claw);
       }
@@ -2236,7 +2279,7 @@ function buildEnemyMesh(type) {
       const pd = new THREE.Mesh(loftGeo([
         { y: -0.15, rx: P.armt * 1.18, rz: P.armt * 1.08, jm: 0.4 },
         { y: 0.05, rx: P.armt * 0.55, rz: P.armt * 0.55, jm: 0.2 },
-      ], 26, jit, seed), EM(C.pelvis));
+      ], 26, jit, seed), M.pelvis);
       pd.position.set(sd * (P.shld / 2 + P.armt * 0.1), 0.02, 0);
       collar.add(pd);
     }
@@ -2326,7 +2369,7 @@ function buildEnemyMesh(type) {
   blob.position.y = 0.01;
   g.add(blob);
 
-  return { g, legL, legR, armL, armR, egun,
+  return { g, legL, legR, armL, armR, egun, mats: M,
     shinL: LG.shin, shinR: RG.shin, kneeRest: EP.knee,
     armLock, armRLock, armLRest, armRRest,
     egunBaseMat: type === 'laser' ? EM(0xff2d1a) : MAT_BLACK };
@@ -2549,6 +2592,7 @@ function spawnEnemy(type = 'gunner') {
       : 19 + Math.random() * 6,           // guns come up early — pressure from range
     burstLeft: 0,
     burstT: 0,
+    tell: 0,                              // fire-telegraph heat, 0..1
     holdZ,                                // set for the door-approach finale
     alive: true,
   });
@@ -2797,6 +2841,10 @@ function removeEnemyShards(e) {
 
 function killEnemy(i, impulseDir) {
   const e = enemies[i];
+  // Kill the glow on the same frame. In the reference an enemy shot mid-aim
+  // goes flat red instantly, and that snap is what makes an interrupted
+  // telegraph read as interrupted rather than as a death animation.
+  setTelegraph(e, 0);
   removeEnemyShards(e);   // a mid-assembly kill (menu demo) must not leak shards
   removeBeam(e);          // shattering the laser cuts his sweep instantly
   if (timeMode === 'toggle' && (game.state === 'play' || game.state === 'intro')) {
@@ -3093,6 +3141,11 @@ function updateEnemy(e, sdt) {
       const aimT = spec.aimTime * aimSpeedFactor();
       const t = Math.min(e.stateT / aimT, 1);
       if (!e.armRLock) e.armR.rotation.x = -t * (Math.PI / 2 - 0.06);
+      // THE FIRE TELEGRAPH. The gun-tip flash is a few pixels at portrait
+      // scale; a body-wide heat ramp is legible at any distance and in
+      // peripheral vision, which is what the mode actually needs — knowing
+      // WHO is about to shoot is the whole skill at a 42-degree field.
+      setTelegraph(e, Math.min(1, e.stateT / aimT));
       setEgunFlash(e, e.stateT > aimT * 0.7 ? MAT_WHITEFLASH : MAT_BLACK);
       if (e.stateT >= aimT) {
         // Someone else just pulled a trigger? Hold, arm still up, and take
@@ -3102,6 +3155,7 @@ function updateEnemy(e, sdt) {
         const held = e.holdFireT || 0;
         if (worldT - lastEnemyShotAt < ENEMY_SHOT_GAP && held < 0.6) {
           e.holdFireT = held + sdt;
+          setTelegraph(e, 1);   // held at full heat: he is still about to fire
         } else {
           e.holdFireT = 0;
           enemyFire(e, toPlayer);
@@ -3132,6 +3186,8 @@ function updateEnemy(e, sdt) {
       break;
     }
     case 'recover': {
+      // cool back down over about the same time it took to heat up
+      if (e.tell > 0) setTelegraph(e, Math.max(0, e.tell - sdt / 0.3));
       // relax each arm back toward its own rest pose (braced arms have one)
       if (!e.armRLock) e.armR.rotation.x = Math.min(0, e.armR.rotation.x + sdt * 4.5);
       e.armL.rotation.x += ((e.armLRest || 0) - e.armL.rotation.x) * Math.min(1, sdt * 6);
@@ -6501,6 +6557,7 @@ window.__ts = {
   fx: () => ({ on: fxOn, slowT: +fxSlowT.toFixed(2),
     active: fxQuads.filter((q) => q.visible).length }),
   setFx: (v) => { fxOn = !!v; fxSlowT = 0; },
+  setTell: (i, t) => setTelegraph(enemies[i], t),
   render: () => ({ calls: renderer.info.render.calls, tris: renderer.info.render.triangles,
     geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures,
     debrisLive: debrisPool ? debrisPool.live : -1 }),
