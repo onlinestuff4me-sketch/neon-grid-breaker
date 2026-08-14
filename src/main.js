@@ -12,7 +12,7 @@
 // speed while the world crawls.
 
 import * as THREE from '../lib/three.module.min.js';
-import { WEAPONS, TYPE_INTRO, TYPE_SHARE, TYPE_DROP, DROPS, RAMP, COMP, PACING, TIME, LEG }
+import { WEAPONS, TYPE_INTRO, TYPE_SHARE, TYPE_DROP, DROPS, RAMP, COMP, PACING, TIME, LEG, SHATTER }
   from './balance.js';
 import { composeProtocol, newRunMemory, enemyRoster, ELEMENTS } from './protocols.js';
 
@@ -1402,72 +1402,178 @@ function updateRipples(sdt) {
 // ---------------------------------------------------------------------------
 // Debris — shatter shards & impact sparks with gravity + floor bounce
 // ---------------------------------------------------------------------------
-const debris = [];   // {mesh, vel, angVel, life, maxLife}
 const shardGeo = new THREE.TetrahedronGeometry(0.12);
 
-function spawnShatter(center, impulseDir) {
-  for (let i = 0; i < 26; i++) {
-    const mesh = new THREE.Mesh(shardGeo, Math.random() < 0.75 ? MAT_RED : MAT_DARKRED);
-    const s = 0.5 + Math.random() * 1.4;
-    mesh.scale.setScalar(s);
-    mesh.position.set(
-      center.x + (Math.random() - 0.5) * 0.5,
-      0.25 + Math.random() * 1.5,
-      center.z + (Math.random() - 0.5) * 0.5
-    );
-    const vel = new THREE.Vector3(
-      (Math.random() - 0.5) * 4.5,
-      Math.random() * 3.5 + 0.5,
-      (Math.random() - 0.5) * 4.5
-    ).addScaledVector(impulseDir, 2.2 + Math.random() * 2);
-    scene.add(mesh);
-    debris.push({
-      mesh, vel,
-      angVel: new THREE.Vector3((Math.random() - 0.5) * 12, (Math.random() - 0.5) * 12, (Math.random() - 0.5) * 12),
-      life: 2.8 + Math.random(), maxLife: 3.8,
-    });
+// ---------------------------------------------------------------------------
+// SHARD POOLS
+//
+// Every shard used to be its own THREE.Mesh. A kill made 26 of them and a
+// materialising enemy made ~156, none of it capped — so a busy corridor could
+// be carrying a thousand meshes and a thousand draw calls, for an effect that
+// is the same tetrahedron every time.
+//
+// Both are now fixed-size InstancedMesh pools: one draw call each, a ring
+// buffer so the oldest shard is recycled instead of the count growing without
+// bound, and per-instance colour so the whole palette still fits in one call.
+// This is cheaper than what it replaces AND allows more than twice the pieces.
+function makeShardPool(count, material) {
+  const mesh = new THREE.InstancedMesh(shardGeo, material, count);
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(count * 3), 3);
+  mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+  mesh.frustumCulled = false;   // a pool has no meaningful bounds
+  scene.add(mesh);
+  const items = new Array(count);
+  for (let i = 0; i < count; i++) items[i] = { on: false };
+  return { mesh, items, head: 0, count };
+}
+// white base: the per-instance colour is what you actually see
+const MAT_SHARD = new THREE.MeshLambertMaterial({ color: 0xffffff });
+const _sm = new THREE.Matrix4();
+const _sq = new THREE.Quaternion();
+const _se = new THREE.Euler();
+const _sv = new THREE.Vector3();
+const _sc = new THREE.Color();
+const HIDDEN = new THREE.Matrix4().makeScale(0, 0, 0);
+
+let debrisPool = null, assemblePool = null;
+function claimShard(pool, color) {
+  const i = pool.head;
+  pool.head = (pool.head + 1) % pool.count;
+  const it = pool.items[i];
+  it.on = true;
+  it.idx = i;
+  // A ring buffer hands the same slot out again under load. Anything holding
+  // a reference (an assembling enemy holds 156 of them) must be able to tell
+  // that its shard has been recycled, or it will animate someone else's.
+  it.gen = (it.gen || 0) + 1;
+  if (color !== undefined) {
+    _sc.set(color);
+    pool.mesh.instanceColor.setXYZ(i, _sc.r, _sc.g, _sc.b);
+    pool.mesh.instanceColor.needsUpdate = true;
+  }
+  return it;
+}
+function writeShard(pool, it) {
+  if (!it.on || it.hold > 0) { pool.mesh.setMatrixAt(it.idx, HIDDEN); return; }
+  _se.set(it.rx, it.ry, it.rz);
+  _sq.setFromEuler(_se);
+  _sv.setScalar(it.s);
+  _sm.compose({ x: it.px, y: it.py, z: it.pz }, _sq, _sv);
+  pool.mesh.setMatrixAt(it.idx, _sm);
+}
+
+function clearShardPool(pool) {
+  if (!pool) return;
+  for (let i = 0; i < pool.count; i++) {
+    pool.items[i].on = false;
+    pool.mesh.setMatrixAt(i, HIDDEN);
+  }
+  pool.mesh.instanceMatrix.needsUpdate = true;
+  pool.live = 0;
+}
+
+debrisPool = makeShardPool(SHATTER.pool, MAT_SHARD);
+// Its own pool on purpose. The materialising swarm is the first thing the
+// game shows you and it has no equivalent in the reference; sharing a ring
+// buffer with the debris would let a busy fight eat it alive.
+assemblePool = makeShardPool(SHATTER.assemblePool, MAT_SHARD);
+
+// a shard's colour class: mostly dark, a hot minority that STAYS hot as it
+// flies, and the odd near-white fleck
+function shardColor() {
+  const r = Math.random();
+  if (r < SHATTER.ratioDark) return SHATTER.colDark;
+  if (r < SHATTER.ratioDark + SHATTER.ratioMid) return SHATTER.colMid;
+  if (r < SHATTER.ratioDark + SHATTER.ratioMid + SHATTER.ratioHot) return SHATTER.colHot;
+  return SHATTER.colFleck;
+}
+
+function spawnShatter(center, impulseDir, count) {
+  const n = count || SHATTER.perKill;
+  for (let i = 0; i < n; i++) {
+    const it = claimShard(debrisPool, shardColor());
+    // weighted small: the median piece is ~4.5 cm, and only a tenth are big
+    it.s = SHATTER.sizeMin + SHATTER.sizeVar * Math.pow(Math.random(), SHATTER.sizeCurve);
+    it.px = center.x + (Math.random() - 0.5) * 0.5;
+    it.py = 0.25 + Math.random() * 1.5;
+    it.pz = center.z + (Math.random() - 0.5) * 0.5;
+    // isotropic direction, most of them SLOW with a fast tail, plus a shove
+    // along the killing blow and a constant lift — that lift is what puts the
+    // cloud above the wound instead of level with it
+    const th = Math.random() * Math.PI * 2, ph = Math.acos(2 * Math.random() - 1);
+    const sp = SHATTER.speedBase + SHATTER.speedVar * Math.pow(Math.random(), SHATTER.speedCurve);
+    const im = SHATTER.impulse + Math.random() * SHATTER.impulseVar;
+    it.vx = Math.sin(ph) * Math.cos(th) * sp + impulseDir.x * im;
+    it.vy = Math.cos(ph) * sp + SHATTER.rise;
+    it.vz = Math.sin(ph) * Math.sin(th) * sp + impulseDir.z * im;
+    it.rx = Math.random() * 6.28; it.ry = Math.random() * 6.28; it.rz = Math.random() * 6.28;
+    it.wx = (Math.random() - 0.5) * 2 * SHATTER.spin;
+    it.wy = (Math.random() - 0.5) * 2 * SHATTER.spin;
+    it.wz = (Math.random() - 0.5) * 2 * SHATTER.spin;
+    it.life = SHATTER.life + Math.random() * SHATTER.lifeVar;
+    it.maxLife = it.life;
+    // the body does not vanish between two frames: pieces arrive across a
+    // short window, so you see it come apart rather than pop
+    it.hold = SHATTER.breakWindow * Math.pow(Math.random(), 1.6);
   }
 }
 
-function spawnSparks(at, color) {
-  const mat = new THREE.MeshBasicMaterial({ color });
-  for (let i = 0; i < 6; i++) {
-    const mesh = new THREE.Mesh(shardGeo, mat);
-    mesh.scale.setScalar(0.25 + Math.random() * 0.25);
-    mesh.position.copy(at);
-    scene.add(mesh);
-    debris.push({
-      mesh,
-      vel: new THREE.Vector3((Math.random() - 0.5) * 5, Math.random() * 3, (Math.random() - 0.5) * 5),
-      angVel: new THREE.Vector3((Math.random() - 0.5) * 20, (Math.random() - 0.5) * 20, (Math.random() - 0.5) * 20),
-      life: 0.6 + Math.random() * 0.4, maxLife: 1,
-    });
+function spawnSparks(at, color, count) {
+  const n = count || SHATTER.sparkWall;
+  for (let i = 0; i < n; i++) {
+    const it = claimShard(debrisPool, color);
+    it.s = 0.1 + Math.random() * 0.14;
+    it.px = at.x; it.py = at.y; it.pz = at.z;
+    it.vx = (Math.random() - 0.5) * 5;
+    it.vy = Math.random() * 3;
+    it.vz = (Math.random() - 0.5) * 5;
+    it.rx = Math.random() * 6.28; it.ry = Math.random() * 6.28; it.rz = Math.random() * 6.28;
+    it.wx = (Math.random() - 0.5) * 40;
+    it.wy = (Math.random() - 0.5) * 40;
+    it.wz = (Math.random() - 0.5) * 40;
+    it.life = 1.8 + Math.random() * 0.8;
+    it.maxLife = it.life;
+    it.hold = 0;
   }
 }
 
 function updateDebris(sdt) {
-  for (let i = debris.length - 1; i >= 0; i--) {
-    const d = debris[i];
-    d.life -= sdt;
-    if (d.life <= 0) {
-      scene.remove(d.mesh);
-      debris.splice(i, 1);
+  const pool = debrisPool;
+  if (!pool) return;
+  let live = 0;
+  for (let i = 0; i < pool.count; i++) {
+    const d = pool.items[i];
+    if (!d.on) { pool.mesh.setMatrixAt(i, HIDDEN); continue; }
+    if (d.hold > 0) {                    // still part of the body coming apart
+      d.hold -= sdt;
+      pool.mesh.setMatrixAt(i, HIDDEN);
+      live++;
       continue;
     }
-    d.vel.y -= GRAVITY * sdt;
-    d.mesh.position.addScaledVector(d.vel, sdt);
-    d.mesh.rotation.x += d.angVel.x * sdt;
-    d.mesh.rotation.y += d.angVel.y * sdt;
-    d.mesh.rotation.z += d.angVel.z * sdt;
-    const r = 0.1 * d.mesh.scale.x;
-    if (d.mesh.position.y < r && d.vel.y < 0) {   // floor bounce with friction
-      d.mesh.position.y = r;
-      d.vel.y *= -0.32;
-      d.vel.x *= 0.6; d.vel.z *= 0.6;
-      d.angVel.multiplyScalar(0.5);
+    d.life -= sdt;
+    if (d.life <= 0) { d.on = false; pool.mesh.setMatrixAt(i, HIDDEN); continue; }
+    live++;
+    d.vy -= GRAVITY * sdt;
+    // air drag: without it the cloud expands forever. With it the spray
+    // stops growing at about a metre and then hangs, which is the thing that
+    // makes frozen time read as frozen AIR rather than frozen objects.
+    const k = Math.max(0, 1 - SHATTER.drag * sdt);
+    d.vx *= k; d.vy *= k; d.vz *= k;
+    d.px += d.vx * sdt; d.py += d.vy * sdt; d.pz += d.vz * sdt;
+    d.rx += d.wx * sdt; d.ry += d.wy * sdt; d.rz += d.wz * sdt;
+    const r = 0.1 * d.s;
+    if (d.py < r && d.vy < 0) {          // floor bounce with friction
+      d.py = r;
+      d.vy *= -SHATTER.restitution;
+      d.vx *= SHATTER.friction; d.vz *= SHATTER.friction;
+      d.wx *= SHATTER.angDamp; d.wy *= SHATTER.angDamp; d.wz *= SHATTER.angDamp;
     }
-    if (d.life < 0.5) d.mesh.scale.multiplyScalar(Math.max(0.0, 1 - sdt * 2));
+    if (d.life < 0.5) d.s = Math.max(0, d.s * (1 - sdt * 2));   // shrink out
+    writeShard(pool, d);
   }
+  pool.mesh.instanceMatrix.needsUpdate = true;
+  pool.live = live;
 }
 
 // ---------------------------------------------------------------------------
@@ -2350,23 +2456,24 @@ function spawnEnemy(type = 'gunner') {
   const N_INIT = 6, N_LATE = 150;
   for (let i = 0; i < N_INIT + N_LATE; i++) {
     const late = i >= N_INIT;
-    const mesh = new THREE.Mesh(shardGeo, Math.random() < 0.75 ? MAT_RED : MAT_DARKRED);
+    const it = claimShard(assemblePool, Math.random() < 0.75 ? 0xff2d1a : 0xc61703);
     const size = late ? 0.35 + Math.random() * 0.4 : 0.6 + Math.random() * 0.6;
-    mesh.scale.setScalar(size);
     const a = Math.random() * Math.PI * 2;
     const r = 1.1 + Math.random() * 1.8;
     const from = new THREE.Vector3(x + Math.sin(a) * r, 0.2 + Math.random() * 2.6, z + Math.cos(a) * r);
     const to = bodyPoint();
-    mesh.position.copy(from);
-    mesh.visible = !late;
-    scene.add(mesh);
+    it.s = size;
+    it.px = from.x; it.py = from.y; it.pz = from.z;
+    it.rx = Math.random() * 6.28; it.ry = Math.random() * 6.28; it.rz = Math.random() * 6.28;
+    it.hold = 0;
     shards.push({
-      mesh, from, to, size,
+      it, gen: it.gen, from, to, size,
       // hard-accelerating schedule (curve 0.35): a trickle at first, then a
       // torrent — the figure floods in right before the reveal
       activeAt: late ? ASSEMBLE_T * 0.9 * Math.pow((i - N_INIT) / N_LATE, 0.35) : 0,
       travel: late ? 0.06 : ASSEMBLE_T * 0.48,
       spin: new THREE.Vector3((Math.random() - 0.5) * 10, (Math.random() - 0.5) * 10, (Math.random() - 0.5) * 10),
+      shown: !late,
     });
   }
   enemies.push({
@@ -2623,7 +2730,12 @@ const ASSEMBLE_REVEAL = 0.95; // fraction of T when the body appears under the
 
 function removeEnemyShards(e) {
   if (!e.shards) return;
-  for (const s of e.shards) scene.remove(s.mesh);
+  for (const s of e.shards) {
+    if (s.it.gen !== s.gen) continue;   // already recycled to someone else
+    s.it.on = false;
+    assemblePool.mesh.setMatrixAt(s.it.idx, HIDDEN);
+  }
+  assemblePool.mesh.instanceMatrix.needsUpdate = true;
   e.shards = null;
 }
 
@@ -2809,16 +2921,26 @@ function updateEnemy(e, sdt) {
       const shrinkP = Math.max(0, (e.stateT / ASSEMBLE_T - ASSEMBLE_REVEAL) / (1 - ASSEMBLE_REVEAL));
       if (shrinkP > 0) e.g.visible = true;
       for (const s of e.shards) {
-        if (e.stateT < s.activeAt) continue;
-        s.mesh.visible = true;
+        const it = s.it;
+        if (!it.on) continue;
+        if (it.gen !== s.gen) continue;          // recycled out from under us
+        if (e.stateT < s.activeAt) {              // has not flown in yet
+          assemblePool.mesh.setMatrixAt(it.idx, HIDDEN);
+          continue;
+        }
+        s.shown = true;
         const p = Math.min((e.stateT - s.activeAt) / s.travel, 1);
         const ease = 1 - Math.pow(1 - p, 3);
-        s.mesh.position.lerpVectors(s.from, s.to, ease);
-        s.mesh.rotation.x += s.spin.x * sdt * (1 - ease);
-        s.mesh.rotation.y += s.spin.y * sdt * (1 - ease);
-        s.mesh.rotation.z += s.spin.z * sdt * (1 - ease);
-        if (shrinkP > 0) s.mesh.scale.setScalar(s.size * (1 - shrinkP));
+        it.px = s.from.x + (s.to.x - s.from.x) * ease;
+        it.py = s.from.y + (s.to.y - s.from.y) * ease;
+        it.pz = s.from.z + (s.to.z - s.from.z) * ease;
+        it.rx += s.spin.x * sdt * (1 - ease);
+        it.ry += s.spin.y * sdt * (1 - ease);
+        it.rz += s.spin.z * sdt * (1 - ease);
+        if (shrinkP > 0) it.s = s.size * (1 - shrinkP);
+        writeShard(assemblePool, it);
       }
+      assemblePool.mesh.instanceMatrix.needsUpdate = true;
       if (e.stateT >= ASSEMBLE_T) {
         removeEnemyShards(e);
         e.g.visible = true;
@@ -5002,7 +5124,8 @@ function clearField() {
     enemies.splice(i, 1);
   }
   for (let i = bullets.length - 1; i >= 0; i--) killBullet(i, null);
-  for (let i = debris.length - 1; i >= 0; i--) { scene.remove(debris[i].mesh); debris.splice(i, 1); }
+  clearShardPool(debrisPool);
+  clearShardPool(assemblePool);
   for (let i = ripples.length - 1; i >= 0; i--) {
     scene.remove(ripples[i].mesh);
     ripples[i].mesh.material.dispose();
@@ -6191,6 +6314,9 @@ window.__ts = {
   fx: () => ({ on: fxOn, slowT: +fxSlowT.toFixed(2),
     active: fxQuads.filter((q) => q.visible).length }),
   setFx: (v) => { fxOn = !!v; fxSlowT = 0; },
+  render: () => ({ calls: renderer.info.render.calls, tris: renderer.info.render.triangles,
+    geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures,
+    debrisLive: debrisPool ? debrisPool.live : -1 }),
   progress: () => ({ lifetimeDoors, archive: [...archive] }),
   banner: showBanner,
   diff: () => ({ speed: enemyBulletSpeed(), aim: aimSpeedFactor(), t: diffT() }),

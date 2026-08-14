@@ -149,6 +149,33 @@ export const PACING = {
   aheadMin: 4,         // never spawn closer than this in front (m)
 };
 
+// SHATTER. Every value here used to be a literal buried in main.js, which
+// meant the one thing the game is named after could not be tuned.
+//
+// Sizes are SCALE MULTIPLIERS on the shared tetrahedron (circumradius 0.12,
+// so edge = 0.196 x scale). The reference breaks a body into 50-70 pieces of
+// 3-10 cm, median 4 cm — a spray of shattered ceramic. Ours were 26 pieces of
+// 10-27 cm, which read as chunks of meat.
+export const SHATTER = {
+  pool: 512,           // instanced slots; oldest is recycled on overflow
+  assemblePool: 768,   // materialising enemies get their own, so a big fight
+                       // cannot starve the effect the game opens with
+  perKill: 56,
+  sparkBody: 14, sparkWall: 6,
+  sizeMin: 0.15, sizeVar: 0.36, sizeCurve: 2.2,   // -> 3-10 cm, median ~4.5
+  speedBase: 1.4, speedVar: 3.0, speedCurve: 3,   // most slow, a few fast
+  impulse: 0.8, impulseVar: 1.6,                  // along the killing blow
+  rise: 1.6,           // upward bias: the cloud sits above the wound
+  drag: 1.8,           // per second — without it the cloud expands forever
+  spin: 14,            // rad/s per axis
+  life: 2.8, lifeVar: 1.0,
+  breakWindow: 0.06,   // seconds of WORLD time the body crumbles over
+  restitution: 0.32, friction: 0.6, angDamp: 0.5,
+  // ~90% dark, a hot minority that stays hot, a couple of near-white
+  colDark: 0x8f3028, colMid: 0xc6302a, colHot: 0xf2d820, colFleck: 0xfff4e0,
+  ratioDark: 0.72, ratioMid: 0.2, ratioHot: 0.07,   // remainder = fleck
+};
+
 // The slow-mo bank.
 export const TIME = {
   base: 5,             // seconds at wave start (and the floor each wave)
