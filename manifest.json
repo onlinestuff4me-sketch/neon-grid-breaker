@@ -1,13 +1,17 @@
 {
+  "id": "/",
   "name": "TIME SHATTER",
   "short_name": "TIME SHATTER",
   "description": "Stop time. Shatter them all. A first-person time-manipulation arcade shooter.",
-  "start_url": "./",
-  "scope": "./",
+  "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#0c0d10",
   "theme_color": "#0c0d10",
+  "categories": [
+    "games"
+  ],
   "icons": [
     {
       "src": "icons/icon-192.png",

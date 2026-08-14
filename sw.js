@@ -1,7 +1,9 @@
 // TIME SHATTER service worker — network-first so updates always arrive when
 // online (fixes the stale home-screen web app); the cache is only a fallback
 // for offline play.
-const CACHE = 'timeshatter-v1';
+// Bumped when the game moved to timeshatter.app. A cache keyed to the old
+// origin must never be served on the new one.
+const CACHE = 'timeshatter-v2';
 
 self.addEventListener('install', () => {
   self.skipWaiting();
