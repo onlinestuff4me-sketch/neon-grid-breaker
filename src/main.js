@@ -3815,8 +3815,22 @@ function onPointerDown(ev) {
     timeBtnDownAt = performance.now();
     timeBtnDownX = ev.clientX; timeBtnDownY = ev.clientY;
     timeBtnWasLocked = timeLocked;
+    timeBtnYaw = player.yaw; timeBtnPitch = player.pitch;
     if (!timeLocked) setTimeLocked(true);
     vibrate(8);
+    // AND it is a look pointer from this instant. The button is 146 px in
+    // the bottom-right corner, which is half of where a right thumb
+    // re-plants to aim after freezing time — so this is the touch the player
+    // makes constantly, and it used to apply NO look until the thumb had
+    // travelled 26 px, then replay all of it at once. That is the residual
+    // jump. The threshold still decides whether this was a button press or a
+    // look gesture (below); it no longer decides whether the camera moves.
+    input.pointers.set(ev.pointerId, {
+      sx: ev.clientX, sy: ev.clientY, x: ev.clientX, y: ev.clientY,
+      ox: ev.clientX, oy: ev.clientY, role: 'look',
+      downT: performance.now(), t: performance.now(),
+    });
+    input.holding = true;
     return;   // the button never fires the gun
   }
   input.pointers.set(ev.pointerId, {
@@ -3828,20 +3842,13 @@ function onPointerDown(ev) {
 }
 
 function onPointerMove(ev) {
-  if (ev.pointerId === timeBtnPointer) {
-    // a swipe that starts on the time button is a look flick, not a press —
-    // undo the accidental toggle and hand the pointer over to the look control
-    if (Math.hypot(ev.clientX - timeBtnDownX, ev.clientY - timeBtnDownY) > TIMEBTN_SLIP_PX) {
-      if (!timeBtnWasLocked) setTimeLocked(false);
-      timeBtnPointer = null;
-      input.pointers.set(ev.pointerId, {
-        sx: timeBtnDownX, sy: timeBtnDownY, x: ev.clientX, y: ev.clientY,
-        ox: ev.clientX, oy: ev.clientY, role: 'look', downT: performance.now(),
-      });
-      input.holding = true;
-      applyLook(ev.clientX - timeBtnDownX, ev.clientY - timeBtnDownY);
-    }
-    return;
+  // A swipe that starts on the time button is a look gesture, not a press:
+  // once it has travelled far enough to say so, undo the activation it
+  // caused on the way down. The camera has been tracking it all along.
+  if (ev.pointerId === timeBtnPointer &&
+      Math.hypot(ev.clientX - timeBtnDownX, ev.clientY - timeBtnDownY) > TIMEBTN_SLIP_PX) {
+    if (!timeBtnWasLocked) setTimeLocked(false);
+    timeBtnPointer = null;
   }
   const p = input.pointers.get(ev.pointerId);
   if (!p) return;
@@ -4008,19 +4015,33 @@ function releasePointer(ev, isTapEligible) {
 
 let timeBtnPointer = null, timeBtnDownAt = 0, timeBtnWasLocked = false;
 let timeBtnDownX = 0, timeBtnDownY = 0;
+// Where the camera was pointing when the thumb landed on the button. A
+// gesture that turns out to be a PRESS rather than a look has its rotation
+// handed back, so tracking from the first pixel costs a tap nothing: no dead
+// zone on a drag, and no nudge to your aim on a tap.
+let timeBtnYaw = 0, timeBtnPitch = 0;
+function undoTimeBtnLook() {
+  clearPendingLook();
+  player.yaw = timeBtnYaw;
+  player.pitch = timeBtnPitch;
+}
 const TIMEBTN_TAP_MS = 280;
 const TIMEBTN_SLIP_PX = 26;   // slide this far off the button = look gesture
 
 function onPointerUp(ev) {
   sfx.init();   // some browsers only allow audio resume on the gesture's END
   if (ev.pointerId === timeBtnPointer) {
+    // still the button's pointer, so it never slipped: this was a press, and
+    // whatever the thumb wobbled is given back
     timeBtnPointer = null;
+    undoTimeBtnLook();
     if (performance.now() - timeBtnDownAt < TIMEBTN_TAP_MS) {
       // quick tap: toggle (was locked -> off, was off -> stays locked)
       if (timeBtnWasLocked) setTimeLocked(false);
     } else {
       setTimeLocked(false);   // long press: time flows again when you let go
     }
+    releasePointer(ev, false);   // clean up its look pointer; never fires
     return;
   }
   releasePointer(ev, true);
@@ -4028,8 +4049,8 @@ function onPointerUp(ev) {
 function onPointerCancel(ev) {
   if (ev.pointerId === timeBtnPointer) {
     timeBtnPointer = null;
+    undoTimeBtnLook();
     setTimeLocked(false);
-    return;
   }
   releasePointer(ev, false);
 }

@@ -17,10 +17,27 @@ is wrong the fix is a keyframe drag in the Scarcity Console, not new content.
 
 ---
 
-## 0b. Look input starves for ~350 ms after a fresh touch — cause unknown
+## 0b. The look jump — one cause fixed, one smoothed
 
-**The symptom is now smoothed, the cause is not found.** Worth keeping at the
-top, because fluidity of look and movement outranks everything else here.
+There were **two** causes, and they overlapped, which is why the first fix
+helped without curing it. Kept at the top because fluidity of look and
+movement outranks everything else here.
+
+### Cause 1 — the time button ate the first 26 px (fixed)
+
+The freeze button is 146 px in the bottom-right corner: **half of where a
+right thumb re-plants to aim after tapping it**. A pointer landing there
+applied no look at all until the thumb had travelled 26 px, then replayed the
+whole distance in one `applyLook`. So the exact gesture the player makes
+constantly — freeze, lift, re-plant, aim — had a guaranteed dead zone.
+
+The 26 px threshold still does its real job, deciding whether the gesture was
+a button press or a look, but it no longer decides whether the camera moves.
+The pointer is a look pointer from the first pixel, and if the gesture turns
+out to be a press its rotation is **handed back** on release, so a tap costs
+your aim nothing. No dead zone on a drag, no nudge on a tap.
+
+### Cause 2 — input starves for ~350 ms after a fresh touch (smoothed only)
 
 Measured frame by frame off a 60 fps screen recording of the real device:
 
@@ -45,7 +62,7 @@ arbitration on a touch that lands near the bottom edge — which is exactly
 where a right thumb re-plants after tapping the time button — or a stale
 cached build on the device.
 
-**What shipped instead:** an oversized single sample is now paid out across
+**What shipped for cause 2:** an oversized single sample is now paid out across
 at least three frames rather than applied at once, so a starved burst reads
 as a fast pan instead of a cut. The common path is untouched — coalesced
 events mean genuine fast motion arrives as many small samples, so only a real
