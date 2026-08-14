@@ -3916,13 +3916,75 @@ function movePointer(p, cx, cy) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// LOOK, AND WHY A BURST IS NOT A CUT.
+//
+// Measured off a screen recording, frame by frame: through the "freeze" the
+// renderer never misses a beat — every frame differs, there is not one
+// duplicate — and the camera sits at EXACTLY zero for 20-27 frames before
+// moving 15 px of thumb travel in a single frame and then tracking smoothly
+// at about 1 px per frame. Nothing was rendered late. The first ~350 ms of
+// pointermove simply never reached us, and then arrived all at once.
+//
+// We cannot fix what we are not told. What we can fix is what we do with it:
+// applying 15 px in one frame is a 7.6 degree snap, which reads as a jump
+// even though the total rotation is correct.
+//
+// So an ordinary sample goes straight through with no added latency, and an
+// oversized one is spread across the next few frames instead. The threshold
+// discriminates correctly because of coalesced events: genuine fast motion
+// arrives as MANY small samples (the browser hands over every sample it
+// had), so only a real gap in the event stream can produce one big delta.
+// ---------------------------------------------------------------------------
+// A burst is paid out per FRAME, not per second. Two earlier shapes failed
+// for the same reason: an exponential put 40-plus per cent of the burst on
+// its first frame, and a rate-per-second let a single long frame swallow the
+// whole thing — which is precisely when this happens, because a starved
+// event stream and a long frame travel together. A per-frame budget spreads
+// a burst over at least three frames whatever the frame rate is doing.
+const LOOK_SNAP_PX = 6;        // a single sample bigger than this is spread
+const LOOK_DRAIN_FRAC = 0.34;  // ...over three frames, more if it is large
+let lookPendX = 0, lookPendY = 0;
+// How often the event stream starves, and by how much. Cheap enough to leave
+// in: the next time this is investigated it should start from a number.
+const lookStats = { bursts: 0, worstPx: 0, lastAt: 0 };
+
 function applyLook(dx, dy) {
+  if (Math.abs(dx) <= LOOK_SNAP_PX && Math.abs(dy) <= LOOK_SNAP_PX) {
+    lookNow(dx, dy);   // the common path, untouched
+    return;
+  }
+  const px = Math.hypot(dx, dy);
+  lookStats.bursts++;
+  lookStats.worstPx = Math.max(lookStats.worstPx, +px.toFixed(1));
+  lookStats.lastAt = performance.now();
+  lookPendX += dx; lookPendY += dy;
+}
+
+function lookNow(dx, dy) {
   const w = window.innerWidth;
   player.yaw -= (dx / w) * LOOK_SENS;
   player.pitch -= (dy / w) * LOOK_SENS_Y;
   player.pitch = Math.min(Math.max(player.pitch, -PITCH_LIMIT), PITCH_LIMIT);
   input.lookIdle = 0;
 }
+
+// Drained once per rendered frame, like the rest of the camera — freezing the
+// world must never slow down how fast you can look around.
+function drainLook() {
+  if (lookPendX === 0 && lookPendY === 0) return;
+  const len = Math.hypot(lookPendX, lookPendY);
+  // one budget for the whole 2-D delta, so the direction of the sweep is
+  // preserved instead of x and y draining at different speeds
+  const step = Math.min(len, Math.max(LOOK_SNAP_PX, len * LOOK_DRAIN_FRAC));
+  const f = step / len;
+  const ax = lookPendX * f, ay = lookPendY * f;
+  lookPendX -= ax; lookPendY -= ay;
+  if (Math.hypot(lookPendX, lookPendY) < 0.01) { lookPendX = lookPendY = 0; }
+  lookNow(ax, ay);
+}
+
+function clearPendingLook() { lookPendX = lookPendY = 0; }
 
 function releasePointer(ev, isTapEligible) {
   const p = input.pointers.get(ev.pointerId);
@@ -3984,6 +4046,7 @@ window.addEventListener('contextmenu', (e) => e.preventDefault());
 // leaving the stick pinned. The touch layer is the ground truth: whenever it
 // says no fingers remain, drop every tracked pointer.
 function dropAllPointers() {
+  clearPendingLook();
   if (input.pointers.size === 0) return;
   input.pointers.clear();
   input.stickX = input.stickY = 0;
@@ -6356,9 +6419,11 @@ function frame(now) {
   lastT = now;
 
   if (game.state === 'paused') {   // hard freeze: just keep the frame up
+    clearPendingLook();
     renderFrame(dt);
     return;
   }
+  drainLook();   // per frame, so freezing the world never slows down looking
 
   // --- time scale: frozen while a finger is down — but time moves (a little)
   // when YOU move, so dodging costs the world a few frames
@@ -6720,6 +6785,8 @@ window.__ts = {
   audio: () => sfx.debug(), sfx,
   slow: () => ({ bank: +slowBank.toFixed(2), locked: timeLocked, mode: timeMode }),
   setSlow: (v) => { slowBank = v; updateSlowMeter(); },
+  look: applyLook,   // inject a look sample exactly as the pointer handler does
+  lookStats: () => ({ ...lookStats, pending: +Math.hypot(lookPendX, lookPendY).toFixed(2) }),
   hall: () => hall,
   leg: () => {
     if (!hall) return null;

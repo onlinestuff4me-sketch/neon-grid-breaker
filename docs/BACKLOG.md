@@ -17,6 +17,45 @@ is wrong the fix is a keyframe drag in the Scarcity Console, not new content.
 
 ---
 
+## 0b. Look input starves for ~350 ms after a fresh touch — cause unknown
+
+**The symptom is now smoothed, the cause is not found.** Worth keeping at the
+top, because fluidity of look and movement outranks everything else here.
+
+Measured frame by frame off a 60 fps screen recording of the real device:
+
+- The renderer **never stalls**. Not one duplicate frame; the max pixel delta
+  between consecutive frames stays at 78–253 right through the "freeze".
+- The camera sits at **exactly zero for 20–27 frames** (350–450 ms), then
+  applies about **15 px of thumb travel in a single frame** — a 7.6 degree
+  snap — and then tracks smoothly at roughly 1 px per frame.
+- A thumb moving at 1 px/frame does not do 15 px in one frame and then go
+  back to 1 px/frame. That is buffered input being released, not motion.
+- It is **not** the 26 px time-button slip threshold. Calibrated against
+  known rotations with the scene frozen, 26 px of travel would produce a
+  149 px image shift; the recorded jumps are 71 and 75 px, which land on the
+  13 px calibration point.
+- It is **not** a shader-compile stall. That was a real bug and is fixed, but
+  it would have shown as duplicate frames, and there are none.
+
+So the first ~350 ms of `pointermove` after a fresh touch are not reaching
+the page. Our own code applies look from the first pixel (`ROLE_PX = 2`), so
+the buffering is upstream. What could not be tested from here: iOS gesture
+arbitration on a touch that lands near the bottom edge — which is exactly
+where a right thumb re-plants after tapping the time button — or a stale
+cached build on the device.
+
+**What shipped instead:** an oversized single sample is now paid out across
+at least three frames rather than applied at once, so a starved burst reads
+as a fast pan instead of a cut. The common path is untouched — coalesced
+events mean genuine fast motion arrives as many small samples, so only a real
+gap in the event stream can produce one oversized delta. `__ts.lookStats()`
+counts them, so the next look at this starts from a number.
+
+**If it still reads wrong**, the next real step is the native build: inside
+the app the touch pipeline is ours, and `UIGestureRecognizer` delays can be
+disabled outright.
+
 ## 1. The fire telegraph — **built, then removed**
 
 Shipped in `5b5b2f6` and reverted the same day after playtest. It read as
