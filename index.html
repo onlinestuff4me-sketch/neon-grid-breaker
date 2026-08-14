@@ -264,8 +264,11 @@
   #scores .scval em { font-style:normal; font-size:10px; font-weight:800; letter-spacing:.16em; color:#8a9099; }
   #scores .scdate { margin-left:auto; font-size:11px; font-weight:600; letter-spacing:.04em; color:#8a9099; }
 
-  /* bottom row: how-to link + flat speaker toggle */
-  #menurow { display:flex; align-items:center; justify-content:center; gap:10px; }
+  /* bottom row: how-to + archive + settings links, and the speaker toggle.
+     It wraps: four controls is more than 390px of portrait reliably holds,
+     and a wrapped second row is better than a clipped first one. */
+  #menurow { display:flex; align-items:center; justify-content:center; gap:10px;
+             flex-wrap:wrap; max-width:min(340px, 90vw); }
   #moderow { display:none; }   /* folded into #menurow */
 
   /* ---- ONE BUTTON FAMILY, FOUR WEIGHTS ----------------------------------
@@ -299,8 +302,8 @@
   #sndbtn svg { width:22px; height:22px; }
   #sndbtn.muted { opacity:.55; }
 
-  /* modals: how-to + enemies */
-  #htp, #enm { position:fixed; inset:0; z-index:12; display:none; align-items:center; justify-content:center;
+  /* modals: how-to + enemies + archive */
+  #htp, #enm, #arch { position:fixed; inset:0; z-index:12; display:none; align-items:center; justify-content:center;
                background:rgba(22,24,29,.35); }
   .htpcard { background:#eef0f3; border-radius:20px; padding:30px 34px; text-align:center;
              width:min(330px, 86vw);
@@ -316,11 +319,37 @@
   .enmcard .enrow { text-align:left; letter-spacing:.04em; }
   .enmcard .enrow b { display:block; font-size:12px; letter-spacing:.18em; color:#16181d; }
   .enmcard .enrow span { font-size:12px; font-weight:600; color:#6b7078; }
+
+  /* ---- THE ARCHIVE -------------------------------------------------------
+     A ledger, not a gallery. Every slot is visible from the first run; what
+     a locked row hides is the NAME, never the fact that the row exists —
+     that is the whole reason it reads as depth rather than as a list. */
+  .archcard { gap:0; padding:26px 0 24px; }
+  .archcard h2 { margin-bottom:2px; }
+  #archmeta { font-size:9px; font-weight:800; letter-spacing:.26em; color:#9aa0ab;
+              padding:0 28px 12px; }
+  #archlist { overflow-y:auto; -webkit-overflow-scrolling:touch; touch-action:pan-y;
+              max-height:min(52vh, 420px); padding:0 28px;
+              border-top:1px solid rgba(22,24,29,.1); border-bottom:1px solid rgba(22,24,29,.1); }
+  .asec { display:flex; align-items:baseline; gap:8px; padding:15px 0 5px;
+          font-size:9px; font-weight:900; letter-spacing:.3em; color:#16181d; }
+  .asec i { font-style:normal; margin-left:auto; font-size:9px; font-weight:800;
+            letter-spacing:.14em; color:#9aa0ab; }
+  .arow { display:flex; gap:9px; text-align:left; padding:5px 0; align-items:baseline; }
+  .adesig { flex:0 0 26px; font-size:8.5px; font-weight:800; letter-spacing:.06em;
+            color:#a8aeb8; padding-top:2px; }
+  .arow b { display:block; font-size:11.5px; font-weight:900; letter-spacing:.18em; color:#16181d; }
+  .arow span { display:block; font-size:11.5px; font-weight:600; letter-spacing:.02em;
+               color:#6b7078; line-height:1.35; }
+  .arow .redact { height:9px; border-radius:2px; background:#d5dae1; margin:4px 0 2px; }
+  .arow.locked .adesig { color:#c2c8d0; }
+  .archcard .htpclose { margin-top:16px; }
   #overlay .go { animation:gopulse 2.6s ease-in-out infinite; }
   @keyframes gopulse { 0%,100% { box-shadow:0 6px 20px rgba(255,45,26,.26); }
                        55% { box-shadow:0 6px 30px rgba(255,45,26,.5); } }
   @media (prefers-reduced-motion: reduce) { #overlay .go { animation:none; } }
   #overlay .stats { margin-top:14px; font-size:14px; font-weight:700; letter-spacing:.18em; color:#2a2d33; }
+  #overlay .filed { font-size:9.5px; font-weight:800; letter-spacing:.26em; color:#ff2d1a; }
   #menubtn { display:none; margin-top:34px; padding:13px 36px; border:2px solid #16181d;
              border-radius:999px; font-size:13px; font-weight:900; letter-spacing:.26em; color:#16181d; }
 </style>
@@ -379,6 +408,7 @@
   <div class="mdiv" id="div2"></div>
   <div id="menurow">
     <div class="btn btn-3" id="howtolink">HOW TO PLAY</div>
+    <div class="btn btn-3" id="archlink">ARCHIVE</div>
     <div class="btn btn-3" id="setlink">SETTINGS</div>
     <div id="sndbtn"></div>
   </div>
@@ -412,6 +442,15 @@
     <div class="enrow"><b>RUSHER</b><span>hot red, claws out, sprints straight at you — never fires</span></div>
     <div class="enrow"><b>LASER</b><span>sweeps a beam across the whole arena — killing him is the only out</span></div>
     <div id="enmback">◂ HOW TO PLAY</div>
+    <div class="htpclose">TAP OUTSIDE TO CLOSE</div>
+  </div>
+</div>
+
+<div id="arch">
+  <div class="htpcard archcard">
+    <h2>ARCHIVE</h2>
+    <div id="archmeta"></div>
+    <div id="archlist"></div>
     <div class="htpclose">TAP OUTSIDE TO CLOSE</div>
   </div>
 </div>

@@ -30,19 +30,26 @@ has to read as interrupted.
 The weights are why `docs/BLENDER.md` insists on four named material slots:
 a single-material mesh can only glow uniformly, which is the blob we avoided.
 
-## 2. The archive screen
+## ~~2. The archive screen~~ — **shipped**
 
-The spine of the meta, and the expensive part is already built: `protocols.js`
-is a registry of 20 entries with names, tiers, unlock keys and archive lines,
-and `lifetimeDoors` + the `archive` set are already persisted. What is missing
-is the screen that reads them.
+Built. **35 slots** across three sections — enemies, protocols, weapons —
+every one visible from the first run. A locked row keeps its designation and
+hides its name behind a bar as wide as the real name, so you can always see
+how much is left without being told what it is.
 
-One grid, three sections — enemies, protocols, weapons. Locked entries show
-as silhouettes with the designation visible and the name hidden (`P-07 ·
-████████`), so you can see how much is left. Unlocking is *meeting*, not
-defeating.
+Three things the build had to get right that the plan didn't say:
 
-Cheap, and it converts depth from a number into a reason.
+- **Unlocking is meeting, and the menu is not a meeting.** The attract loop
+  behind the title spawns and shatters enemies for show; filing those would
+  have handed every new player the heavy before they pressed PLAY.
+- **Leg 1 was never filed.** `recordMet` only ran on crossing a door, so the
+  form you played through first was the one the archive never knew about.
+- **Weapons went into the registry** with ids matching the `WEAPONS` keys, so
+  a pickup files itself with no mapping table.
+
+The death screen now reports `+N FILED TO THE ARCHIVE` when a life turned
+something up, which is the only place the archive advertises itself — and
+dying with a find is exactly when you go and look.
 
 ## 3. Per-part shatter, and where you hit
 

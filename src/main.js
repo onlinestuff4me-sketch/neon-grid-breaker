@@ -18,6 +18,41 @@ import { composeProtocol, newRunMemory, enemyRoster, ELEMENTS } from './protocol
 import { haptic, persist, hydrateStorage, shellSetup, isNative } from './native.js';
 
 // ---------------------------------------------------------------------------
+// LIFETIME PROGRESS — every door ever passed, and every element ever met.
+//
+// These are the two keys the protocol system gates on, so they outlive runs.
+// They live at the very top because `recordMet` is called from the moment a
+// weapon is put in your hand, which happens before the hallway code is even
+// reached; a `let` further down would still be in its temporal dead zone.
+// ---------------------------------------------------------------------------
+let lifetimeDoors = 0;
+let archive = new Set();
+try {
+  lifetimeDoors = parseInt(localStorage.getItem('timeshard_doors') || '0', 10) || 0;
+  archive = new Set(JSON.parse(localStorage.getItem('timeshard_archive') || '[]'));
+} catch { /* private mode */ }
+function saveProgress() {
+  try {
+    persist('timeshard_doors', String(lifetimeDoors));
+    persist('timeshard_archive', JSON.stringify([...archive]));
+  } catch { /* private mode */ }
+}
+function recordMet(ids) {
+  let fresh = 0;
+  for (const id of ids) if (id && !archive.has(id)) { archive.add(id); fresh++; }
+  if (fresh) { runFiled += fresh; saveProgress(); archiveDirty = true; }
+}
+let archiveDirty = true;   // the screen is rebuilt only when something changed
+let runFiled = 0;          // filed THIS life — the death screen reports it
+
+// Everything a leg is made of is met the moment you walk into it.
+function recordMetProto(p) {
+  if (!p) return;
+  recordMet([p.form && p.form.id, p.condition && p.condition.id,
+    ...p.measures.map((m) => m.id), p.enemyDebut && p.enemyDebut.id]);
+}
+
+// ---------------------------------------------------------------------------
 // Tunables
 // ---------------------------------------------------------------------------
 const ARENA_HALF = 21;            // arena is a square, walls at ±ARENA_HALF
@@ -1012,6 +1047,7 @@ function setWeapon(type, clips) {
 // Picking a weapon off the floor: a fresh one if it is new, another clip if
 // you already carry it (capped), and a pistol clip just tops the pistol up.
 function takePickup(type) {
+  recordMet([type === CLIP ? 'pistol' : type]);   // ids match the registry's
   if (type === CLIP) {
     if (player.weapon === 'pistol') {
       player.clips = Math.min(WEAPONS.pistol.maxClips, player.clips + 1);
@@ -1033,6 +1069,7 @@ function takePickup(type) {
 // Out of everything: the knife. Lethal, silent, and it demands you close
 // the distance — which is the point.
 function dropToKnife() {
+  recordMet(['knife']);
   setWeapon('knife', 0);
   showBanner('OUT OF AMMO<small>THE KNIFE IS ALL YOU HAVE</small>', 1700);
   vibrate([40, 40, 40]);
@@ -2402,6 +2439,10 @@ function pointInObstacle(x, z, pad) {
 }
 
 function spawnEnemy(type = 'gunner') {
+  // The archive files what you MEET, not what you kill — but the attract loop
+  // behind the title is a shop window, not a meeting, so the menu files
+  // nothing. Otherwise every player would "know" the heavy before playing.
+  if (game.state !== 'menu') recordMet([type]);
   const parts = buildEnemyMesh(type);
   const spec = ENEMY_TYPES[type];
   parts.g.scale.set(...spec.scale);
@@ -3642,7 +3683,11 @@ function stickUI(show, ox, oy, x, y) {
 function onPointerDown(ev) {
   // "inside settings" means inside the CARD — the backdrop covers the screen
   const inSettings = ev.target && ev.target.closest && ev.target.closest('#settings .htpcard');
-  if (!inSettings) ev.preventDefault();   // sliders need native pointer handling
+  // Two places need the browser's own touch handling: the settings sliders,
+  // and the archive's scroll pane. `touch-action:none` on <body> means an
+  // un-prevented pointerdown is the only thing that lets either one work.
+  const inArchScroll = ev.target && ev.target.closest && ev.target.closest('#archlist');
+  if (!inSettings && !inArchScroll) ev.preventDefault();
   sfx.init();
   if (el.settings.style.display === 'flex') {   // settings modal open
     if (inSettings) {
@@ -3702,6 +3747,11 @@ function onPointerDown(ev) {
     el.enm.style.display = 'none';
     return;
   }
+  if (el.arch.style.display === 'flex') {   // archive open
+    if (ev.target && ev.target.closest && ev.target.closest('#arch .htpcard')) return;
+    el.arch.style.display = 'none';
+    return;
+  }
   if (game.state === 'menu' || game.state === 'dead' || game.state === 'gameover') {
     // brief lockout after dying so panic taps don't skip the death screen
     if (game.state === 'dead' && performance.now() - deathAt < 1000) return;
@@ -3719,6 +3769,10 @@ function onPointerDown(ev) {
         document.getElementById('htptime').textContent =
           timeMode === 'toggle' ? 'TIME BUTTON — stops time' : 'HOLD — freezes time';
         el.htp.style.display = 'flex';
+        return;
+      }
+      if (ev.target.closest('#archlink')) {
+        openArchive();
         return;
       }
       if (ev.target.closest('#setlink')) {
@@ -5013,6 +5067,9 @@ const el = {
   howtolink: document.getElementById('howtolink'),
   htp: document.getElementById('htp'),
   enm: document.getElementById('enm'),
+  arch: document.getElementById('arch'),
+  archlist: document.getElementById('archlist'),
+  archmeta: document.getElementById('archmeta'),
   menurow: document.getElementById('menurow'),
   moderow: document.getElementById('moderow'),
   rushlink: document.getElementById('rushlink'),
@@ -5022,6 +5079,57 @@ const el = {
   reloadbar: document.getElementById('reloadbar'),
   reloadfill: document.getElementById('reloadfill'),
 };
+
+// ---------------------------------------------------------------------------
+// THE ARCHIVE
+//
+// Depth is a number — "34 doors" — and a number is not a reason to go back in.
+// The archive turns it into a ledger of what the building has shown you, and
+// what it still hasn't. Every slot is visible from the very first run: a
+// locked row hides the NAME and keeps the DESIGNATION, so you can always see
+// how much is left without being told what it is.
+//
+// Unlocking is MEETING, not defeating. Walking into a fog leg files FOG;
+// living through it is a separate matter.
+// ---------------------------------------------------------------------------
+const ARCH_SECTIONS = [
+  { title: 'ENEMIES', kinds: ['enemy'] },
+  { title: 'PROTOCOLS', kinds: ['form', 'condition', 'measure'] },
+  { title: 'WEAPONS', kinds: ['weapon'] },
+];
+
+function renderArchive() {
+  let html = '', known = 0, total = 0;
+  for (const sec of ARCH_SECTIONS) {
+    const rows = ELEMENTS.filter((e) => sec.kinds.includes(e.kind));
+    const got = rows.reduce((n, e) => n + (archive.has(e.id) ? 1 : 0), 0);
+    known += got; total += rows.length;
+    html += `<div class="asec">${sec.title}<i>${got}/${rows.length}</i></div>`;
+    for (const e of rows) {
+      const on = archive.has(e.id);
+      // The redaction is as wide as the real name, so a long name reads as a
+      // long bar — the only thing a locked row gives you, and a good hook.
+      // It is drawn in CSS rather than typed as block characters: U+2588 is
+      // missing from plenty of system stacks and falls back to tofu.
+      const bar = `<b class="redact" style="width:${Math.round(
+        Math.max(4, Math.min(11, e.name.length)) * 7.4)}px"></b>`;
+      html += `<div class="arow${on ? '' : ' locked'}">` +
+        `<div class="adesig">${e.designation}</div><div>` +
+        (on ? `<b>${e.name}</b><span>${e.archive}</span>` : bar) + `</div></div>`;
+    }
+  }
+  el.archlist.innerHTML = html;
+  el.archmeta.textContent =
+    `${known} OF ${total} RECOVERED · ${lifetimeDoors} DOOR${lifetimeDoors === 1 ? '' : 'S'}`;
+  archiveDirty = false;
+}
+
+function openArchive() {
+  if (archiveDirty) renderArchive();
+  el.arch.style.display = 'flex';
+  el.archlist.scrollTop = 0;
+}
+
 renderScores();
 
 // swap the h1's plain SHARD for the faceted polygon wordmark BEFORE the menu
@@ -5227,6 +5335,7 @@ function startWave(n, quiet = false) {   // quiet: the clear card already announ
   game.stateT = 0;
   game.spawnQueue = composeWave(n);
   game.spawnTimer = 0;
+  recordMet(['pistol']);   // it is already in your hand
   // attack bearing: toward the open arena from wherever the player stands,
   // or a random direction if they're near the middle
   const dx = -player.pos.x, dz = -player.pos.z;
@@ -5297,14 +5406,18 @@ function hitPlayer(ended = false) {
     el.overlay.querySelector('h1').innerHTML = ended ? 'RUN<br><em>ENDED</em>' : 'YOU<br><em>DIED</em>';
     el.overlay.querySelector('.sub').textContent = ended ? 'YOU CALLED IT' : 'ONE HIT IS ALL IT TAKES';
     const r = el.overlay.querySelector('.rules');
-    r.innerHTML = game.mode === 'rush'
+    // A run that showed you something new says so. It is the only place the
+    // archive advertises itself, and dying with a find is the moment you are
+    // most likely to go and look at it.
+    const filed = runFiled ? `<div class="filed">+${runFiled} FILED TO THE ARCHIVE</div>` : '';
+    r.innerHTML = (game.mode === 'rush'
       ? `<div class="stats">RUSH HOUR · ${markPips} ${markPips === 1 ? 'MARK' : 'MARKS'} · ` +
         `${game.kills} SHATTERED · ${Math.round(runPlayT)}S</div>`
       : game.mode === 'hall'
       ? `<div class="stats">TUNNEL · ${hall ? hall.doorsPassed : 0} ` +
         `${hall && hall.doorsPassed === 1 ? 'DOOR' : 'DOORS'} · ${game.kills} SHATTERED</div>`
       : `<div class="stats">${game.wave} ${game.wave === 1 ? 'WAVE' : 'WAVES'} · ` +
-        `${game.kills} SHATTERED · BEST ${bestWave} ${bestWave === 1 ? 'WAVE' : 'WAVES'}</div>`;
+        `${game.kills} SHATTERED · BEST ${bestWave} ${bestWave === 1 ? 'WAVE' : 'WAVES'}</div>`) + filed;
     r.style.display = 'flex';
     el.scores.style.display = 'none';
     el.menurow.style.display = 'none';
@@ -5369,6 +5482,7 @@ function advanceFromOverlay() {
   sfx.fadeAll(1, 0.25);
   el.overlay.classList.add('hidden');
   el.redflash.style.opacity = 0;
+  runFiled = 0;   // a retry is a new life, so it gets its own tally
   if (game.state === 'menu') {
     clearField();   // sweep away the attract-mode fight
     player.alive = true;
@@ -5410,27 +5524,6 @@ function advanceFromOverlay() {
 // and the red door slides into the floor; crossing it is a checkpoint, and
 // the door seals shut behind you. Corridors turn and branch, but every
 // route leads to the next door.
-// ---------------------------------------------------------------------------
-// Lifetime progress: every door ever passed, and every element ever met.
-// These are the two keys the protocol system gates on, so they outlive runs.
-let lifetimeDoors = 0;
-let archive = new Set();
-try {
-  lifetimeDoors = parseInt(localStorage.getItem('timeshard_doors') || '0', 10) || 0;
-  archive = new Set(JSON.parse(localStorage.getItem('timeshard_archive') || '[]'));
-} catch { /* private mode */ }
-function saveProgress() {
-  try {
-    persist('timeshard_doors', String(lifetimeDoors));
-    persist('timeshard_archive', JSON.stringify([...archive]));
-  } catch { /* private mode */ }
-}
-function recordMet(ids) {
-  let fresh = false;
-  for (const id of ids) if (id && !archive.has(id)) { archive.add(id); fresh = true; }
-  if (fresh) saveProgress();
-}
-
 const HALL = { cell: LEG.cellM, h: 3.1, wall: 0.3 };
 const HALL_FINALE = LEG.finaleWave;   // the one final group staged at the door
 function makeHallWallTexture() {
@@ -5920,6 +6013,8 @@ function initHall() {
   hall = { legs: [], grid: new Set(), cur: 0, doorsPassed: 0, checkpoint: { x: 0, z: 0 },
     mem: newRunMemory(archive) };
   hall.legs.push(buildHallLeg(0, 0, composeProtocol(1, lifetimeDoors, hall.mem)));
+  recordMetProto(hall.legs[0].proto);   // leg 1 counts too; only 2+ used to
+  recordMet(['pistol']);                // it is already in your hand
   rebuildHallObstacles();
   game.spawnQueue = hallWave(1);
   game.spawnTimer = 0.5;
@@ -5995,13 +6090,7 @@ function crossHallDoor() {
   game.wave++;
   lifetimeDoors++;
   saveProgress();
-  const L2 = hall.legs[hall.cur];
-  if (L2 && L2.proto) {   // everything this leg is made of is now "met"
-    recordMet([L2.proto.form && L2.proto.form.id,
-      L2.proto.condition && L2.proto.condition.id,
-      ...L2.proto.measures.map((m) => m.id),
-      L2.proto.enemyDebut && L2.proto.enemyDebut.id]);
-  }
+  recordMetProto(hall.legs[hall.cur] && hall.legs[hall.cur].proto);
   hall.checkpoint = { x: prev.door.x, z: prev.door.z + 2 };
   const old = hall.legs[hall.cur - 2];
   if (old && !old.retired) {   // two doors back is gone for good
@@ -6561,7 +6650,8 @@ window.__ts = {
   render: () => ({ calls: renderer.info.render.calls, tris: renderer.info.render.triangles,
     geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures,
     debrisLive: debrisPool ? debrisPool.live : -1 }),
-  progress: () => ({ lifetimeDoors, archive: [...archive] }),
+  progress: () => ({ lifetimeDoors, archive: [...archive], runFiled }),
+  die: (ended) => hitPlayer(!!ended),
   banner: showBanner,
   diff: () => ({ speed: enemyBulletSpeed(), aim: aimSpeedFactor(), t: diffT() }),
   fire: playerFire, setWeapon, spawnEnemy, spawnPickup,

@@ -75,7 +75,35 @@ export const ELEMENTS = [
     archive: 'Guided munition. It will follow. Break the line.' },
   { id: 'laser', name: 'LASER', kind: 'enemy', tier: 4, minDoor: 12, unlockAt: 200, weight: 2, impl: true,
     archive: 'Sweep emitter. Cover is irrelevant. Kill it.' },
+
+  // --- weapons: ids match the WEAPONS keys, so a pickup files itself --------
+  { id: 'knife', name: 'KNIFE', kind: 'weapon', tier: 1, minDoor: 1, unlockAt: 0, weight: 0, impl: true,
+    archive: 'Not a service item. What is left when the count reaches zero.' },
+  { id: 'pistol', name: 'PISTOL', kind: 'weapon', tier: 1, minDoor: 1, unlockAt: 0, weight: 0, impl: true,
+    archive: 'Sidearm. Five rounds. Sufficient, in the right order.' },
+  { id: 'shotgun', name: 'SHOTGUN', kind: 'weapon', tier: 1, minDoor: 3, unlockAt: 0, weight: 0, impl: true,
+    archive: 'Six pellets on one authorisation. Distance is the price.' },
+  { id: 'burst', name: 'BURST RIFLE', kind: 'weapon', tier: 2, minDoor: 5, unlockAt: 15, weight: 0, impl: true,
+    archive: 'Three rounds per pull. The building prefers certainty.' },
+  { id: 'sniper', name: 'RAIL', kind: 'weapon', tier: 3, minDoor: 6, unlockAt: 40, weight: 0, impl: true,
+    archive: 'Rated to pass through three. It usually finds them.' },
+  { id: 'launcher', name: 'LAUNCHER', kind: 'weapon', tier: 3, minDoor: 7, unlockAt: 40, weight: 0, impl: true,
+    archive: 'Arcing charge. Mind what is between you and the arc.' },
+  { id: 'rocket', name: 'ROCKET', kind: 'weapon', tier: 4, minDoor: 10, unlockAt: 140, weight: 0, impl: true,
+    archive: 'Direct munition. Not intended for corridors. Used in them anyway.' },
 ];
+
+// Every entry carries a stable designation, because a LOCKED entry has to
+// show something: the archive hides the name, never the fact that a slot
+// exists. Derived from registry order so adding a row needs no bookkeeping.
+const KIND_TAG = { form: 'F', condition: 'C', measure: 'M', enemy: 'E', weapon: 'W' };
+{
+  const seq = {};
+  for (const e of ELEMENTS) {
+    seq[e.kind] = (seq[e.kind] || 0) + 1;
+    e.designation = `${KIND_TAG[e.kind] || 'X'}-${String(seq[e.kind]).padStart(2, '0')}`;
+  }
+}
 
 // Pairs that break each other mechanically. Slots handle the rest.
 export const CONFLICTS = [
