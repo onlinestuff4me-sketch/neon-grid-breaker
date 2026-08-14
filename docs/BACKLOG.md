@@ -51,15 +51,19 @@ The death screen now reports `+N FILED TO THE ARCHIVE` when a life turned
 something up, which is the only place the archive advertises itself — and
 dying with a find is exactly when you go and look.
 
-## 3. Per-part shatter, and where you hit
+## ~~3. Per-part shatter, and where you hit~~ — **shipped**
 
-Bookmarked in `TUNNEL_META.md`. Break each body part separately, with the
-head worth more **time bank** than the torso. The reward is seconds rather
-than points on purpose: as ammo tightens and time-per-kill falls, precision
-becomes the way to keep the bank alive — the same spray-to-choose progression
-the scarcity curves encode. Points would sit outside that loop.
+Built. Four zones; the one you hit throws more pieces, faster, and the rest
+follow outward a beat at a time. Head pays **1.6×** the time bank, legs
+**0.7×** — seconds rather than points, so precision plugs into the scarcity
+loop instead of sitting outside it. A knife jab is always a body hit.
 
-Also makes the knife's reach meaningful, since a jab is always a body hit.
+The part the plan missed: removing the mesh on the frame of the kill left
+any zone whose shards were still held as neither mesh nor debris. In bullet
+time that gap is three real seconds of a body with no legs. The body now
+stays in the scene and is hidden zone by zone on the same clock, which is
+also what makes a headshot read as a head coming off with the torso still
+standing. See `docs/TUNNEL_META.md`.
 
 ## 4. Protocol elements, cheapest first
 

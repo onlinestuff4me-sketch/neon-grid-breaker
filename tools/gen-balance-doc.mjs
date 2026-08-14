@@ -14,6 +14,7 @@ import {
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const n = (v) => (v === Infinity ? '∞' : String(Math.round(v * 1000) / 1000));
+const s2 = (v) => v.toFixed(2).replace(/\.?0+$/, '');
 
 const diffT = (w) => Math.min((w - 1) / RAMP.rampWaves, 1);
 const speed = (w) => RAMP.bulletBase * Math.min(
@@ -234,6 +235,68 @@ the door approach, in line of sight of the slab, so the door opens in view.
 | \`drain\` | ${n(TIME.drain)} | seconds spent per second frozen, before ramp scaling |
 | \`slowScale\` | ${n(TIME.slowScale)} | world speed while standing still |
 | \`moveScale\` | ${n(TIME.moveScale)} | world speed at full stick |
+
+### Where you hit
+
+The kill bonus is multiplied by where the round landed. It pays in **seconds
+rather than points** on purpose: as ammo tightens and \`timeGain\` falls with
+depth, precision becomes the only way to keep the bank alive. Points would
+sit outside that loop.
+
+A knife jab is always a body hit — part of the cost of closing — and a blast
+has no single wound, so it pays the flat rate.
+
+| Zone | × bonus | At door 1 | At door 8 |
+|---|---|---|---|
+${SHATTER.zoneOrder.map((k) => `| ${k} | ${n(TIME.partBonus[k])}× | ` +
+  `${s2(TIME.bonus * TIME.partBonus[k] * scarcity('timeGain', 1))} s | ` +
+  `${s2(TIME.bonus * TIME.partBonus[k] * scarcity('timeGain', 8))} s |`).join('\n')}
+| blast / no wound | 1× | ${s2(TIME.bonus * scarcity('timeGain', 1))} s | ${s2(TIME.bonus * scarcity('timeGain', 8))} s |
+
+---
+
+## The shatter
+
+${n(SHATTER.perKill)} pieces per body from a pool of ${n(SHATTER.pool)} instanced slots
+(materialising enemies draw on their own pool of ${n(SHATTER.assemblePool)}, so a
+big fight cannot starve the effect the game opens with).
+
+Sizes are **scale multipliers** on a shared tetrahedron of circumradius 0.12,
+so an edge is 0.196 × scale. Two classes in every burst: ${Math.round(SHATTER.chunkFrac * 100)}%
+are chunks big enough to follow with your eye, and the rest is grit.
+
+| Knob | Value | Meaning |
+|---|---|---|
+| \`chunkFrac\` | ${n(SHATTER.chunkFrac)} | share that are big pieces |
+| \`chunkMin\` / \`chunkVar\` | ${n(SHATTER.chunkMin)} / ${n(SHATTER.chunkVar)} | chunk scale range |
+| \`gritMin\` / \`gritVar\` | ${n(SHATTER.gritMin)} / ${n(SHATTER.gritVar)} | grit scale range, weighted small by \`gritCurve\` ${n(SHATTER.gritCurve)} |
+| \`speedBase\` / \`speedVar\` | ${n(SHATTER.speedBase)} / ${n(SHATTER.speedVar)} | m/s, most slow with a fast tail |
+| \`impulse\` / \`impulseVar\` | ${n(SHATTER.impulse)} / ${n(SHATTER.impulseVar)} | shove along the killing blow |
+| \`rise\` | ${n(SHATTER.rise)} | upward bias, so the cloud sits above the wound |
+| \`drag\` / \`spin\` | ${n(SHATTER.drag)} / ${n(SHATTER.spin)} | settle rate, rad/s per axis |
+| \`life\` / \`lifeVar\` | ${n(SHATTER.life)} / ${n(SHATTER.lifeVar)} s | seconds on screen |
+| \`breakWindow\` | ${n(SHATTER.breakWindow)} s | world time a single zone crumbles over |
+
+### The per-part break
+
+The body is four zones. The zone you hit throws **${n(SHATTER.hitShare)}× its share**
+of the pieces at **${n(SHATTER.hitSpeed)}× the speed**, and the rest follow outward
+at **${n(SHATTER.cascade)} s of world time per zone away from the wound** — so a
+headshot reads as a head coming off and the body collapsing after it.
+
+The mesh is hidden zone by zone on the same clock, rather than removed on the
+frame of the kill. Otherwise a zone whose shards are still held would be
+neither mesh nor debris, and in bullet time that gap stretches with
+everything else.
+
+Weights are renormalised, so every kill throws the same amount of debris —
+only its distribution moves.
+
+| Zone | Height (m) | Share | Lateral spread |
+|---|---|---|---|
+${SHATTER.zoneOrder.map((k) => { const z = SHATTER.zones[k];
+  return `| ${k} | ${n(z.y0)} – ${n(z.y1)} | ${Math.round(z.share * 100)}% | ±${n(z.r)} m |`;
+}).join('\n')}
 `;
 
 writeFileSync(join(root, 'docs/BALANCE.md'), md);

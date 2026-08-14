@@ -155,6 +155,13 @@
                box-shadow:0 0 18px rgba(255,45,26,.5); }
   body.slowmo #slowfill { background:#ff4a35; }
   body.slowmo #slowmeter { background:rgba(238,240,243,.25); }
+  /* a headshot pays more time than a body shot, and the meter is the thing
+     that grew — so the meter is where it says so */
+  #slowmeter.bonus { animation:bankpop .42s ease-out; }
+  #slowmeter.bonus #slowfill { background:#fff; }
+  @keyframes bankpop { 0% { box-shadow:0 0 0 0 rgba(255,255,255,.9); }
+                       100% { box-shadow:0 0 0 12px rgba(255,255,255,0); } }
+  @media (prefers-reduced-motion: reduce) { #slowmeter.bonus { animation:none; } }
   #timebtn.empty::before { background:#9aa0ab; }
   @keyframes tpulse { 0%,100% { box-shadow:0 0 0 0 rgba(255,45,26,.55); }
                       55% { box-shadow:0 0 0 14px rgba(255,45,26,0); } }
