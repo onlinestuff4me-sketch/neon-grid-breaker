@@ -17,25 +17,18 @@ is wrong the fix is a keyframe drag in the Scarcity Console, not new content.
 
 ---
 
-## 1. The fire telegraph — the biggest single gap
+## ~~1. The fire telegraph~~ — **shipped**
 
-The reference's signature look, and we don't have it. Amber "veins" ramp up
-across an enemy's whole body over roughly a second before he fires, peak on
-the shot, then cool. **We originally mistook this for a hit flash** and
-copied it onto our debris, where it was meaningless confetti; it was removed.
-The real thing was never built.
+Built. Each enemy now owns its material set (the shared cache would have
+tinted every enemy of a type at once) and `setTelegraph` ramps `emissive`
+along a black → ember → amber curve, weighted per body group: chest 1.0,
+pelvis 0.95, limbs 0.7, **head 0.25** so the silhouette survives the glow.
+It ramps over the aim window, holds at full while a stagger delays the shot,
+cools over 0.3 s, and is killed outright on death — an interrupted telegraph
+has to read as interrupted.
 
-This is not decoration. Our telegraph today is `setEgunFlash` — a white gun
-tip, which at portrait scale is a few pixels. At a 42° horizontal field,
-knowing *who is about to shoot* is the whole skill of the mode, and right now
-that information is nearly invisible. A body-wide ramp is legible at any
-distance and in peripheral vision.
-
-Ramp 0.30 s scaled up, hold through the shot, cool 0.30 s, and **kill it
-instantly on death** — the reference's body goes flat red the moment it is
-hit, which is what makes an interrupted telegraph read as interrupted.
-Colour ramp `#ff2d1a → #ff7030 → #ffa83c → #fff020`, concentrated on chest,
-hips, knees and feet.
+The weights are why `docs/BLENDER.md` insists on four named material slots:
+a single-material mesh can only glow uniformly, which is the blob we avoided.
 
 ## 2. The archive screen
 
