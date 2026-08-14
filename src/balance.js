@@ -149,6 +149,63 @@ export const PACING = {
   aheadMin: 4,         // never spawn closer than this in front (m)
 };
 
+// ===========================================================================
+// SCARCITY — the primary balance levers, and the reason the game gets good
+// ===========================================================================
+//
+// The loop the game is actually about:
+//
+//   limited AMMO forces you to hide, pick your shots, and freeze time to
+//   line them up  ->  limited TIME forces you to hoard the freeze, so when
+//   you spend it you make it count  ->  out of both, you close with a knife
+//   and freezing time is the only way to land the jab.
+//
+// A beginner sprays and never notices. The moment ammo gets tight the whole
+// game turns into resource management, and that is the fun. So these four
+// curves are the top-level dials, and everything else is detail:
+//
+//   1. how often ammo drops
+//   2. how fast the time bank fills and empties
+//   3. how many enemies a leg holds in total
+//   4. how many come at you at once
+//
+// Doors 1-3 stay generous — that is where you learn to spray. 4-6 tighten.
+// By 8 you are counting rounds and hoarding the freeze.
+//
+// Each curve is keyframes of [door, multiplier], linearly interpolated, and
+// flat outside its ends. Read them as "at door N, multiply the base by M".
+export const SCARCITY = {
+  // x DROPS.clipRate. Generous while learning, then the tap closes.
+  ammoDrop:   [[1, 1.45], [3, 1.25], [5, 0.9], [8, 0.55], [12, 0.4]],
+  // x the per-type weapon drop chance — a floor gun matters more when the
+  // clips stop coming, so this falls more slowly than ammo does.
+  weaponDrop: [[1, 1.2], [3, 1.05], [6, 0.85], [10, 0.7]],
+  // x TIME.bonus — seconds of bank refunded per kill.
+  timeGain:   [[1, 1.0], [3, 1.0], [6, 0.8], [8, 0.62], [12, 0.5]],
+  // x the drain rate while frozen. Above 1 the bank empties faster.
+  timeDrain:  [[1, 1.0], [3, 1.0], [6, 1.15], [8, 1.35], [12, 1.6]],
+  // x the leg's body budget (LEG.perCell) — total enemies in the level.
+  legSize:    [[1, 1.0], [4, 1.05], [8, 1.15], [12, 1.25]],
+  // x maxAlive — how many can be on you at once. This is the one that
+  // decides whether a fight is a queue or a swarm, so it moves least.
+  groupSize:  [[1, 1.0], [4, 1.1], [8, 1.25], [12, 1.4]],
+};
+
+// Linear interpolation across the keyframes, flat before the first and after
+// the last. Door numbers are 1-based.
+export function scarcity(curve, door) {
+  const k = SCARCITY[curve];
+  if (!k || !k.length) return 1;
+  if (door <= k[0][0]) return k[0][1];
+  for (let i = 1; i < k.length; i++) {
+    if (door <= k[i][0]) {
+      const [d0, v0] = k[i - 1], [d1, v1] = k[i];
+      return v0 + (v1 - v0) * ((door - d0) / (d1 - d0));
+    }
+  }
+  return k[k.length - 1][1];
+}
+
 // SHATTER. Every value here used to be a literal buried in main.js, which
 // meant the one thing the game is named after could not be tuned.
 //

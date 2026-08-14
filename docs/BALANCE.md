@@ -10,6 +10,56 @@ Tuner artifact mirrors the same shape — so none of the three can drift.
 
 ---
 
+## Scarcity — the primary levers
+
+The loop the game is about: **limited ammo** forces you to hide, pick your
+shots and freeze time to line them up → **limited time** forces you to hoard
+the freeze, so when you spend it you make it count → out of both, you close
+with a knife and freezing is the only way to land the jab.
+
+A beginner sprays and never notices. The moment ammo gets tight the whole
+game becomes resource management, and that is the fun. So these four are the
+top-level dials and everything below is detail. Doors 1–3 stay generous —
+that is where you learn to spray. 4–6 tighten. By 8 you are counting rounds.
+
+Each curve is keyframes of `[door, multiplier]`, linearly interpolated and
+flat outside its ends.
+
+| Door | Ammo drops | Weapon drops | Time per kill | Time drain | Leg size | Group size |
+|---|---|---|---|---|---|---|
+| 1 | 1.45× | 1.20× | 1.00× | 1.00× | 1.00× | 1.00× |
+| 2 | 1.35× | 1.13× | 1.00× | 1.00× | 1.02× | 1.03× |
+| 3 | 1.25× | 1.05× | 1.00× | 1.00× | 1.03× | 1.07× |
+| 4 | 1.07× | 0.98× | 0.93× | 1.05× | 1.05× | 1.10× |
+| 5 | 0.90× | 0.92× | 0.87× | 1.10× | 1.07× | 1.14× |
+| 6 | 0.78× | 0.85× | 0.80× | 1.15× | 1.10× | 1.18× |
+| 7 | 0.67× | 0.81× | 0.71× | 1.25× | 1.13× | 1.21× |
+| 8 | 0.55× | 0.77× | 0.62× | 1.35× | 1.15× | 1.25× |
+| 10 | 0.48× | 0.70× | 0.56× | 1.48× | 1.20× | 1.32× |
+| 12 | 0.40× | 0.70× | 0.50× | 1.60× | 1.25× | 1.40× |
+
+What each multiplies:
+
+| Curve | Multiplies | Effect |
+|---|---|---|
+| `ammoDrop` | `DROPS.clipRate` (0.34) | how often a kill leaves a pistol clip |
+| `weaponDrop` | the per-type weapon drop chance | falls slower than ammo — a floor gun matters more once clips dry up |
+| `timeGain` | `TIME.bonus` (2 s) | seconds of bank refunded per kill |
+| `timeDrain` | the drain rate while frozen | above 1× the bank empties faster |
+| `legSize` | `LEG.perCell` | total enemies in the level |
+| `groupSize` | `maxAlive` | how many can be on you at once |
+
+Raw keyframes:
+
+```js
+ammoDrop   : [[1,1.45],[3,1.25],[5,0.9],[8,0.55],[12,0.4]]
+weaponDrop : [[1,1.2],[3,1.05],[6,0.85],[10,0.7]]
+timeGain   : [[1,1],[3,1],[6,0.8],[8,0.62],[12,0.5]]
+timeDrain  : [[1,1],[3,1],[6,1.15],[8,1.35],[12,1.6]]
+legSize    : [[1,1],[4,1.05],[8,1.15],[12,1.25]]
+groupSize  : [[1,1],[4,1.1],[8,1.25],[12,1.4]]
+```
+
 ## Weapons
 
 A weapon holds **`mag` bullets per clip** and up to **`maxClips` spares**.

@@ -12,8 +12,8 @@
 // speed while the world crawls.
 
 import * as THREE from '../lib/three.module.min.js';
-import { WEAPONS, TYPE_INTRO, TYPE_SHARE, TYPE_DROP, DROPS, RAMP, COMP, PACING, TIME, LEG, SHATTER }
-  from './balance.js';
+import { WEAPONS, TYPE_INTRO, TYPE_SHARE, TYPE_DROP, DROPS, RAMP, COMP, PACING, TIME, LEG, SHATTER,
+  scarcity } from './balance.js';
 import { composeProtocol, newRunMemory, enemyRoster, ELEMENTS } from './protocols.js';
 import { haptic, persist, hydrateStorage, shellSetup, isNative } from './native.js';
 
@@ -1346,6 +1346,35 @@ function collectRippleFX() {
   }
   return n;
 }
+// Compile everything BEFORE it is first needed.
+//
+// A material's shader is compiled the first time it is drawn, and that stalls
+// the frame it lands on. Measured across three doors, the only spike over
+// 120 ms in a whole run was a single 150 ms frame that did NOT coincide with
+// a leg being built — it was the refraction pass compiling the first time a
+// ripple appeared, which is to say the first time anyone shot at you. The
+// camera does not stop responding during a stall like that (look is applied
+// in the pointer handler, not the frame loop) but the SCREEN does, and then
+// catches up in one jump — which is indistinguishable from input sticking.
+function warmUp() {
+  try {
+    renderer.compile(scene, camera);
+    if (!rippleRT) initRippleFX();
+    // draw one throwaway frame through the whole post path so the refraction
+    // shader and the render target are both real before anything shoots
+    for (let i = 0; i < fxQuads.length; i++) {
+      fxQuads[i].material.uniforms.uR.value.set(0.5, 0.5, 0.1, 0.001);
+      fxQuads[i].visible = i === 0;
+    }
+    renderer.setRenderTarget(rippleRT);
+    renderer.clear();
+    renderer.render(scene, camera);
+    renderer.setRenderTarget(null);
+    renderer.render(fxScene, fxCam);
+    for (const q of fxQuads) q.visible = false;
+  } catch { /* a warm-up must never be able to break a boot */ }
+}
+
 function renderFrame(dt) {
   if (!rippleRT) initRippleFX();
   // Self-limiting: if frames are consistently long while the pass is on, it
@@ -2745,7 +2774,10 @@ function killEnemy(i, impulseDir) {
   removeEnemyShards(e);   // a mid-assembly kill (menu demo) must not leak shards
   removeBeam(e);          // shattering the laser cuts his sweep instantly
   if (timeMode === 'toggle' && (game.state === 'play' || game.state === 'intro')) {
-    slowBank = Math.min(SLOWMO.cap, slowBank + SLOWMO.bonus);   // kills buy time
+    // kills buy time — but they buy LESS of it as you go deeper, which is
+    // what turns the freeze from a habit into a decision
+    slowBank = Math.min(SLOWMO.cap,
+      slowBank + SLOWMO.bonus * scarcity('timeGain', game.mode === 'hall' ? game.wave : 1));
   }
   if (game.state !== 'menu') vibrate(15);   // every kill lands in the thumb
   spawnShatter(e.pos, impulseDir);
@@ -2756,9 +2788,13 @@ function killEnemy(i, impulseDir) {
   // comes at you with his hands, so a pistol clip dropping off his body was
   // loot appearing from nowhere.
   const armed = e.type !== 'rusher';
+  // SCARCITY: the tap closes with depth. This is the lever the whole game
+  // hangs off — once clips stop arriving you start hiding, picking shots and
+  // spending the freeze to line them up, which is the actual game.
+  const door = game.mode === 'hall' ? game.wave : 1;
   if (typeof drop === 'string') spawnPickup(e.pos, drop);           // named loot
-  else if (kind && r < drop) spawnPickup(e.pos, kind);               // his own weapon
-  else if (armed && r < DROPS.clipRate) spawnPickup(e.pos, CLIP);    // pistol ammo
+  else if (kind && r < drop * scarcity('weaponDrop', door)) spawnPickup(e.pos, kind);
+  else if (armed && r < DROPS.clipRate * scarcity('ammoDrop', door)) spawnPickup(e.pos, CLIP);
   scene.remove(e.g);
   enemies.splice(i, 1);
   game.kills++;
@@ -3656,7 +3692,8 @@ function onPointerDown(ev) {
   }
   input.pointers.set(ev.pointerId, {
     sx: ev.clientX, sy: ev.clientY, x: ev.clientX, y: ev.clientY,
-    ox: ev.clientX, oy: ev.clientY, role: null, downT: performance.now(),
+    ox: ev.clientX, oy: ev.clientY, role: null,
+    downT: performance.now(), t: performance.now(),
   });
   input.holding = true;
 }
@@ -3702,11 +3739,20 @@ function onPointerMove(ev) {
 const ROLE_PX = 2;   // just enough not to assign a role to a still thumb
 
 function movePointer(p, cx, cy) {
-  // a stale entry (mobile browsers sometimes lose a pointerup at the screen
+  // A stale entry (mobile browsers sometimes lose a pointerup at the screen
   // edge) makes the NEXT touch look like a huge instant swipe — the camera
-  // "jumps". Any implausible single-event hop is a re-plant, not a move:
-  // carry the anchors along with it so nothing is applied.
-  if (Math.hypot(cx - p.x, cy - p.y) > 140) {
+  // "jumps". Any implausible hop is treated as a re-plant, not a move: the
+  // anchors are carried along so nothing is applied.
+  //
+  // But distance alone is not enough evidence. A genuinely fast flick after a
+  // dropped frame can cover 140 px in one sample, and swallowing that is
+  // itself a stall — the exact bug this is meant to prevent, arriving from
+  // the other direction. A re-plant is a GAP in the pointer stream, so it has
+  // to be far AND late; a flick delivers samples every 8-16 ms.
+  const now = performance.now();
+  const gap = now - (p.t || now);
+  p.t = now;
+  if (Math.hypot(cx - p.x, cy - p.y) > 140 && gap > 120) {
     p.ox += cx - p.x; p.oy += cy - p.y;
     p.sx += cx - p.x; p.sy += cy - p.y;
     p.x = cx; p.y = cy;
@@ -3856,7 +3902,8 @@ function setHaptics(on) {
 const sfx = (() => {
   let ctx = null, master = null, sfxBus = null;
   let echoIn = null, echoWet = null, echoSendBus = null, voiceBus = null;
-  let musicSrc = null, musicGain = null, musicFilter = null;
+  let echoFb = null, echoDelay = null;
+  let musicSrc = null, musicGain = null, musicFilter = null, musicBuf = null;
   let musicRate = 1, lastTs = 1, building = false;
   let faded = false;   // pause/death silence
   let muted = false;
@@ -3903,6 +3950,7 @@ const sfx = (() => {
   let slowFromCombat = false;   // did this slow phase begin during combat?
   let whooshBuf = null;    // shared 2s noise loop for all bullet whooshes
   let whooshCount = 0;
+  const liveWhooshes = [];   // so a flush can cut every one of them at once
   const WHOOSH_MAX = 12;   // concurrent whoosh voices — plenty, and bounded
   let voUntilMs = 0;       // a voice line is playing until then — never overlap
   let waveVoEndMs = 0;     // when the wave-intro VO finishes
@@ -4019,6 +4067,7 @@ const sfx = (() => {
     const fb = ctx.createGain();
     fb.gain.value = 0.45;
     echoIn.connect(delay); delay.connect(damp); damp.connect(fb); fb.connect(delay);
+    echoFb = fb; echoDelay = delay;
     echoWet = ctx.createGain();
     echoWet.gain.value = 0.06;
     damp.connect(echoWet); echoWet.connect(master);
@@ -4156,14 +4205,24 @@ const sfx = (() => {
     });
 
     try {
-      const buf = await off.startRendering();
-      musicSrc = ctx.createBufferSource();
-      musicSrc.buffer = buf;
-      musicSrc.loop = true;
-      musicSrc.connect(musicFilter);
-      musicSrc.start();
-      musicGain.gain.setTargetAtTime(0.26 * musicVol, ctx.currentTime, 1.2);   // fade in
+      musicBuf = await off.startRendering();
+      startMusic(1.2);
     } catch { /* keep SFX even if music fails */ }
+  }
+
+  // Seating the loop is its own function because a retry has to restart it
+  // from the top: fading the master leaves the loop running underneath, so
+  // the next run would otherwise pick the track up mid-phrase.
+  function startMusic(fade = 0.4) {
+    if (!ctx || !musicBuf || !musicFilter || muted) return;
+    if (musicSrc) { try { musicSrc.stop(); } catch { /* already stopped */ } musicSrc.disconnect(); }
+    musicSrc = ctx.createBufferSource();
+    musicSrc.buffer = musicBuf;
+    musicSrc.loop = true;
+    musicSrc.playbackRate.value = musicRate;
+    musicSrc.connect(musicFilter);
+    musicSrc.start();
+    musicGain.gain.setTargetAtTime(0.26 * musicVol, ctx.currentTime, fade);
   }
 
   // --- one-shot helpers, routed through the sfx bus + echo send
@@ -4363,12 +4422,21 @@ const sfx = (() => {
       if (game.state === 'menu') return;   // demo stays silent
       const r = selfRate();
       if (weapon === 'shotgun') {
-        // pitched down for depth, with a synth sub-thump under the blast
-        if (playSample('shotgun', { rate: r * 0.75, gainMul: 1.15, send: 0.35, fadeAfter: 1.4 })) {
-          tone(150, 32, 0.28, 0.45, 'sine', r, 0.2);
+        // It read as "far away", and the two causes were both here. Playing it
+        // at 0.75 rate stretched the transient until the blast had no crack
+        // left, and a 0.35 echo send meant a third of what you heard was the
+        // ROOM rather than the gun — which is exactly how distance is encoded.
+        // At full speed it now runs near its own pitch with a much drier send
+        // and a hard noise spike in front of it for the attack. selfRate()
+        // still stretches and drowns it in bullet time, where the cavernous
+        // version is the one that sounds right.
+        if (playSample('shotgun', { rate: r * 0.92, gainMul: 1.25, send: 0.12 * r, fadeAfter: 1.4 })) {
+          noise(0.035, 5200, 0.7, 0.5, 1, 0.02);        // the crack, real-time
+          tone(150, 32, 0.28, 0.5, 'sine', r, 0.08);    // sub-thump under it
           return;
         }
-        noise(0.28, 550, 0.5, 0.75, r, 0.3); tone(160, 40, 0.18, 0.3, 'square', r);
+        noise(0.05, 4800, 0.6, 0.6, 1, 0.03);
+        noise(0.28, 550, 0.5, 0.75, r, 0.12); tone(160, 40, 0.18, 0.3, 'square', r);
       } else if (weapon === 'sniper') {   // same rifle crack, pitched down a touch
         if (playSample('gunshot', { rate: r * 0.85, send: 0.4 })) return;
         noise(0.09, 3200, 0.6, 0.7, r, 0.2);
@@ -4437,7 +4505,9 @@ const sfx = (() => {
       g.connect(send); send.connect(echoSendBus);
       src.start(ctx.currentTime, Math.random() * 2);   // decorrelate the loops
       whooshCount++;
-      return { src, g, send, dead: false };
+      const h = { src, g, send, dead: false };
+      liveWhooshes.push(h);
+      return h;
     },
     updateWhoosh(h, dist, vr) {   // vr: radial closing speed, + = approaching
       if (!h || h.dead) return;
@@ -4468,6 +4538,8 @@ const sfx = (() => {
       if (!h || h.dead) return;
       h.dead = true;
       whooshCount--;
+      const li = liveWhooshes.indexOf(h);
+      if (li >= 0) liveWhooshes.splice(li, 1);
       try {   // quick fade so a bullet dying mid-swell doesn't click
         h.g.gain.setTargetAtTime(0, ctx.currentTime, 0.03);
         h.src.stop(ctx.currentTime + 0.15);
@@ -4545,6 +4617,44 @@ const sfx = (() => {
         noise(0.85, 420, 0.5, 0.2, 1, 0.3);             // slab on its track
         tone(150, 96, 0.75, 0.16, 'sawtooth', 1, 0.3);
       }, 130);
+    },
+    // Death fades the MASTER, which attenuates the output but leaves the
+    // world still running underneath it: the delay line keeps circulating the
+    // last shots at full amplitude (0.29 s tap, 0.45 feedback, so a tail of
+    // roughly two seconds), the music loop keeps playing, and any voice with
+    // a long tail keeps ringing. Bring the master back up for the next run
+    // inside that window and you hear the end of the run you just lost.
+    //
+    // So a retry does not merely un-duck: it FLUSHES. The feedback path is
+    // opened for long enough to drain, every whoosh voice is cut, and the
+    // music is re-seated at the top of its loop.
+    flush() {
+      if (!ctx) return;
+      const now = ctx.currentTime;
+      for (const node of [echoIn, echoWet, echoFb]) {
+        if (!node) continue;
+        node.gain.cancelScheduledValues(now);
+        node.gain.setValueAtTime(0.0001, now);
+      }
+      for (const h of liveWhooshes.slice()) this.detachWhoosh(h);
+      if (musicSrc) {
+        try { musicSrc.stop(); } catch { /* already stopped */ }
+        musicSrc.disconnect();
+        musicSrc = null;
+      }
+      if (musicGain) {
+        musicGain.gain.cancelScheduledValues(now);
+        musicGain.gain.setValueAtTime(0, now);
+      }
+      // re-arm once the line has certainly drained
+      setTimeout(() => {
+        if (!ctx || !echoIn) return;
+        const t = ctx.currentTime;
+        echoIn.gain.setValueAtTime(1, t);
+        if (echoWet) echoWet.gain.setValueAtTime(0.06, t);
+        if (echoFb) echoFb.gain.setValueAtTime(0.45, t);
+        startMusic();
+      }, 90);
     },
     // Everything ducks to silence for pause/death and swells back on resume.
     // Ramping the master (not stopping voices) is what kills the buzzing
@@ -5061,7 +5171,13 @@ function startWave(n, quiet = false) {   // quiet: the clear card already announ
 // how many are ON the street — the aim-token cap keeps most of them
 // stalking rather than shooting, so density can run higher than pressure
 function maxAlive() {
-  if (game.mode === 'hall') return Math.min(PACING.hallAliveBase + Math.floor(game.wave / 2), PACING.hallAliveCap);
+  // how many can be ON you at once — the dial that decides whether a fight
+  // is a queue or a swarm, so it is the one that moves least
+  if (game.mode === 'hall') {
+    return Math.max(2, Math.round(
+      Math.min(PACING.hallAliveBase + Math.floor(game.wave / 2), PACING.hallAliveCap)
+      * scarcity('groupSize', game.wave)));
+  }
   return Math.min(PACING.cityAliveBase + Math.floor(game.wave / 2), PACING.cityAliveCap);
 }
 
@@ -5183,11 +5299,13 @@ function advanceFromOverlay() {
     runStartAt = Date.now();
     runPlayT = 0;
     setWeapon('pistol');
+    sfx.flush();   // a fresh run starts silent, whatever the last one was doing
     if (game.mode === 'rush') initRush();
     else if (game.mode === 'hall') initHall();
     else { startWave(1); showGuide(); }
   } else {   // retry current wave
     clearField();
+    sfx.flush();   // drain the dead run's echo tail and re-seat the music
     player.alive = true;
     player.pos.set(0, 0, 14);
     player.vel.set(0, 0, 0);
@@ -5264,7 +5382,36 @@ function makeHallFloorTexture() {
 }
 const HALL_WALL_MAT = new THREE.MeshLambertMaterial({ map: makeHallWallTexture() });
 // unlit: Lambert undersides get no directional light and go near-black
-const HALL_CEIL_MAT = new THREE.MeshBasicMaterial({ color: 0x97a9b3 });
+// The ceiling is roughly half of a portrait frame and it was ONE FLAT COLOUR
+// — the single largest dead area on screen. Beams break it up further down
+// the corridor, but directly overhead there is nothing for the eye to hold.
+// A texture costs nothing at runtime and gives the near ceiling panel joints,
+// a service run and the odd access hatch.
+function makeHallCeilTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = '#97a9b3'; g.fillRect(0, 0, 256, 256);
+  // coffer grid: a 2 m panel joint, darker in one axis than the other so the
+  // ceiling reads as spanning rather than as a checkerboard
+  g.strokeStyle = 'rgba(20,38,48,0.30)'; g.lineWidth = 5;
+  g.beginPath(); g.moveTo(128, 0); g.lineTo(128, 256); g.stroke();
+  g.strokeStyle = 'rgba(20,38,48,0.16)'; g.lineWidth = 3;
+  for (const y of [64, 128, 192]) { g.beginPath(); g.moveTo(0, y); g.lineTo(256, y); g.stroke(); }
+  // a service duct running the length of it, offset from centre
+  g.fillStyle = 'rgba(20,38,48,0.13)'; g.fillRect(40, 0, 34, 256);
+  g.fillStyle = 'rgba(255,255,255,0.10)'; g.fillRect(40, 0, 5, 256);
+  // access hatches and a couple of bolt rows, so no two glances read alike
+  g.fillStyle = 'rgba(20,38,48,0.22)';
+  g.fillRect(168, 30, 44, 44);
+  g.fillRect(178, 168, 26, 26);
+  g.fillStyle = 'rgba(20,38,48,0.35)';
+  for (let i = 0; i < 8; i++) { g.fillRect(150, 12 + i * 30, 3, 3); g.fillRect(232, 12 + i * 30, 3, 3); }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+const HALL_CEIL_MAT = new THREE.MeshBasicMaterial({ map: makeHallCeilTexture() });
 // beams must be their own value or they vanish into the ceiling they hang from
 const HALL_BEAM_MAT = new THREE.MeshBasicMaterial({ color: 0x7c8d97 });
 // unlit and bright: the strips read as the light source, not a lit surface
@@ -5598,7 +5745,8 @@ function playerStretch(L) {
 // have it in, not because a number went up. The approach is always exactly
 // one final group.
 function stretchQuota(L, n) {
-  const per = Math.min(LEG.perCellCap, LEG.perCell + n * LEG.perCellPerDoor);
+  const per = Math.min(LEG.perCellCap,
+    (LEG.perCell + n * LEG.perCellPerDoor) * scarcity('legSize', n));
   const body = L.stretches.slice(0, -1);          // everything but the approach
   if (!body.length) return [LEG.finaleWave];
   const cells = body.reduce((a, s) => a + s.cells.length, 0) || 1;
@@ -5699,6 +5847,11 @@ function initHall() {
   player.pitch = 0;
   game.noFireBefore = performance.now() + 2500;
   el.pausebtn.style.display = 'block';
+  // The first leg is built, so every material the tunnel uses is now in the
+  // scene. Compile it all here, under the intro card, where a stall is
+  // invisible — requestIdleCallback was worse than useless because it can
+  // just as easily fire mid-fight.
+  warmUp();
   el.ammo.style.display = '';
   setTimeLocked(false);
   slowBank = SLOWMO.base;
@@ -5961,8 +6114,9 @@ function frame(now) {
       // on the opening waves, full price once the run heats up. Rush hour is
       // built AROUND frozen time (it's how you see the sleepers), so its
       // tank is cheap for the whole run.
-      slowBank -= dt * SLOWMO.drain *
-        (game.mode === 'rush' ? RAMP.rushDrain : RAMP.drainFloor + RAMP.drainRange * diffT());
+      slowBank -= dt * SLOWMO.drain * (game.mode === 'rush' ? RAMP.rushDrain
+        : (RAMP.drainFloor + RAMP.drainRange * diffT())
+          * scarcity('timeDrain', game.mode === 'hall' ? game.wave : 1));
       if (slowBank <= 0) {
         slowBank = 0;
         setTimeLocked(false);   // time rushes back — resume SFX fires as usual

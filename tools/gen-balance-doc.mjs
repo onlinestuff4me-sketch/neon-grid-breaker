@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
   WEAPONS, TYPE_INTRO, TYPE_SHARE, TYPE_DROP, DROPS, RAMP, COMP, LEG, PACING, TIME,
+  SHATTER, SCARCITY, scarcity,
 } from '../src/balance.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -56,6 +57,42 @@ game imports that file, this document is generated from it, and the Balance
 Tuner artifact mirrors the same shape — so none of the three can drift.
 
 ---
+
+## Scarcity — the primary levers
+
+The loop the game is about: **limited ammo** forces you to hide, pick your
+shots and freeze time to line them up → **limited time** forces you to hoard
+the freeze, so when you spend it you make it count → out of both, you close
+with a knife and freezing is the only way to land the jab.
+
+A beginner sprays and never notices. The moment ammo gets tight the whole
+game becomes resource management, and that is the fun. So these four are the
+top-level dials and everything below is detail. Doors 1–3 stay generous —
+that is where you learn to spray. 4–6 tighten. By 8 you are counting rounds.
+
+Each curve is keyframes of \`[door, multiplier]\`, linearly interpolated and
+flat outside its ends.
+
+| Door | Ammo drops | Weapon drops | Time per kill | Time drain | Leg size | Group size |
+|---|---|---|---|---|---|---|
+${[1, 2, 3, 4, 5, 6, 7, 8, 10, 12].map((d) => `| ${d} | ${scarcity('ammoDrop', d).toFixed(2)}× | ${scarcity('weaponDrop', d).toFixed(2)}× | ${scarcity('timeGain', d).toFixed(2)}× | ${scarcity('timeDrain', d).toFixed(2)}× | ${scarcity('legSize', d).toFixed(2)}× | ${scarcity('groupSize', d).toFixed(2)}× |`).join('\n')}
+
+What each multiplies:
+
+| Curve | Multiplies | Effect |
+|---|---|---|
+| \`ammoDrop\` | \`DROPS.clipRate\` (${n(DROPS.clipRate)}) | how often a kill leaves a pistol clip |
+| \`weaponDrop\` | the per-type weapon drop chance | falls slower than ammo — a floor gun matters more once clips dry up |
+| \`timeGain\` | \`TIME.bonus\` (${n(TIME.bonus)} s) | seconds of bank refunded per kill |
+| \`timeDrain\` | the drain rate while frozen | above 1× the bank empties faster |
+| \`legSize\` | \`LEG.perCell\` | total enemies in the level |
+| \`groupSize\` | \`maxAlive\` | how many can be on you at once |
+
+Raw keyframes:
+
+\`\`\`js
+${Object.entries(SCARCITY).map(([k, v]) => `${k.padEnd(11)}: ${JSON.stringify(v)}`).join('\n')}
+\`\`\`
 
 ## Weapons
 
