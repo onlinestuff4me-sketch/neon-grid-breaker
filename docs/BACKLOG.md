@@ -17,18 +17,23 @@ is wrong the fix is a keyframe drag in the Scarcity Console, not new content.
 
 ---
 
-## ~~1. The fire telegraph~~ — **shipped**
+## 1. The fire telegraph — **built, then removed**
 
-Built. Each enemy now owns its material set (the shared cache would have
-tinted every enemy of a type at once) and `setTelegraph` ramps `emissive`
-along a black → ember → amber curve, weighted per body group: chest 1.0,
-pelvis 0.95, limbs 0.7, **head 0.25** so the silhouette survives the glow.
-It ramps over the aim window, holds at full while a stagger delays the shot,
-cools over 0.3 s, and is killed outright on death — an interrupted telegraph
-has to read as interrupted.
+Shipped in `5b5b2f6` and reverted the same day after playtest. It read as
+**confusing rather than informative**: the game already telegraphs a shot
+twice — the enemy raises his gun arm, and the muzzle flashes white just
+before firing — and a third signal on the body competed with those instead
+of reinforcing them.
 
-The weights are why `docs/BLENDER.md` insists on four named material slots:
-a single-material mesh can only glow uniformly, which is the blob we avoided.
+Do not rebuild it as-is. The premise it was built on (that a gun-tip flash
+is only a few pixels at a 42-degree horizontal field, so the warning needs to
+be body-scale) was not wrong about the geometry, but the arm-raise is already
+body-scale and already reads. If this is revisited, the question to answer
+first is whether the arm-raise is legible **in peripheral vision**, and if
+not, the fix is probably to exaggerate the arm-raise rather than to add a
+second channel.
+
+The code is recoverable from `5b5b2f6` if it is ever wanted.
 
 ## ~~2. The archive screen~~ — **shipped**
 
@@ -51,19 +56,33 @@ The death screen now reports `+N FILED TO THE ARCHIVE` when a life turned
 something up, which is the only place the archive advertises itself — and
 dying with a find is exactly when you go and look.
 
-## ~~3. Per-part shatter, and where you hit~~ — **shipped**
+## 3. Per-part shatter — **built, then removed; needs its own workstream**
 
-Built. Four zones; the one you hit throws more pieces, faster, and the rest
-follow outward a beat at a time. Head pays **1.6×** the time bank, legs
-**0.7×** — seconds rather than points, so precision plugs into the scarcity
-loop instead of sitting outside it. A knife jab is always a body hit.
+Shipped in `4653f43` and reverted the same day. Two independent problems:
 
-The part the plan missed: removing the mesh on the frame of the kill left
-any zone whose shards were still held as neither mesh nor debris. In bullet
-time that gap is three real seconds of a body with no legs. The body now
-stays in the scene and is hidden zone by zone on the same clock, which is
-also what makes a headshot read as a head coming off with the torso still
-standing. See `docs/TUNNEL_META.md`.
+1. **It looked bad.** Four zones breaking in sequence, with the body hidden a
+   zone at a time to match, produced a body that came apart in visible
+   chunks-of-schedule rather than shattering. The still frames read well,
+   which is exactly why stills were the wrong verification.
+2. **Headshots did not register**, in the sense that mattered: the bonus was
+   paid into the slow-mo bank, and the bank caps at 10 s while a kill already
+   refunds 2 s. Land a headshot with a nearly-full bank — which is most of
+   the early game — and it pays nothing, flashes nothing, and says nothing.
+   The reward was real in the model and invisible in the hand.
+
+**What a real workstream has to settle before any code:**
+
+- Where the reward lands so it is always felt. A bank that is usually full
+  cannot carry it. Options: overfill the cap briefly, pay a separate
+  resource, or make the payoff non-numeric (a longer freeze on the kill).
+- What "coming apart" should look like frame by frame at 60 fps and at the
+  0.05x freeze scale — the two are very different problems, and the freeze is
+  where the effect is actually looked at.
+- Whether the body should be hidden at all, or replaced by per-part rigid
+  bodies that fall. That is a bigger build and probably the right one, and it
+  wants the glTF characters to land first so the parts already exist.
+
+The code is recoverable from `4653f43`.
 
 ## 4. Protocol elements, cheapest first
 

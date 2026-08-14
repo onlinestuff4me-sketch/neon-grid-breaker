@@ -113,42 +113,16 @@ veterans a reason to keep starting over. Each has its own depth record.
 
 ---
 
-## Per-part shatter and where you hit — **built**
+## Per-part shatter — built, reverted, back on the backlog
 
-The shatter used to break a body as one object: pieces spawned from the
-centre regardless of where the round landed, so every hit was the same hit.
+Built and shipped, then removed the same day after playtest. The write-up of
+what went wrong and what a real attempt has to settle first lives in
+`docs/BACKLOG.md` item 3; the code is recoverable from commit `4653f43`.
 
-**What shipped.** The body is four zones — head, chest, pelvis, legs, with
-heights matching the hitboxes. The zone you hit throws 1.6x its share of the
-pieces at 1.45x the speed, and the others follow outward at 0.05 s of world
-time per zone away from the wound. Weights are renormalised, so a headshot
-and a leg shot throw the same amount of debris and only its distribution
-moves — otherwise one would quietly be a bigger effect than the other, which
-is a performance difference disguised as a design one.
-
-**The mesh had to stop vanishing.** Removing the group on the frame of the
-kill left any zone whose shards were still held as neither mesh nor debris —
-invisible. In bullet time that gap stretches with everything else, and 0.15 s
-of world time at the 0.05x standing-still scale is three real seconds of a
-body with no legs. So the body stays in the scene and is hidden a zone at a
-time, on the same clock as its shards. Zones are bucketed by each mesh's
-WORLD height at the moment of the kill, which means the mesh builder needs no
-tagging and a scaled enemy sorts itself out.
-
-That is the whole effect: a headshot reads as a head coming off with the
-torso still standing for a beat, and a leg shot reads as the legs going out
-from under.
-
-**The reward is the time bank, not points**, as planned: head 1.6x, chest 1x,
-pelvis 0.9x, legs 0.7x on `TIME.bonus`. It plugs straight into the scarcity
-loop — as ammo tightens and `timeGain` falls with depth, precision becomes
-the way to keep the bank alive, which is the progression from spraying to
-choosing the whole balance model is built around. A knife jab is always a
-body hit, which is part of the cost of closing, and a blast has no single
-wound so it pays the flat rate.
-
-The meter flashes white on a headshot bonus, because the meter is the thing
-that grew; the first headshot you ever land also says it in words, once.
-
-Values live in `SHATTER.zones` and `TIME.partBonus`, and `docs/BALANCE.md` is
-generated from both.
+The short version: breaking the body in four scheduled zones read as
+*scheduled*, not as shattering, and the headshot reward was paid into a
+slow-mo bank that is usually already at its cap — so most headshots paid
+nothing a player could feel. The idea is still right. The reward needs
+somewhere to land that is always felt, and the effect wants per-part rigid
+bodies rather than a hide-on-a-timer, which in turn wants the glTF characters
+to land first so the parts already exist as separate objects.

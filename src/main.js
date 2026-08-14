@@ -1157,23 +1157,62 @@ function makeTrailGeo() {
 const bulletMatP = new THREE.MeshBasicMaterial({ color: 0x16181d });
 
 // bullet scars: temporary marks where rounds strike walls and cover
+// ---------------------------------------------------------------------------
+// MATERIAL POOLS — the "screen locks for a second, then jumps" bug.
+//
+// Ripples, bullet marks and grenade rings each built a fresh material and
+// DISPOSED it when the effect died. three.js refcounts shader programs by how
+// many live materials use them, so the moment the last ripple expired that
+// program's count hit zero and the program was deleted — and the next shot
+// linked it again from source. Measured over a real session: the program
+// count cycles 16 -> 15 -> 16 -> 15 for the whole run.
+//
+// A GL link is sub-millisecond on this desktop and can be hundreds of
+// milliseconds on a phone, and it blocks the GL thread. Look is applied in
+// the pointer handler rather than in the frame loop, so the camera keeps
+// ACCUMULATING rotation right through the stall and then delivers all of it
+// on the frame that finally lands. That is exactly "the screen locks for a
+// second, then jumps" — and it is worst around slow-mo, because a ripple
+// lives 0.8 s of WORLD time, which at the 0.05x scale is sixteen real
+// seconds: the pool drains between fights and every re-entry pays the link.
+//
+// So effect materials are never disposed. They are returned here and reused,
+// which keeps every program's refcount above zero for the life of the page.
+// ---------------------------------------------------------------------------
+const matPools = new Map();
+function takeMat(kind, make) {
+  const pool = matPools.get(kind);
+  return (pool && pool.length) ? pool.pop() : make();
+}
+function freeMat(kind, m) {
+  let pool = matPools.get(kind);
+  if (!pool) matPools.set(kind, pool = []);
+  // Every caller already caps its own effect count (70 marks, 90 ripples), so
+  // this ceiling is a runaway guard rather than a working limit.
+  if (pool.length < 256) pool.push(m);
+}
+
 const markGeo = new THREE.PlaneGeometry(0.15, 0.15);
 const marks = [];
 function addBulletMark(b, at) {
   const p = (at || b.pos).clone();
-  const m = new THREE.Mesh(markGeo,
+  const mat = takeMat('mark', () =>
     new THREE.MeshBasicMaterial({ color: 0x16181d, transparent: true, opacity: 0.38 }));
+  mat.opacity = 0.38;
+  const m = new THREE.Mesh(markGeo, mat);
   m.position.copy(p).addScaledVector(_v1.copy(b.vel).normalize(), -0.03);
   m.lookAt(m.position.x - b.vel.x, m.position.y - b.vel.y, m.position.z - b.vel.z);
   marks.push({ m, t: 0 });
   scene.add(m);
-  if (marks.length > 70) { scene.remove(marks[0].m); marks[0].m.material.dispose(); marks.shift(); }
+  if (marks.length > 70) {
+    scene.remove(marks[0].m); freeMat('mark', marks[0].m.material); marks.shift();
+  }
 }
 function updateMarks(dt2) {
   for (let i = marks.length - 1; i >= 0; i--) {
     const k = marks[i]; k.t += dt2;
     k.m.material.opacity = 0.38 * Math.max(0, 1 - k.t / 10);
-    if (k.t >= 10) { scene.remove(k.m); k.m.material.dispose(); marks.splice(i, 1); }
+    if (k.t >= 10) { scene.remove(k.m); freeMat('mark', k.m.material); marks.splice(i, 1); }
   }
 }
 const bulletMatE = new THREE.MeshBasicMaterial({ color: 0xff2d1a });
@@ -1452,10 +1491,11 @@ function renderFrame(dt) {
 }
 
 function spawnRipple(pos, vel, big) {
-  const mat = new THREE.MeshBasicMaterial({
-    color: big ? 0xd88a80 : 0x8aa8c4, transparent: true, opacity: 0.5,
-    side: THREE.DoubleSide, depthWrite: false,
-  });
+  const mat = takeMat('ripple', () => new THREE.MeshBasicMaterial({
+    transparent: true, side: THREE.DoubleSide, depthWrite: false,
+  }));
+  mat.color.setHex(big ? 0xd88a80 : 0x8aa8c4);
+  mat.opacity = 0.5;
   const mesh = new THREE.Mesh(rippleGeo, mat);
   mesh.position.copy(pos);
   mesh.lookAt(_v1.copy(pos).add(vel));
@@ -1465,7 +1505,7 @@ function spawnRipple(pos, vel, big) {
   if (ripples.length > 90) {   // hard cap; oldest rings pop first
     const r = ripples.shift();
     scene.remove(r.mesh);
-    r.mesh.material.dispose();
+    freeMat('ripple', r.mesh.material);
   }
 }
 
@@ -1475,7 +1515,7 @@ function updateRipples(sdt) {
     r.life -= sdt;
     if (r.life <= 0) {
       scene.remove(r.mesh);
-      r.mesh.material.dispose();
+      freeMat('ripple', r.mesh.material);
       ripples.splice(i, 1);
       continue;
     }
@@ -1576,68 +1616,39 @@ function shardColor() {
   return SHATTER.colDeep;
 }
 
-// Which zone a hit at this height landed in. The bullet is already known to
-// be within 0.34 m of the body axis, so its own y is the wound height.
-function zoneAtY(y) {
-  const order = SHATTER.zoneOrder;
-  for (const k of order) if (y >= SHATTER.zones[k].y0) return k;
-  return order[order.length - 1];
-}
-
-// THE BREAK. The body comes apart in four zones rather than as one cloud:
-// the zone you hit goes first and throws hardest, and the others follow
-// outward from it a beat at a time. A headshot therefore reads as a head
-// coming off and the rest collapsing after it, and a leg shot reads as the
-// legs going out from under. `part` of null — a blast, which has no single
-// wound — breaks every zone at once, which is what a blast should look like.
-function spawnShatter(center, impulseDir, part, count) {
-  const total = count || SHATTER.perKill;
-  const order = SHATTER.zoneOrder;
-  const hit = part ? order.indexOf(part) : -1;
-  // The struck zone is weighted up and the whole set renormalised, so every
-  // kill throws the same amount of debris — only its distribution moves.
-  // Otherwise a headshot would quietly be a bigger effect than a leg shot,
-  // which is a performance difference disguised as a design one.
-  const w = order.map((k, i) => SHATTER.zones[k].share * (i === hit ? SHATTER.hitShare : 1));
-  const wsum = w.reduce((a, b) => a + b, 0);
-  for (let zi = 0; zi < order.length; zi++) {
-    const z = SHATTER.zones[order[zi]];
-    const n = Math.round(total * w[zi] / wsum);
-    const delay = hit < 0 ? 0 : Math.abs(zi - hit) * SHATTER.cascade;
-    const boost = zi === hit ? SHATTER.hitSpeed : 1;
-    for (let i = 0; i < n; i++) {
-      const it = claimShard(debrisPool, shardColor());
-      // TWO CLASSES. A third are the original big chunks — pieces large
-      // enough to follow with your eye as they tumble — and the rest is grit
-      // around them. All-grit read as sand; all-chunks read as meat. Both
-      // together is a body coming apart.
-      const chunk = Math.random() < SHATTER.chunkFrac;
-      it.s = chunk
-        ? SHATTER.chunkMin + Math.random() * SHATTER.chunkVar
-        : SHATTER.gritMin + SHATTER.gritVar * Math.pow(Math.random(), SHATTER.gritCurve);
-      it.px = center.x + (Math.random() - 0.5) * 2 * z.r;
-      it.py = z.y0 + Math.random() * (z.y1 - z.y0);
-      it.pz = center.z + (Math.random() - 0.5) * 2 * z.r;
-      // isotropic direction, most of them SLOW with a fast tail, plus a shove
-      // along the killing blow and a constant lift — that lift is what puts
-      // the cloud above the wound instead of level with it
-      const th = Math.random() * Math.PI * 2, ph = Math.acos(2 * Math.random() - 1);
-      const sp = (SHATTER.speedBase + SHATTER.speedVar
-        * Math.pow(Math.random(), SHATTER.speedCurve)) * boost;
-      const im = (SHATTER.impulse + Math.random() * SHATTER.impulseVar) * boost;
-      it.vx = Math.sin(ph) * Math.cos(th) * sp + impulseDir.x * im;
-      it.vy = Math.cos(ph) * sp + SHATTER.rise;
-      it.vz = Math.sin(ph) * Math.sin(th) * sp + impulseDir.z * im;
-      it.rx = Math.random() * 6.28; it.ry = Math.random() * 6.28; it.rz = Math.random() * 6.28;
-      it.wx = (Math.random() - 0.5) * 2 * SHATTER.spin;
-      it.wy = (Math.random() - 0.5) * 2 * SHATTER.spin;
-      it.wz = (Math.random() - 0.5) * 2 * SHATTER.spin;
-      it.life = SHATTER.life + Math.random() * SHATTER.lifeVar;
-      it.maxLife = it.life;
-      // the body does not vanish between two frames: pieces arrive across a
-      // short window, so you see it come apart rather than pop
-      it.hold = delay + SHATTER.breakWindow * Math.pow(Math.random(), 1.6);
-    }
+function spawnShatter(center, impulseDir, count) {
+  const n = count || SHATTER.perKill;
+  for (let i = 0; i < n; i++) {
+    const it = claimShard(debrisPool, shardColor());
+    // TWO CLASSES. A third are the original big chunks — pieces large enough
+    // to follow with your eye as they tumble — and the rest is grit around
+    // them. All-grit read as sand; all-chunks read as meat. Both together is
+    // a body coming apart.
+    const chunk = Math.random() < SHATTER.chunkFrac;
+    it.s = chunk
+      ? SHATTER.chunkMin + Math.random() * SHATTER.chunkVar
+      : SHATTER.gritMin + SHATTER.gritVar * Math.pow(Math.random(), SHATTER.gritCurve);
+    it.px = center.x + (Math.random() - 0.5) * 0.5;
+    it.py = 0.25 + Math.random() * 1.5;
+    it.pz = center.z + (Math.random() - 0.5) * 0.5;
+    // isotropic direction, most of them SLOW with a fast tail, plus a shove
+    // along the killing blow and a constant lift — that lift is what puts the
+    // cloud above the wound instead of level with it
+    const th = Math.random() * Math.PI * 2, ph = Math.acos(2 * Math.random() - 1);
+    const sp = SHATTER.speedBase + SHATTER.speedVar * Math.pow(Math.random(), SHATTER.speedCurve);
+    const im = SHATTER.impulse + Math.random() * SHATTER.impulseVar;
+    it.vx = Math.sin(ph) * Math.cos(th) * sp + impulseDir.x * im;
+    it.vy = Math.cos(ph) * sp + SHATTER.rise;
+    it.vz = Math.sin(ph) * Math.sin(th) * sp + impulseDir.z * im;
+    it.rx = Math.random() * 6.28; it.ry = Math.random() * 6.28; it.rz = Math.random() * 6.28;
+    it.wx = (Math.random() - 0.5) * 2 * SHATTER.spin;
+    it.wy = (Math.random() - 0.5) * 2 * SHATTER.spin;
+    it.wz = (Math.random() - 0.5) * 2 * SHATTER.spin;
+    it.life = SHATTER.life + Math.random() * SHATTER.lifeVar;
+    it.maxLife = it.life;
+    // the body does not vanish between two frames: pieces arrive across a
+    // short window, so you see it come apart rather than pop
+    it.hold = SHATTER.breakWindow * Math.pow(Math.random(), 1.6);
   }
 }
 
@@ -1658,62 +1669,6 @@ function spawnSparks(at, color, count) {
     it.maxLife = it.life;
     it.hold = 0;
   }
-}
-
-// ---------------------------------------------------------------------------
-// THE BODY COMING APART, not vanishing.
-//
-// The debris cascade alone would have left a hole: the group used to be
-// removed from the scene on the frame of the kill, so a zone whose shards are
-// still held would be neither mesh nor debris — invisible. In bullet time
-// that gap stretches with everything else, and 0.15 s of world time at the
-// 0.05x standing-still scale is three real seconds of a body with no legs.
-//
-// So the body stays in the scene and is hidden a zone at a time, on the same
-// clock as its shards. Zones are bucketed by each mesh's WORLD height at the
-// moment of the kill, which means the builder needs no tagging and a crouched
-// or scaled enemy sorts itself out.
-// ---------------------------------------------------------------------------
-const breaking = [];
-const _vb = new THREE.Vector3();
-
-function beginBreak(g, part) {
-  const order = SHATTER.zoneOrder;
-  const hit = part ? order.indexOf(part) : -1;
-  const buckets = order.map(() => []);
-  g.updateMatrixWorld(true);
-  g.traverse((o) => {
-    if (!o.isMesh) return;
-    o.getWorldPosition(_vb);
-    buckets[order.indexOf(zoneAtY(_vb.y))].push(o);
-  });
-  const items = [];
-  for (let zi = 0; zi < order.length; zi++) {
-    if (!buckets[zi].length) continue;
-    items.push({ t: hit < 0 ? 0 : Math.abs(zi - hit) * SHATTER.cascade,
-      meshes: buckets[zi], done: false });
-  }
-  breaking.push({ g, items });
-  updateBreaking(0);   // the struck zone goes on this frame, not the next
-}
-
-function updateBreaking(sdt) {
-  for (let i = breaking.length - 1; i >= 0; i--) {
-    const b = breaking[i];
-    let left = 0;
-    for (const it of b.items) {
-      if (it.done) continue;
-      it.t -= sdt;
-      if (it.t <= 0) { for (const m of it.meshes) m.visible = false; it.done = true; }
-      else left++;
-    }
-    if (!left) { scene.remove(b.g); breaking.splice(i, 1); }
-  }
-}
-
-function clearBreaking() {
-  for (const b of breaking) scene.remove(b.g);
-  breaking.length = 0;
 }
 
 function updateDebris(sdt) {
@@ -1760,6 +1715,9 @@ function updateDebris(sdt) {
 // ---------------------------------------------------------------------------
 const grenades = [];   // {mesh, ring, pos, vel, t}
 const grenadeGeo = new THREE.SphereGeometry(0.14, 10, 10);
+// shared, like every other effect geometry: the target ring used to build a
+// fresh RingGeometry per grenade and never dispose it
+const grenadeRingGeo = new THREE.RingGeometry(0.6, 0.78, 24);
 const BLAST_R = 2.3;
 
 function spawnGrenade(e) {
@@ -1777,10 +1735,11 @@ function spawnGrenade(e) {
   const mesh = new THREE.Mesh(grenadeGeo, MAT_BLACK);
   mesh.position.copy(origin);
   scene.add(mesh);
-  const ring = new THREE.Mesh(
-    new THREE.RingGeometry(0.6, 0.78, 24),
-    new THREE.MeshBasicMaterial({ color: 0xff2d1a, transparent: true, opacity: 0.5, side: THREE.DoubleSide })
-  );
+  const ringMat = takeMat('gring', () => new THREE.MeshBasicMaterial({
+    color: 0xff2d1a, transparent: true, side: THREE.DoubleSide,
+  }));
+  ringMat.opacity = 0.5;
+  const ring = new THREE.Mesh(grenadeRingGeo, ringMat);
   ring.rotation.x = -Math.PI / 2;
   ring.position.set(target.x, 0.02, target.z);
   scene.add(ring);
@@ -1793,7 +1752,7 @@ function explodeGrenade(i) {
   const at = gr.pos.clone();
   scene.remove(gr.mesh);
   scene.remove(gr.ring);
-  gr.ring.material.dispose();
+  freeMat('gring', gr.ring.material);
   grenades.splice(i, 1);
   spawnSparks(at, 0xff2d1a);
   spawnSparks(at, 0x16181d);
@@ -2014,48 +1973,6 @@ const enemyMatCache = {};
 function EM(hex) {
   return enemyMatCache[hex] || (enemyMatCache[hex] = new THREE.MeshLambertMaterial({ color: hex }));
 }
-// THE FIRE TELEGRAPH needs to heat ONE body, and the cache above hands the
-// same material to every enemy of a type — tinting it would light up the
-// whole room. So each enemy builds its own set. This costs a handful of
-// material objects and NO extra draw calls, because every body part is
-// already its own mesh; the cache was only ever saving allocations.
-function enemyMatSet(C) {
-  const mk = (hex) => new THREE.MeshLambertMaterial({ color: hex });
-  return { body: mk(C.body), chest: mk(C.chest), pelvis: mk(C.pelvis), head: mk(C.head) };
-}
-// Ramped emissive along the measured heat: red, through orange and amber, to
-// a near-yellow at the moment of the shot.
-const TELL_RAMP = [
-  [0.00, 0x000000],   // cold: no glow at all
-  [0.45, 0x5a1a08],
-  [0.75, 0xa8481a],
-  [1.00, 0xd8901c],
-];
-const _tellA = new THREE.Color(), _tellB = new THREE.Color();
-function tellColor(out, t) {
-  t = Math.max(0, Math.min(1, t));
-  for (let i = 1; i < TELL_RAMP.length; i++) {
-    if (t <= TELL_RAMP[i][0]) {
-      const [t0, c0] = TELL_RAMP[i - 1], [t1, c1] = TELL_RAMP[i];
-      _tellA.setHex(c0); _tellB.setHex(c1);
-      return out.copy(_tellA).lerp(_tellB, (t - t0) / (t1 - t0));
-    }
-  }
-  return out.setHex(TELL_RAMP[TELL_RAMP.length - 1][1]);
-}
-const _tellOut = new THREE.Color();
-// The reference concentrates the heat on chest, hips and legs rather than
-// spreading it evenly — the head stays dark, which is what keeps the
-// silhouette readable while the body is glowing.
-const TELL_WEIGHT = { chest: 1, pelvis: 0.95, body: 0.7, head: 0.25 };
-function setTelegraph(e, t) {
-  if (!e.mats) return;
-  e.tell = t;
-  for (const k in e.mats) {
-    tellColor(_tellOut, t * (TELL_WEIGHT[k] || 0.6));
-    e.mats[k].emissive.copy(_tellOut);
-  }
-}
 const MAT_SASH = new THREE.MeshLambertMaterial({ color: 0x16181d, side: THREE.DoubleSide });
 
 function rnd01(s) { const x = Math.sin(s * 127.1) * 43758.5453; return x - Math.floor(x); }
@@ -2139,7 +2056,7 @@ function buildEnemyMesh(type) {
     : type === 'sniper' ? { body: 0xb81205, chest: 0xa21507, pelvis: 0x8c1004, head: 0xc8281a }
     : type === 'rusher' ? { body: 0xe0321f, chest: 0xe83a26, pelvis: 0xc8281a, head: 0xf5533f }
     : { body: 0xc8281a, chest: 0xd3291b, pelvis: 0xa21507, head: 0xe03222 };
-  const M = enemyMatSet(C);   // this body's own materials — see setTelegraph
+  const M = { body: EM(C.body), chest: EM(C.chest), pelvis: EM(C.pelvis), head: EM(C.head) };
   const lean = P.lean + (type === 'rusher' ? 0.22 : 0);   // the rusher stalks hunched
   const headH = P.head * 1.08;
   const headBot = 1.62 - headH / 2;
@@ -2491,7 +2408,7 @@ function buildEnemyMesh(type) {
   blob.position.y = 0.01;
   g.add(blob);
 
-  return { g, legL, legR, armL, armR, egun, mats: M,
+  return { g, legL, legR, armL, armR, egun,
     shinL: LG.shin, shinR: RG.shin, kneeRest: EP.knee,
     armLock, armRLock, armLRest, armRRest,
     egunBaseMat: type === 'laser' ? EM(0xff2d1a) : MAT_BLACK };
@@ -2965,29 +2882,21 @@ function removeEnemyShards(e) {
   e.shards = null;
 }
 
-// `part` is the zone the killing blow landed in — 'head' | 'chest' |
-// 'pelvis' | 'legs' — or null for a blast, which has no single wound. It
-// decides both how the body comes apart and how much time the kill refunds.
-function killEnemy(i, impulseDir, part = null) {
+function killEnemy(i, impulseDir) {
   const e = enemies[i];
   // Kill the glow on the same frame. In the reference an enemy shot mid-aim
   // goes flat red instantly, and that snap is what makes an interrupted
   // telegraph read as interrupted rather than as a death animation.
-  setTelegraph(e, 0);
   removeEnemyShards(e);   // a mid-assembly kill (menu demo) must not leak shards
   removeBeam(e);          // shattering the laser cuts his sweep instantly
-  const pay = (part && TIME.partBonus[part]) || 1;
   if (timeMode === 'toggle' && (game.state === 'play' || game.state === 'intro')) {
     // kills buy time — but they buy LESS of it as you go deeper, which is
-    // what turns the freeze from a habit into a decision, and WHERE you hit
-    // decides how much of it you get
-    const before = slowBank;
-    slowBank = Math.min(SLOWMO.cap, slowBank + SLOWMO.bonus * pay
-      * scarcity('timeGain', game.mode === 'hall' ? game.wave : 1));
-    if (part === 'head' && slowBank > before) headPay(slowBank - before);
+    // what turns the freeze from a habit into a decision
+    slowBank = Math.min(SLOWMO.cap,
+      slowBank + SLOWMO.bonus * scarcity('timeGain', game.mode === 'hall' ? game.wave : 1));
   }
   if (game.state !== 'menu') vibrate(15);   // every kill lands in the thumb
-  spawnShatter(e.pos, impulseDir, part);
+  spawnShatter(e.pos, impulseDir);
   const drop = ENEMY_TYPES[e.type].drop;
   const kind = TYPE_DROP[e.type];
   const r = Math.random();
@@ -3002,7 +2911,7 @@ function killEnemy(i, impulseDir, part = null) {
   if (typeof drop === 'string') spawnPickup(e.pos, drop);           // named loot
   else if (kind && r < drop * scarcity('weaponDrop', door)) spawnPickup(e.pos, kind);
   else if (armed && r < DROPS.clipRate * scarcity('ammoDrop', door)) spawnPickup(e.pos, CLIP);
-  beginBreak(e.g, part);   // hidden zone by zone, in step with its shards
+  scene.remove(e.g);
   enemies.splice(i, 1);
   game.kills++;
   // the flow: a kill pulls the next spawn forward, so the street never
@@ -3013,26 +2922,6 @@ function killEnemy(i, impulseDir, part = null) {
   killWord();
   sfx.shatter();
   vibrate(30);
-}
-
-// A headshot paid more than a body shot would have. The meter is the thing
-// that grew, so the meter is where it says so — and the first one you ever
-// land also says it in words, once, because a rule you are never told is a
-// rule that only the players who already expected it will find.
-let headTipShown = false;
-try { headTipShown = localStorage.getItem('timeshard_headtip') === '1'; } catch { /* private */ }
-function headPay(sec) {
-  const m = el.slowmeter;
-  m.classList.remove('bonus');
-  void m.offsetWidth;            // restart the animation on a repeat headshot
-  m.classList.add('bonus');
-  clearTimeout(headPay._t);
-  headPay._t = setTimeout(() => m.classList.remove('bonus'), 460);
-  if (!headTipShown && game.state === 'play') {
-    headTipShown = true;
-    try { persist('timeshard_headtip', '1'); } catch { /* private */ }
-    showBanner(`HEADSHOT<small>+${sec.toFixed(1)}S — AIM HIGH</small>`, 1800);
-  }
 }
 
 // The last moment ANY enemy pulled a trigger. Two of them resolving their
@@ -3294,11 +3183,6 @@ function updateEnemy(e, sdt) {
       const aimT = spec.aimTime * aimSpeedFactor();
       const t = Math.min(e.stateT / aimT, 1);
       if (!e.armRLock) e.armR.rotation.x = -t * (Math.PI / 2 - 0.06);
-      // THE FIRE TELEGRAPH. The gun-tip flash is a few pixels at portrait
-      // scale; a body-wide heat ramp is legible at any distance and in
-      // peripheral vision, which is what the mode actually needs — knowing
-      // WHO is about to shoot is the whole skill at a 42-degree field.
-      setTelegraph(e, Math.min(1, e.stateT / aimT));
       setEgunFlash(e, e.stateT > aimT * 0.7 ? MAT_WHITEFLASH : MAT_BLACK);
       if (e.stateT >= aimT) {
         // Someone else just pulled a trigger? Hold, arm still up, and take
@@ -3308,7 +3192,6 @@ function updateEnemy(e, sdt) {
         const held = e.holdFireT || 0;
         if (worldT - lastEnemyShotAt < ENEMY_SHOT_GAP && held < 0.6) {
           e.holdFireT = held + sdt;
-          setTelegraph(e, 1);   // held at full heat: he is still about to fire
         } else {
           e.holdFireT = 0;
           enemyFire(e, toPlayer);
@@ -3339,8 +3222,6 @@ function updateEnemy(e, sdt) {
       break;
     }
     case 'recover': {
-      // cool back down over about the same time it took to heat up
-      if (e.tell > 0) setTelegraph(e, Math.max(0, e.tell - sdt / 0.3));
       // relax each arm back toward its own rest pose (braced arms have one)
       if (!e.armRLock) e.armR.rotation.x = Math.min(0, e.armR.rotation.x + sdt * 4.5);
       e.armL.rotation.x += ((e.armLRest || 0) - e.armL.rotation.x) * Math.min(1, sdt * 6);
@@ -3535,9 +3416,7 @@ function knifeStrike(spec) {
   }
   if (best >= 0) {
     const e = enemies[best];
-    // A jab is always a body hit. That is the cost of closing the distance,
-    // and it is why the knife never pays a headshot's bank.
-    killEnemy(best, _v1.set(e.pos.x - player.pos.x, 0.4, e.pos.z - player.pos.z).normalize(), 'chest');
+    killEnemy(best, _v1.set(e.pos.x - player.pos.x, 0.4, e.pos.z - player.pos.z).normalize());
   }
 }
 
@@ -3731,14 +3610,7 @@ function updateBullets(sdt) {
           break;
         }
         const impulse = _v1.copy(b.vel).normalize();
-        // Where it landed. The head has its own sphere test; for a body hit
-        // the bullet is already inside 0.34 m of the spine, so the midpoint
-        // of the step it took is the wound height.
-        // ...clamped below the head band, because the body capsule reaches
-        // 1.50 and only the sphere test may ever pay a headshot.
-        killEnemy(j, impulse, headshot ? 'head'
-          : zoneAtY(Math.min(SHATTER.zones.head.y0 - 0.01,
-            ((b.prev.y + b.pos.y) / 2) / Math.max(sy, 0.01))));
+        killEnemy(j, impulse);
         if (b.pierce > 0) { b.pierce--; continue; }   // sniper rounds keep going
         consumed = true;
         break;
@@ -5561,18 +5433,17 @@ function clearField() {
     enemies.splice(i, 1);
   }
   for (let i = bullets.length - 1; i >= 0; i--) killBullet(i, null);
-  clearBreaking();
   clearShardPool(debrisPool);
   clearShardPool(assemblePool);
   for (let i = ripples.length - 1; i >= 0; i--) {
     scene.remove(ripples[i].mesh);
-    ripples[i].mesh.material.dispose();
+    freeMat('ripple', ripples[i].mesh.material);
     ripples.splice(i, 1);
   }
   for (let i = grenades.length - 1; i >= 0; i--) {
     scene.remove(grenades[i].mesh);
     scene.remove(grenades[i].ring);
-    grenades[i].ring.material.dispose();
+    freeMat('gring', grenades[i].ring.material);
     grenades.splice(i, 1);
   }
   for (let i = missiles.length - 1; i >= 0; i--) {
@@ -6794,7 +6665,6 @@ function frame(now) {
     updateMarks(sdt);
   }
   updateShells(sdt);
-  updateBreaking(sdt);
   updateDebris(sdt);
   updateRipples(sdt);
   updateGrenades(sdt);
@@ -6862,9 +6732,9 @@ window.__ts = {
   fx: () => ({ on: fxOn, slowT: +fxSlowT.toFixed(2),
     active: fxQuads.filter((q) => q.visible).length }),
   setFx: (v) => { fxOn = !!v; fxSlowT = 0; },
-  setTell: (i, t) => setTelegraph(enemies[i], t),
   render: () => ({ calls: renderer.info.render.calls, tris: renderer.info.render.triangles,
     geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures,
+    programs: renderer.info.programs ? renderer.info.programs.length : -1,
     debrisLive: debrisPool ? debrisPool.live : -1 }),
   progress: () => ({ lifetimeDoors, archive: [...archive], runFiled }),
   die: (ended) => hitPlayer(!!ended),
@@ -6877,11 +6747,7 @@ window.__ts = {
   },
   forceMeasures: (ids) => { forcedMeasures = ids || null; },
   restartHall: () => { setEnvironment('city'); clearField(); initHall(); },
-  breaking: () => breaking.map((b) => ({ left: b.items.filter((x) => !x.done).length,
-    shown: b.items.reduce((n, x) => n + (x.done ? 0 : x.meshes.length), 0) })),
-  shatterHeld: () => (debrisPool
-    ? debrisPool.items.reduce((n, d) => n + (d.on && d.hold > 0 ? 1 : 0), 0) : -1),
-  killAt: (i, part) => killEnemy(i, _v1.set(0, 0.5, -1).normalize(), part || null),
+  killAt: (i) => killEnemy(i, _v1.set(0, 0.5, -1).normalize()),
   banner: showBanner,
   diff: () => ({ speed: enemyBulletSpeed(), aim: aimSpeedFactor(), t: diffT() }),
   fire: playerFire, setWeapon, spawnEnemy, spawnPickup,

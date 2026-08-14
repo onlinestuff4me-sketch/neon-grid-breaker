@@ -239,27 +239,6 @@ export const SHATTER = {
   // telegraph, so hot pieces were just confetti.
   colBright: 0xff2d1a, colDark: 0xc61703, colDeep: 0x8f2018,
   ratioBright: 0.55, ratioDark: 0.32,   // remainder = deep
-
-  // PER-PART BREAK. The body is four zones, each with its own share of the
-  // pieces and its own moment. The zone you HIT goes first and hardest and
-  // the rest follow outward from it, so a headshot and a leg shot are
-  // visibly different events rather than the same cloud twice.
-  //
-  // Heights are absolute metres off the floor, matching the hitboxes: the
-  // head sphere sits at 1.62 and the body capsule runs 0.15 to 1.50.
-  // `share` is the fraction of the pieces the zone throws (they sum to 1)
-  // and `r` is its lateral spread — shoulders are wider than a skull.
-  zones: {
-    head:   { y0: 1.44, y1: 1.82, share: 0.16, r: 0.20 },
-    chest:  { y0: 1.02, y1: 1.44, share: 0.34, r: 0.32 },
-    pelvis: { y0: 0.74, y1: 1.02, share: 0.20, r: 0.27 },
-    legs:   { y0: 0.04, y1: 0.74, share: 0.30, r: 0.24 },
-  },
-  // Top to bottom, so |i - hit| is how far a zone is from the wound.
-  zoneOrder: ['head', 'chest', 'pelvis', 'legs'],
-  hitShare: 1.6,       // the struck zone throws this many times its share...
-  hitSpeed: 1.45,      // ...and throws them this much harder
-  cascade: 0.05,       // seconds of WORLD time per zone away from the wound
 };
 
 // The slow-mo bank.
@@ -270,11 +249,4 @@ export const TIME = {
   drain: 1,            // seconds spent per second frozen, before scaling
   slowScale: 0.05,     // world speed while standing still
   moveScale: 0.3,      // world speed at full stick
-  // WHERE you hit pays differently, and it pays in SECONDS rather than
-  // points on purpose. Points would sit outside the loop; seconds sit inside
-  // it — as ammo tightens and timeGain falls with depth, precision becomes
-  // the way to keep the bank alive at all. A knife jab is always a body hit,
-  // which is part of the cost of closing, and a blast has no wound to read
-  // so it pays the flat rate.
-  partBonus: { head: 1.6, chest: 1.0, pelvis: 0.9, legs: 0.7 },
 };
