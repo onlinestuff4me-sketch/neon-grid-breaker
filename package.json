@@ -1,0 +1,23 @@
+{
+  "name": "timeshatter",
+  "version": "1.0.0",
+  "private": true,
+  "description": "TIME SHATTER — native shell tooling only. The game itself has no build step.",
+  "type": "module",
+  "scripts": {
+    "pack": "node tools/pack-native.mjs",
+    "ios:sync": "npm run pack && npx cap sync ios",
+    "ios:open": "npm run ios:sync && npx cap open ios",
+    "balance": "node tools/gen-balance-doc.mjs"
+  },
+  "dependencies": {
+    "@capacitor/core": "^8.5.0",
+    "@capacitor/haptics": "^8.0.2",
+    "@capacitor/preferences": "^8.0.1",
+    "@capacitor/status-bar": "^8.0.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.0",
+    "@capacitor/ios": "^8.5.0"
+  }
+}

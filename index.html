@@ -435,6 +435,14 @@
   </div>
 </div>
 
-<script type="module" src="./src/main.js"></script>
+<script type="module">
+  // Durable storage is hydrated BEFORE the game module loads, because
+  // main.js reads bests, lifetime doors and the archive at import time. On
+  // the web hydrateStorage() is a no-op and this costs one microtask.
+  const { hydrateStorage, shellSetup } = await import('./src/native.js');
+  await hydrateStorage();
+  await shellSetup();
+  await import('./src/main.js');
+</script>
 </body>
 </html>

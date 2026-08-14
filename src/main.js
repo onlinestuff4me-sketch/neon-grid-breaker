@@ -15,6 +15,7 @@ import * as THREE from '../lib/three.module.min.js';
 import { WEAPONS, TYPE_INTRO, TYPE_SHARE, TYPE_DROP, DROPS, RAMP, COMP, PACING, TIME, LEG, SHATTER }
   from './balance.js';
 import { composeProtocol, newRunMemory, enemyRoster, ELEMENTS } from './protocols.js';
+import { haptic, persist, hydrateStorage, shellSetup, isNative } from './native.js';
 
 // ---------------------------------------------------------------------------
 // Tunables
@@ -3834,7 +3835,11 @@ let hapticsOn = true;
 try { hapticsOn = localStorage.getItem('timeshard_haptics') !== '0'; } catch { /* private mode */ }
 
 function vibrate(ms) {
-  if (hapticsOn && navigator.vibrate) navigator.vibrate(ms);
+  // haptic() routes to Core Haptics inside the app and to navigator.vibrate
+  // on the web. On iOS Safari there is no third option — navigator.vibrate
+  // does not exist there, which is why none of this has ever been felt on a
+  // phone. Call sites are unchanged: they still speak in milliseconds.
+  if (hapticsOn) haptic(ms);
 }
 function setHaptics(on) {
   hapticsOn = on;
@@ -4599,7 +4604,7 @@ function recordRun() {
     runs.unshift({ id: runStartAt, w: game.wave, k: game.kills, d: Math.round(runPlayT), at: Date.now() });
   }
   runs.sort((a, b) => b.at - a.at);
-  try { localStorage.setItem('timeshard_runs', JSON.stringify(runs.slice(0, 5))); } catch { /* private mode */ }
+  try { persist('timeshard_runs', JSON.stringify(runs.slice(0, 5))); } catch { /* private mode */ }
 }
 
 function fmtWhen(t) {
@@ -5036,7 +5041,7 @@ function startWave(n, quiet = false) {   // quiet: the clear card already announ
   game.waveBearing = Math.hypot(dx, dz) > 3 ? Math.atan2(dx, dz) : Math.random() * Math.PI * 2;
   if (n > bestWave) {
     bestWave = n;
-    try { localStorage.setItem('timeshard_best', String(n)); } catch { /* private mode */ }
+    try { persist('timeshard_best', String(n)); } catch { /* private mode */ }
   }
   if (!quiet) {
     showBanner(`WAVE ${n}<small>THEY ARE COMING</small>`, 1500);
@@ -5216,8 +5221,8 @@ try {
 } catch { /* private mode */ }
 function saveProgress() {
   try {
-    localStorage.setItem('timeshard_doors', String(lifetimeDoors));
-    localStorage.setItem('timeshard_archive', JSON.stringify([...archive]));
+    persist('timeshard_doors', String(lifetimeDoors));
+    persist('timeshard_archive', JSON.stringify([...archive]));
   } catch { /* private mode */ }
 }
 function recordMet(ids) {
@@ -6293,7 +6298,9 @@ el.setsfx.addEventListener('input', () => sfx.setSfxVol(+el.setsfx.value));
 
 // network-first service worker: home-screen installs pick up every deploy
 // automatically and keep working offline
-if ('serviceWorker' in navigator) {
+// Not inside the app: every asset is already on the device there, so a cache
+// layer buys nothing and can only serve something stale after an update.
+if (!isNative() && 'serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(() => { /* http or old browser */ });
 }
 
