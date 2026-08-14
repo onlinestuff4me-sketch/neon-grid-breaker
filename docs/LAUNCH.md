@@ -142,12 +142,19 @@ Convention for a `.app` domain is reverse-DNS of the domain:
 app.timeshatter.game
 ```
 
-It is currently the placeholder `com.timeshatter.game`. **Tell me which you
-want and I'll change it** — after your first submission it cannot be changed
-without shipping a different app and losing your reviews and rankings.
+**Set to `app.timeshatter.game`**, matching the domain. After your first
+submission it cannot be changed without shipping a different app and losing
+your reviews and rankings.
 
-If you go the studio route, `com.littlebearlabs.timeshatter` is equally
-correct and groups future games under one identifier. I'd pick that one.
+It lives in two places — `capacitor.config.json` and the
+`PRODUCT_BUNDLE_IDENTIFIER` in `ios/App/App.xcodeproj/project.pbxproj`.
+`npx cap sync` does **not** rewrite the second one, because it is written
+once when the platform is added. Changing only the config leaves Xcode
+building the old identifier with no warning.
+
+If you'd rather group future games under a studio identifier,
+`com.littlebearlabs.timeshatter` is equally correct — say so before the
+first submission and it is a two-file change.
 
 ### 3.2 Register the App ID
 

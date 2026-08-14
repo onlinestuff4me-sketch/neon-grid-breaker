@@ -1,5 +1,5 @@
 {
-  "appId": "com.timeshatter.game",
+  "appId": "app.timeshatter.game",
   "appName": "TIME SHATTER",
   "webDir": "native/www",
   "ios": {
@@ -12,6 +12,9 @@
     "iosScheme": "capacitor"
   },
   "plugins": {
-    "StatusBar": { "overlaysWebView": true, "style": "DARK" }
+    "StatusBar": {
+      "overlaysWebView": true,
+      "style": "DARK"
+    }
   }
 }

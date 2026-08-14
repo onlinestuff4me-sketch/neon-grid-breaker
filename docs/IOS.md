@@ -72,7 +72,7 @@ Run. For TestFlight: **Product → Archive → Distribute App**.
 | Item | Where | Notes |
 |---|---|---|
 | Apple Developer Program | developer.apple.com | $99/yr. **Nothing ships without it.** |
-| Bundle ID | `capacitor.config.json` → `appId` | Currently `com.timeshatter.game`. **Permanent after first submission** — change it before you ship, not after. |
+| Bundle ID | `capacitor.config.json` → `appId` | `app.timeshatter.game`, matching the domain. **Permanent after first submission.** Also written into `ios/App/App.xcodeproj/project.pbxproj`, which `cap sync` does NOT rewrite — change both or Xcode silently keeps the old one. |
 | App name | App Store Connect | Globally unique. Check availability before committing to it. |
 | Age rating | App Store Connect | Expect **12+**. Answer the violence question "Infrequent/Mild Cartoon or Fantasy Violence" — there is no blood and enemies shatter into geometric shards. Do not overstate it or you land at 17+ for nothing. |
 | App Privacy | App Store Connect | **"Data Not Collected"** everywhere. No analytics, no accounts, no network calls. Worth protecting. |
