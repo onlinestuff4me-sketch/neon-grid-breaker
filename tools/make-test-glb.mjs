@@ -17,7 +17,14 @@ import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const OUT = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'test-assets', 'enemy-test.glb');
+// A second fixture reproduces what Blender ACTUALLY exports when a material
+// datablock name collides: `MAT_CHEST.001`. Pass --mangled to emit it. The
+// loader has to map those to the same four slots, because the alternative is
+// a silent unrecoloured body group on the artist's very first hand-off.
+const MANGLED = process.argv.includes('--mangled');
+const OUT = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'test-assets',
+  MANGLED ? 'enemy-test-mangled.glb' : 'enemy-test.glb');
+const decorate = (n) => (MANGLED ? `${n.toLowerCase()}.001` : n);
 
 // --- binary buffer accumulation --------------------------------------------
 //
@@ -62,10 +69,10 @@ const u16 = (a) => Buffer.from(new Uint16Array(a).buffer);
 // weighted entirely to one of two bones. Trivial geometry on purpose: the
 // point under test is the rig and the naming, not the modelling.
 const SLOTS = [
-  { name: 'MAT_PELVIS', y0: 0.0, y1: 0.5, joint: 0, color: [0.78, 0.09, 0.01, 1] },
-  { name: 'MAT_BODY',   y0: 0.5, y1: 1.0, joint: 0, color: [0.09, 0.09, 0.11, 1] },
-  { name: 'MAT_CHEST',  y0: 1.0, y1: 1.5, joint: 1, color: [1.00, 0.18, 0.10, 1] },
-  { name: 'MAT_HEAD',   y0: 1.5, y1: 2.0, joint: 1, color: [0.87, 0.91, 0.93, 1] },
+  { name: decorate('MAT_PELVIS'), y0: 0.0, y1: 0.5, joint: 0, color: [0.78, 0.09, 0.01, 1] },
+  { name: decorate('MAT_BODY'),   y0: 0.5, y1: 1.0, joint: 0, color: [0.09, 0.09, 0.11, 1] },
+  { name: decorate('MAT_CHEST'),  y0: 1.0, y1: 1.5, joint: 1, color: [1.00, 0.18, 0.10, 1] },
+  { name: decorate('MAT_HEAD'),   y0: 1.5, y1: 2.0, joint: 1, color: [0.87, 0.91, 0.93, 1] },
 ];
 
 const HALF_WIDTH = 0.3;

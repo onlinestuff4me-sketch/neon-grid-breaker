@@ -7,3 +7,6 @@ ios/App/App/config.xml
 DerivedData/
 *.xcuserstate
 .DS_Store
+
+# agent worktrees and local session state
+.claude/

@@ -29,6 +29,19 @@ const SLOT_BY_MATERIAL_NAME = {
   MAT_BODY: 'body',
 };
 
+// Blender guarantees unique datablock names by suffixing duplicates —
+// `MAT_CHEST.001` — and an exporter will happily carry that through. Exact
+// matching would then drop the slot SILENTLY, which is the worst failure
+// shape available: the model loads, nothing throws, and one body group is
+// simply never recoloured. Case and surrounding whitespace are normalised for
+// the same reason. This is deliberately forgiving in one direction only: a
+// name that is not one of the four is still left alone.
+function slotForMaterialName(name) {
+  if (!name) return null;
+  const key = String(name).trim().replace(/\.\d+$/, '').toUpperCase();
+  return SLOT_BY_MATERIAL_NAME[key] || null;
+}
+
 export const CLIPS = ['walk', 'aim', 'idle', 'fire', 'lunge', 'hit'];
 
 // Colours only matter so an unmapped instance is visibly wrong in a
@@ -116,7 +129,7 @@ export function makeEnemyInstance() {
 
   const mats = { head: null, chest: null, pelvis: null, body: null };
   eachMaterialSlot(root, (mesh, index, material) => {
-    const slot = SLOT_BY_MATERIAL_NAME[material && material.name];
+    const slot = slotForMaterialName(material && material.name);
     if (!slot) return;
     // One material per slot even if several meshes share the slot name, so
     // recolouring a slot moves everything that belongs to it.
