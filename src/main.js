@@ -177,7 +177,8 @@ const CITY = {
   fogNear: 55, fogFar: 200,
   reach: 4,        // distant rings of 40m city cells
 };
-scene.fog = new THREE.Fog(0xc2dcea, CITY.fogNear, CITY.fogFar);
+const CITY_FOG_HEX = 0xc2dcea;
+scene.fog = new THREE.Fog(CITY_FOG_HEX, CITY.fogNear, CITY.fogFar);
 
 function makeStreetTexture() {
   const c = document.createElement('canvas');
@@ -3695,6 +3696,11 @@ function onPointerDown(ev) {
         el.sethaptics.classList.toggle('on', hapticsOn);
         vibrate(15);   // demo thump so the toggle speaks for itself
       }
+      if (ev.target.closest && ev.target.closest('#condlink')) {
+        const i = COND_CYCLE.indexOf(testCondition);
+        setTestCondition(COND_CYCLE[(i + 1) % COND_CYCLE.length]);
+        vibrate(12);
+      }
       if (ev.target.closest && ev.target.closest('#modelink')) {
         timeMode = timeMode === 'toggle' ? 'classic' : 'toggle';
         try { localStorage.setItem('timeshard_mode', timeMode); } catch { /* private mode */ }
@@ -4094,6 +4100,26 @@ function tryUnlockAudio() {
   }
 }
 for (const n of unlockEvs) window.addEventListener(n, tryUnlockAudio, { capture: true, passive: true });
+
+// Settings > CONDITIONS. null is off; otherwise every corridor leg is pinned
+// to this condition. A playtest switch, so built-but-unapproved content can
+// be judged without waiting for door 13 or touching the main flow.
+const COND_CYCLE = [null, 'fog', 'blackout'];
+let testCondition = null;
+try {
+  const v = localStorage.getItem('timeshard_cond');
+  if (v && COND_CYCLE.includes(v)) testCondition = v;
+} catch { /* private mode */ }
+function setTestCondition(v) {
+  testCondition = v;
+  try { persist('timeshard_cond', v || ''); } catch { /* private mode */ }
+  updateCondPill();
+}
+function updateCondPill() {
+  if (!el.condlink) return;
+  el.condlink.textContent = testCondition ? testCondition.toUpperCase() : 'OFF';
+  el.condlink.classList.toggle('on', !!testCondition);
+}
 
 let hapticsOn = true;
 try { hapticsOn = localStorage.getItem('timeshard_haptics') !== '0'; } catch { /* private mode */ }
@@ -5066,6 +5092,7 @@ function closePause() {
   sfx.fadeAll(1, 0.22);   // and back up as the world resumes
 }
 function openSettings() {
+  updateCondPill();
   const v = sfx.vols();
   el.setmusic.value = v.music;
   el.setsfx.value = v.sfx;
@@ -5131,6 +5158,7 @@ const el = {
   sethaptics: document.getElementById('sethaptics'),
   timebtn: document.getElementById('timebtn'),
   modelink: document.getElementById('modelink'),
+  condlink: document.getElementById('condlink'),
   gtime: document.getElementById('gtime'),
   slowmeter: document.getElementById('slowmeter'),
   slowfill: document.getElementById('slowfill'),
@@ -5673,7 +5701,29 @@ const HALL_CEIL_MAT = new THREE.MeshBasicMaterial({ map: makeHallCeilTexture() }
 const HALL_BEAM_MAT = new THREE.MeshBasicMaterial({ color: 0x7c8d97 });
 // unlit and bright: the strips read as the light source, not a lit surface
 const HALL_LIGHT_MAT = new THREE.MeshBasicMaterial({ color: 0xffffff });
+// Emergency lighting for a BLACKOUT leg. Deliberately amber and not the
+// signal red: in a world this pale red means threat, and a corridor lit in
+// the threat colour would wreck enemy-reading at exactly the moment the
+// darkness already makes it hardest.
+const HALL_EMERG_MAT = new THREE.MeshBasicMaterial({ color: VIS.blackLight });
+
 const HALL_FLOOR_MAT = new THREE.MeshLambertMaterial({ map: makeHallFloorTexture() });
+
+// A BLACKOUT needs its own surfaces, not just dimmer lights. The ceiling and
+// the drop beams are MeshBasicMaterial — unlit — so turning the hemisphere
+// down does almost nothing to them, and the first attempt at this came out
+// 6% darker than a lit corridor. These are colour-multiplied copies, and
+// because only one leg is ever active they can be animated in place: the
+// freeze brightens them, which is the torch.
+const DARK = (m) => { const c = m.clone(); c.color = new THREE.Color(0xffffff); return c; };
+const HALL_WALL_DARK = DARK(HALL_WALL_MAT);
+const HALL_CEIL_DARK = DARK(HALL_CEIL_MAT);
+const HALL_FLOOR_DARK = DARK(HALL_FLOOR_MAT);
+const HALL_BEAM_DARK = DARK(HALL_BEAM_MAT);
+const DARK_MATS = [HALL_WALL_DARK, HALL_CEIL_DARK, HALL_FLOOR_DARK, HALL_BEAM_DARK];
+function setDarkness(k) {   // k = 1 is fully lit, VIS.blackSurface is blackout
+  for (const m of DARK_MATS) m.color.setScalar(k);
+}
 // The door was the largest red mass on screen and it competed with the
 // enemies for the eye — in a world this pale, red should mean threat and
 // nothing else. Black, not white: white would compete with the ceiling
@@ -5688,7 +5738,11 @@ function setEnvironment(env) {
   floor.visible = !inHall;
   scene.fog.near = inHall ? VIS.hallNear : CITY.fogNear;
   scene.fog.far = inHall ? VIS.hallFar : CITY.fogFar;
-  fogWant.near = scene.fog.near; fogWant.far = scene.fog.far;
+  fogWant.near = scene.fog.near; fogWant.far = scene.fog.far; fogWant.amb = 1;
+  if (!inHall) { hemi.intensity = HEMI_BASE; sun.intensity = SUN_BASE;
+    fill.intensity = FILL_BASE; darkNow = 1; setDarkness(1); }
+  fogWant.col.setHex(inHall ? VIS.hallFog : CITY_FOG_HEX);
+  scene.fog.color.copy(fogWant.col);
   if (!inHall && hall) {
     for (const L of hall.legs) {
       if (!L) continue;
@@ -5886,7 +5940,9 @@ function buildHallLeg(sgx, sgz, proto) {
     // recessed ceiling strip every other cell: the corridor finally has a
     // rhythm to measure your own movement against
     // DIM STRIPS halves the lighting; otherwise every other cell is lit
-    const lit = cond === 'dimStrips' ? (gx + gz) % 4 === 0 : (gx + gz) % 2 === 0;
+    const lit = cond === 'blackout' ? (gx + gz) % VIS.blackLitEvery === 0
+      : cond === 'dimStrips' ? (gx + gz) % 4 === 0
+      : (gx + gz) % 2 === 0;
     if (lit) lights.push([x, H - 0.04, z, 1.5, 0.08, 2.6]);
     // Half the portrait frame is ceiling, and it was one flat slab. A drop
     // beam on every cell the strips skip gives it a 4 m rhythm and puts the
@@ -5997,13 +6053,14 @@ function buildHallLeg(sgx, sgz, proto) {
           max: new THREE.Vector3(sx + 1, H, sz + 0.2) } };
     }
   }
+  const black = cond === 'blackout';
   const meshes = [
-    mergedCityMesh(walls, HALL_WALL_MAT),
-    mergedCityMesh(floors, HALL_FLOOR_MAT),
-    mergedCityMesh(ceils, HALL_CEIL_MAT),
-    mergedCityMesh(lights, HALL_LIGHT_MAT),
-    mergedCityMesh(ribs, HALL_CEIL_MAT),   // ribs read a shade darker
-    mergedCityMesh(beams, HALL_BEAM_MAT),
+    mergedCityMesh(walls, black ? HALL_WALL_DARK : HALL_WALL_MAT),
+    mergedCityMesh(floors, black ? HALL_FLOOR_DARK : HALL_FLOOR_MAT),
+    mergedCityMesh(ceils, black ? HALL_CEIL_DARK : HALL_CEIL_MAT),
+    mergedCityMesh(lights, black ? HALL_EMERG_MAT : HALL_LIGHT_MAT),
+    mergedCityMesh(ribs, black ? HALL_CEIL_DARK : HALL_CEIL_MAT),   // ribs read a shade darker
+    mergedCityMesh(beams, black ? HALL_BEAM_DARK : HALL_BEAM_MAT),
   ];
   const slab = new THREE.Mesh(new THREE.BoxGeometry(2, 2.72, 0.18), DOOR_RED_MAT);
   slab.position.set(dx0, 1.36, dz0);
@@ -6202,10 +6259,13 @@ function forced(proto) {
   if (forcedMeasures) {
     proto.measures = forcedMeasures.map((id) => ELEMENTS.find((e) => e.id === id)).filter(Boolean);
   }
-  if (forcedCondition !== undefined) {
-    proto.condition = forcedCondition
-      ? ELEMENTS.find((e) => e.id === forcedCondition) || null : null;
-  }
+  // Settings > CONDITIONS pins every leg to one condition, so a thing gated
+  // to door 13 can be played on door 1. The composer still cannot pick these
+  // (impl: false), so a normal run is completely unaffected by their
+  // existence — this is the only door into them until they are approved.
+  const pin = forcedCondition !== undefined ? forcedCondition : testCondition;
+  if (pin) proto.condition = ELEMENTS.find((e) => e.id === pin) || null;
+  else if (forcedCondition === null) proto.condition = null;
   return proto;
 }
 
@@ -6227,31 +6287,70 @@ function forced(proto) {
 // Eased rather than snapped: crossing a door into fog should read as walking
 // into it. The ease runs on REAL time — a leg change is not part of the
 // world's clock, and freezing time must not freeze the reveal.
-const fogWant = { near: VIS.hallNear, far: VIS.hallFar };
+const fogWant = { near: VIS.hallNear, far: VIS.hallFar, amb: 1, surf: 1,
+  col: new THREE.Color(VIS.hallFog) };
+const HEMI_BASE = hemi.intensity, SUN_BASE = sun.intensity, FILL_BASE = fill.intensity;
+let darkNow = 1;
 
-function legVisibility(L) {
+// The floor every condition is held above: below `spawnMin + margin` a body
+// is born outside sight, and the door waits on an empty floor.
+const visFloor = () => LEG.spawnMin + VIS.farMargin;
+
+function legVisibility(L, frozen) {
   const cond = L && L.proto && L.proto.condition && L.proto.condition.id;
   if (cond === 'fog') {
-    return { near: VIS.fogNear, far: Math.max(VIS.fogFar, LEG.spawnMin + VIS.farMargin) };
+    return { near: VIS.fogNear, far: Math.max(VIS.fogFar, visFloor()), amb: 1, surf: 1, col: VIS.hallFog };
   }
-  return { near: VIS.hallNear, far: VIS.hallFar };
+  if (cond === 'blackout') {
+    // Stopping time is the torch. This is the whole point of the condition:
+    // the freeze stops being purely defensive and becomes how you SEE.
+    return {
+      near: VIS.blackNear,
+      far: Math.max(frozen ? VIS.blackFrozenFar : VIS.blackFar, visFloor()),
+      amb: frozen ? VIS.blackFrozenAmbient : VIS.blackAmbient,
+      surf: frozen ? VIS.blackFrozenSurface : VIS.blackSurface,
+      col: VIS.blackFog,
+    };
+  }
+  return { near: VIS.hallNear, far: VIS.hallFar, amb: 1, surf: 1, col: VIS.hallFog };
 }
 
 function applyLegVisibility(snap) {
   if (game.mode !== 'hall' || !hall) return;
-  const v = legVisibility(hall.legs[hall.cur]);
-  fogWant.near = v.near; fogWant.far = v.far;
-  if (snap) { scene.fog.near = v.near; scene.fog.far = v.far; }
+  const v = legVisibility(hall.legs[hall.cur], timeLocked || timeScale < 0.55);
+  fogWant.near = v.near; fogWant.far = v.far; fogWant.amb = v.amb; fogWant.surf = v.surf;
+  fogWant.col.setHex(v.col);
+  if (snap) {
+    scene.fog.near = v.near; scene.fog.far = v.far;
+    hemi.intensity = HEMI_BASE * v.amb;
+    sun.intensity = SUN_BASE * v.amb; fill.intensity = FILL_BASE * v.amb;
+    darkNow = v.surf; setDarkness(darkNow);
+    scene.fog.color.copy(fogWant.col);
+    renderer.setClearColor(fogWant.col, 1);
+  }
 }
 
 function updateFog(dtReal) {
   if (!scene.fog) return;
+  // Re-read every frame: a blackout leg's target depends on whether time is
+  // stopped, so the torch has to follow the freeze rather than the door.
+  if (game.mode === 'hall' && hall) applyLegVisibility(false);
   const k = 1 - Math.exp(-dtReal / VIS.tau);
   for (const key of ['near', 'far']) {
     const d = fogWant[key] - scene.fog[key];
     if (Math.abs(d) < 0.05) scene.fog[key] = fogWant[key];
     else scene.fog[key] += d * k;
   }
+  const want = HEMI_BASE * fogWant.amb;
+  const da = want - hemi.intensity;
+  hemi.intensity = Math.abs(da) < 0.002 ? want : hemi.intensity + da * k;
+  sun.intensity = SUN_BASE * fogWant.amb;
+  fill.intensity = FILL_BASE * fogWant.amb;
+  const ds = fogWant.surf - darkNow;
+  darkNow = Math.abs(ds) < 0.002 ? fogWant.surf : darkNow + ds * k;
+  setDarkness(darkNow);
+  scene.fog.color.lerp(fogWant.col, k);
+  renderer.setClearColor(scene.fog.color, 1);
 }
 
 function openHallDoor() {

@@ -155,6 +155,38 @@ export const VIS = {
   fogNear: 3,                    // close enough to feel like it is on you
   fogFar: 12,                    // exactly what the archive line promises
   farMargin: 3,                  // ...and never nearer than spawnMin + this
+
+  // BLACKOUT is about LIGHT, not distance. Pulling the far plane down to the
+  // 8 m the design note first asked for would put the ENTIRE 9-40 m spawn
+  // range outside sight, so every body would be born invisible; and edge
+  // arrows cannot cover it, because their 19.5 deg bearing threshold sits
+  // just inside the ~21 deg screen half-width, so an enemy dead ahead gets no
+  // arrow and no pixels. Dead ahead is the common case in a corridor.
+  //
+  // So the corridor goes dark and stays legible, and the freeze is what buys
+  // back the distance. That is the design intent — it changes what stopping
+  // time is FOR — delivered without making the baseline a soft-lock.
+  blackNear: 2,
+  blackFar: 20,                  // dark, but every spawn is still findable
+  blackFrozenFar: 40,            // stop time and the corridor opens up
+  // Spacing has to be read against blackFar, not chosen for sparseness. At 8
+  // cells (32 m) and then at 5 (20 m) the next surviving strip sat at or past
+  // the fog plane, so it was fogged to nothing and the corridor read as
+  // "unlit" rather than "emergency lighting" — no landmark, nothing to move
+  // between. At 4 cells the next one is 16 m out, inside the 20 m range.
+  // Sparseness is not what makes this a blackout: the darkened surfaces, the
+  // near-black fog colour and the cut light intensity are.
+  blackLitEvery: 4,              // cells between surviving strips (normal: 2)
+  blackLight: 0xff8c3a,          // emergency amber, deliberately NOT signal red
+  // The fog COLOUR matters as much as its distance. Left at the corridor's
+  // pale daylight blue, a blacked-out corridor fades into a bright haze that
+  // reads as light at the end of the tunnel — the opposite of the intent.
+  blackFog: 0x0d1418,            // near-black, faintly cold
+  hallFog: 0xa8cadb,             // the ordinary corridor's air
+  blackSurface: 0.34,            // colour multiplier on the corridor surfaces
+  blackFrozenSurface: 0.62,      // ...lifted by the freeze, with everything else
+  blackAmbient: 0.30,            // light multiplier while blacked out
+  blackFrozenAmbient: 0.52,      // ...lifted with the freeze, like the fog
   // A flat metres-per-second rate is wrong here: the same rate has to cover a
   // 3 m change and a 43 m one, and at any speed that suits the small change
   // the big one takes ~17 s to arrive. Eased on a time constant instead, so

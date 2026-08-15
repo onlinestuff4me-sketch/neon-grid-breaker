@@ -152,6 +152,24 @@ a flat ${n(RAMP.rushDrain)}×. An enemy must be in view for
 | \`farMargin\` | ${n(VIS.farMargin)} m | the far plane is never nearer than \`spawnMin + this\` |
 | \`tau\` | ${n(VIS.tau)} s | eased on a time constant, so every leg change lands in ~1.3 s |
 
+**BLACKOUT** is about light, not distance. Pulling the far plane to the 8 m the
+design note first asked for would put the whole ${n(LEG.spawnMin)}–${n(LEG.spawnMax)} m spawn range
+outside sight; edge arrows cannot cover it either, because their 19.5° bearing
+threshold sits just inside the ~21° screen half-width, so an enemy dead ahead
+gets no arrow and no pixels.
+
+| Knob | Dark | Frozen | Meaning |
+|---|---|---|---|
+| far plane | ${n(VIS.blackFar)} m | ${n(VIS.blackFrozenFar)} m | **stopping time is the torch** |
+| light intensity | ${n(VIS.blackAmbient)}× | ${n(VIS.blackFrozenAmbient)}× | hemisphere, sun and fill together |
+| surface colour | ${n(VIS.blackSurface)}× | ${n(VIS.blackFrozenSurface)}× | ceiling and beams are unlit materials, so only colour reaches them |
+| fog colour | \`#${VIS.blackFog.toString(16).padStart(6,'0')}\` | — | left pale, the corridor faded into a bright haze that read as light at the end of the tunnel |
+| lit strips | every ${n(VIS.blackLitEvery)} cells | — | ${n(VIS.blackLitEvery * LEG.cellM)} m apart, inside the ${n(VIS.blackFar)} m range — at 8 and at 5 the next strip was fogged to nothing |
+| strip colour | \`#${VIS.blackLight.toString(16)}\` | — | emergency amber, deliberately not the signal red |
+
+Measured on a real frame: a blackout corridor is **40% of a lit one's mean
+luminance**, with the emergency strips the only warm pixels in view.
+
 The safety constraint is \`LEG.spawnMin\` (${n(LEG.spawnMin)} m). Bodies are born
 ${n(LEG.spawnMin)}–${n(LEG.spawnMax)} m out and the door opens only on an empty floor, so a far
 plane below the spawn floor would hide every arrival. The effective floor is

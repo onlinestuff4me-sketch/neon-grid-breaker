@@ -7,8 +7,12 @@
 // adding content is adding a row.
 //
 // Values mirror the Protocol Pacing artifact and docs/PROTOCOLS.md.
-// `impl: false` means the element is designed but not built yet — the
-// composer never picks it, so the registry can run ahead of the game.
+// `impl: false` means the composer never picks it, so the registry can run
+// ahead of the game. It covers two cases: not built yet, and BUILT BUT NOT
+// YET APPROVED FOR THE MAIN FLOW — fog and blackout are both built and are
+// reachable through Settings > Conditions for playtesting, which is why their
+// minDoor is set for where they should eventually land rather than where they
+// can currently be seen.
 // ---------------------------------------------------------------------------
 
 export const ELEMENTS = [
@@ -33,9 +37,9 @@ export const ELEMENTS = [
   // --- conditions: how the leg IS -----------------------------------------
   { id: 'dimStrips', name: 'DIM STRIPS', kind: 'condition', tier: 1, minDoor: 3, unlockAt: 15, weight: 6, impl: true,
     archive: 'Illumination at half. Power is needed elsewhere.' },
-  { id: 'fog', name: 'FOG', kind: 'condition', tier: 2, minDoor: 5, unlockAt: 40, weight: 5, impl: true,
+  { id: 'fog', name: 'FOG', kind: 'condition', tier: 2, minDoor: 13, unlockAt: 120, weight: 5, impl: false,
     archive: 'Suppressant discharged. Visibility twelve metres.' },
-  { id: 'blackout', name: 'BLACKOUT', kind: 'condition', tier: 3, minDoor: 7, unlockAt: 80, weight: 4, impl: false,
+  { id: 'blackout', name: 'BLACKOUT', kind: 'condition', tier: 3, minDoor: 15, unlockAt: 180, weight: 4, impl: false,
     archive: 'Emergency lighting only. Compliance is not required to see.' },
   { id: 'flood', name: 'FLOOD', kind: 'condition', tier: 4, minDoor: 11, unlockAt: 200, weight: 2, impl: false,
     archive: 'Level breached. Movement impaired. Proceed.' },

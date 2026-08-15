@@ -135,6 +135,24 @@ a flat 0.4×. An enemy must be in view for
 | `farMargin` | 3 m | the far plane is never nearer than `spawnMin + this` |
 | `tau` | 0.45 s | eased on a time constant, so every leg change lands in ~1.3 s |
 
+**BLACKOUT** is about light, not distance. Pulling the far plane to the 8 m the
+design note first asked for would put the whole 9–40 m spawn range
+outside sight; edge arrows cannot cover it either, because their 19.5° bearing
+threshold sits just inside the ~21° screen half-width, so an enemy dead ahead
+gets no arrow and no pixels.
+
+| Knob | Dark | Frozen | Meaning |
+|---|---|---|---|
+| far plane | 20 m | 40 m | **stopping time is the torch** |
+| light intensity | 0.3× | 0.52× | hemisphere, sun and fill together |
+| surface colour | 0.34× | 0.62× | ceiling and beams are unlit materials, so only colour reaches them |
+| fog colour | `#0d1418` | — | left pale, the corridor faded into a bright haze that read as light at the end of the tunnel |
+| lit strips | every 4 cells | — | 16 m apart, inside the 20 m range — at 8 and at 5 the next strip was fogged to nothing |
+| strip colour | `#ff8c3a` | — | emergency amber, deliberately not the signal red |
+
+Measured on a real frame: a blackout corridor is **40% of a lit one's mean
+luminance**, with the emergency strips the only warm pixels in view.
+
 The safety constraint is `LEG.spawnMin` (9 m). Bodies are born
 9–40 m out and the door opens only on an empty floor, so a far
 plane below the spawn floor would hide every arrival. The effective floor is
