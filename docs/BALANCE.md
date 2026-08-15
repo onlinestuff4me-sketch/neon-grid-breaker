@@ -126,6 +126,25 @@ wave to a hard cap of 1.35× base. Rush Hour drains the bank at
 a flat 0.4×. An enemy must be in view for
 **0.45 s** before its telegraph may begin.
 
+## Visibility, and the FOG condition
+
+| Knob | Value | Meaning |
+|---|---|---|
+| `hallNear` / `hallFar` | 14 / 55 m | the ordinary corridor |
+| `fogNear` / `fogFar` | 3 / 12 m | a **fog** leg — what its archive line promises |
+| `farMargin` | 3 m | the far plane is never nearer than `spawnMin + this` |
+| `tau` | 0.45 s | eased on a time constant, so every leg change lands in ~1.3 s |
+
+The safety constraint is `LEG.spawnMin` (9 m). Bodies are born
+9–40 m out and the door opens only on an empty floor, so a far
+plane below the spawn floor would hide every arrival. The effective floor is
+therefore **12 m**, derived rather than hand-picked.
+
+It cannot soft-lock structurally, not just empirically: the tunnel substitutes
+away every long-range type (sniper, laser, rocketeer, bomber) and no remaining
+type holds position at range, so every enemy that can appear in a fog leg
+closes distance and enters visibility.
+
 ## Wave composition
 
 - **Total** = `min(6 + 2n, 30)`

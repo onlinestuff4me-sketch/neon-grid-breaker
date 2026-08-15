@@ -13,7 +13,7 @@
 
 import * as THREE from '../lib/three.module.min.js';
 import { WEAPONS, TYPE_INTRO, TYPE_SHARE, TYPE_DROP, DROPS, RAMP, COMP, PACING, TIME, LEG, SHATTER,
-  scarcity } from './balance.js';
+  VIS, scarcity } from './balance.js';
 import { composeProtocol, newRunMemory, enemyRoster, ELEMENTS } from './protocols.js';
 import { haptic, persist, hydrateStorage, shellSetup, isNative } from './native.js';
 
@@ -5686,8 +5686,9 @@ function setEnvironment(env) {
   const inHall = env === 'hall';
   for (const m of cityMeshes) m.visible = !inHall;
   floor.visible = !inHall;
-  scene.fog.near = inHall ? 14 : CITY.fogNear;
-  scene.fog.far = inHall ? 55 : CITY.fogFar;
+  scene.fog.near = inHall ? VIS.hallNear : CITY.fogNear;
+  scene.fog.far = inHall ? VIS.hallFar : CITY.fogFar;
+  fogWant.near = scene.fog.near; fogWant.far = scene.fog.far;
   if (!inHall && hall) {
     for (const L of hall.legs) {
       if (!L) continue;
@@ -6139,6 +6140,7 @@ function initHall() {
     mem: newRunMemory(archive) };
   hall.legs.push(buildHallLeg(0, 0, forced(composeProtocol(1, lifetimeDoors, hall.mem))));
   recordMetProto(hall.legs[0].proto);   // leg 1 counts too; only 2+ used to
+  applyLegVisibility(true);             // leg 1 starts in its own weather
   recordMet(['pistol']);                // it is already in your hand
   rebuildHallObstacles();
   game.spawnQueue = hallWave(1);
@@ -6188,18 +6190,68 @@ function retryHall() {
   slowBank = Math.max(slowBank, SLOWMO.base);
   updateSlowMeter();
   updateModeUI();
+  applyLegVisibility(true);   // a retry starts inside the leg's own air
   showBanner(`DOOR ${hall.doorsPassed + 1}<small>AGAIN.</small>`, 1600);
 }
 
 // Test hook only: `__ts.forceMeasures([...])` pins a leg's measures so a
 // rarely-composed element can be reached without playing to door 8. Null in
 // every real run, which is why it can sit in the composer's path.
-let forcedMeasures = null;
+let forcedMeasures = null, forcedCondition;
 function forced(proto) {
   if (forcedMeasures) {
     proto.measures = forcedMeasures.map((id) => ELEMENTS.find((e) => e.id === id)).filter(Boolean);
   }
+  if (forcedCondition !== undefined) {
+    proto.condition = forcedCondition
+      ? ELEMENTS.find((e) => e.id === forcedCondition) || null : null;
+  }
   return proto;
+}
+
+// ---------------------------------------------------------------------------
+// PER-LEG VISIBILITY — what the FOG condition should always have done.
+//
+// `fog` shipped as `impl: true` and was never implemented: `cond` was only
+// ever compared against 'dimStrips', so a fog leg looked exactly like a plain
+// corridor while the archive told the player "Visibility twelve metres". The
+// condition was pickable from door 5, filed itself into the archive, and
+// delivered nothing.
+//
+// The safety constraint is LEG.spawnMin. Bodies are born 9-40 m out and the
+// door opens only on an empty floor, so a far plane below the spawn floor
+// would hide every arrival and could leave a leg unfinishable. The floor is
+// derived from spawnMin rather than hand-picked, so it stays correct if the
+// spawn distance is ever retuned.
+//
+// Eased rather than snapped: crossing a door into fog should read as walking
+// into it. The ease runs on REAL time — a leg change is not part of the
+// world's clock, and freezing time must not freeze the reveal.
+const fogWant = { near: VIS.hallNear, far: VIS.hallFar };
+
+function legVisibility(L) {
+  const cond = L && L.proto && L.proto.condition && L.proto.condition.id;
+  if (cond === 'fog') {
+    return { near: VIS.fogNear, far: Math.max(VIS.fogFar, LEG.spawnMin + VIS.farMargin) };
+  }
+  return { near: VIS.hallNear, far: VIS.hallFar };
+}
+
+function applyLegVisibility(snap) {
+  if (game.mode !== 'hall' || !hall) return;
+  const v = legVisibility(hall.legs[hall.cur]);
+  fogWant.near = v.near; fogWant.far = v.far;
+  if (snap) { scene.fog.near = v.near; scene.fog.far = v.far; }
+}
+
+function updateFog(dtReal) {
+  if (!scene.fog) return;
+  const k = 1 - Math.exp(-dtReal / VIS.tau);
+  for (const key of ['near', 'far']) {
+    const d = fogWant[key] - scene.fog[key];
+    if (Math.abs(d) < 0.05) scene.fog[key] = fogWant[key];
+    else scene.fog[key] += d * k;
+  }
 }
 
 function openHallDoor() {
@@ -6227,6 +6279,7 @@ function crossHallDoor() {
   lifetimeDoors++;
   saveProgress();
   recordMetProto(hall.legs[hall.cur] && hall.legs[hall.cur].proto);
+  applyLegVisibility(false);   // eased, so you walk INTO the next leg's air
   hall.checkpoint = { x: prev.door.x, z: prev.door.z + 2 };
   const old = hall.legs[hall.cur - 2];
   if (old && !old.retired) {   // two doors back is gone for good
@@ -6450,6 +6503,7 @@ function frame(now) {
     return;
   }
   drainLook();   // per frame, so freezing the world never slows down looking
+  updateFog(dt);
 
   // --- time scale: frozen while a finger is down — but time moves (a little)
   // when YOU move, so dodging costs the world a few frames
@@ -6848,6 +6902,11 @@ window.__ts = {
       : null;
   },
   forceMeasures: (ids) => { forcedMeasures = ids || null; },
+  forceCondition: (id) => { forcedCondition = id; },
+  fog: () => ({ near: +scene.fog.near.toFixed(2), far: +scene.fog.far.toFixed(2),
+    wantNear: fogWant.near, wantFar: fogWant.far,
+    cond: (hall && hall.legs[hall.cur] && hall.legs[hall.cur].proto
+      && hall.legs[hall.cur].proto.condition || {}).id || null }),
   restartHall: () => { setEnvironment('city'); clearField(); initHall(); },
   killAt: (i) => killEnemy(i, _v1.set(0, 0.5, -1).normalize()),
   banner: showBanner,

@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
   WEAPONS, TYPE_INTRO, TYPE_SHARE, TYPE_DROP, DROPS, RAMP, COMP, LEG, PACING, TIME,
-  SHATTER, SCARCITY, scarcity,
+  SHATTER, SCARCITY, VIS, scarcity,
 } from '../src/balance.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -142,6 +142,25 @@ Past wave ${RAMP.rampWaves + 1}, speed creeps ${n(RAMP.lateCreep * 100)} % per
 wave to a hard cap of ${n(RAMP.bulletCap)}× base. Rush Hour drains the bank at
 a flat ${n(RAMP.rushDrain)}×. An enemy must be in view for
 **${n(RAMP.sightGrace)} s** before its telegraph may begin.
+
+## Visibility, and the FOG condition
+
+| Knob | Value | Meaning |
+|---|---|---|
+| \`hallNear\` / \`hallFar\` | ${n(VIS.hallNear)} / ${n(VIS.hallFar)} m | the ordinary corridor |
+| \`fogNear\` / \`fogFar\` | ${n(VIS.fogNear)} / ${n(VIS.fogFar)} m | a **fog** leg — what its archive line promises |
+| \`farMargin\` | ${n(VIS.farMargin)} m | the far plane is never nearer than \`spawnMin + this\` |
+| \`tau\` | ${n(VIS.tau)} s | eased on a time constant, so every leg change lands in ~1.3 s |
+
+The safety constraint is \`LEG.spawnMin\` (${n(LEG.spawnMin)} m). Bodies are born
+${n(LEG.spawnMin)}–${n(LEG.spawnMax)} m out and the door opens only on an empty floor, so a far
+plane below the spawn floor would hide every arrival. The effective floor is
+therefore **${n(Math.max(VIS.fogFar, LEG.spawnMin + VIS.farMargin))} m**, derived rather than hand-picked.
+
+It cannot soft-lock structurally, not just empirically: the tunnel substitutes
+away every long-range type (sniper, laser, rocketeer, bomber) and no remaining
+type holds position at range, so every enemy that can appear in a fog leg
+closes distance and enters visibility.
 
 ## Wave composition
 

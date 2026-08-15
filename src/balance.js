@@ -138,6 +138,30 @@ export const LEG = {
   spawnMax: 40,                    // and the furthest
 };
 
+// VISIBILITY, and the condition that changes it.
+//
+// FOG was registered as shipped and was never implemented: `cond` was only
+// ever compared against 'dimStrips', so a fog leg rendered as a plain
+// corridor while the archive told the player "Visibility twelve metres". This
+// is the mechanism it should always have had.
+//
+// The number that governs safety is LEG.spawnMin. A body is born 9-40 m away
+// and the door opens only on an empty floor, so a far plane below the spawn
+// floor means enemies are born invisible and a leg can become unfinishable.
+// `farFloor` therefore derives the minimum from the spawn distance rather
+// than trusting a hand-picked number to stay correct if spawnMin ever moves.
+export const VIS = {
+  hallNear: 14, hallFar: 55,     // the ordinary corridor
+  fogNear: 3,                    // close enough to feel like it is on you
+  fogFar: 12,                    // exactly what the archive line promises
+  farMargin: 3,                  // ...and never nearer than spawnMin + this
+  // A flat metres-per-second rate is wrong here: the same rate has to cover a
+  // 3 m change and a 43 m one, and at any speed that suits the small change
+  // the big one takes ~17 s to arrive. Eased on a time constant instead, so
+  // every leg change lands in about the same 1.3 s however far it travels.
+  tau: 0.45,                     // seconds; ~95% of the way in 3 tau
+};
+
 // How fast the room refills. `fill` is live enemies / alive cap.
 export const PACING = {
   hallAliveBase: 3, hallAliveCap: 6,
