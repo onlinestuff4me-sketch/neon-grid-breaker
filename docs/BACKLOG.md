@@ -186,17 +186,64 @@ once the geometry exists.
 | Element | Kind | Why it's worth building |
 |---|---|---|
 | ~~One-way seal~~ | measure | **Shipped.** A bulkhead halfway to the door that comes up behind you. Placed only where the row it spans — and the row before it — hold a single cell, so no branch lane can walk around the thing that just shut; about a quarter of corridors offer no such spot past the halfway mark and simply get no seal, which is better than one that shuts eight metres in. Anyone still on the far side is **redeployed**, not trapped and not shattered: pulled out and pushed to the front of the spawn queue with their release refunded. Trapping would soft-lock the door, which waits on an empty floor, and killing them would pay you kills and time bank for walking forward. |
-| **Blackout** | condition | Emergency lighting, visibility ~8 m. Freezing time becomes a torch as well as a shield — it changes what the mechanic is *for*. |
+| **Blackout** | condition | Emergency lighting. **Do not use ~8 m** — see below. Freezing time becomes a torch as well as a shield. Design settled, build outstanding. |
 | **Breach walls** | measure | Marked panels enemies come *through* mid-leg, using the shatter language we already have on architecture. Turns a cleared corridor live again. |
 | **Grinder** | measure | Your idea. A slab that seals the leg behind you and advances — and **does not stop while time is frozen**, because it is the building, not a person. The first element that attacks the slow-mo mechanic itself. |
 | Gallery / stairwell / spiral | forms | New skeletons. Stairwell needs vertical movement, which is the only one here that touches the physics. |
 | Turret drop, flood, dead air | mixed | Later. Flood and dead air both need systems that do not exist yet. |
 
-## 5. Higher-fidelity characters — **needs you**
+### FOG was a lie, and is now fixed
 
-Three.js already has `SkinnedMesh` and `AnimationMixer`; we would vendor
-`GLTFLoader` (~50 KB) and load rigged characters with real animation clips.
-The engine is not the blocker.
+`fog` shipped as `impl: true` and was never implemented — the leg condition
+was read once and only ever compared against `dimStrips`, so a fog leg
+rendered as a plain corridor while the archive told the player "Visibility
+twelve metres". Now a real per-leg visibility override, eased on a time
+constant, applied on leg 1 / on crossing / on retry, and guarded so the far
+plane can never fall below `LEG.spawnMin + margin`. See `docs/BALANCE.md`.
+
+That mechanism is what blackout needs, so blackout is now mostly a lighting
+job rather than a from-scratch build.
+
+### Blackout: the number to avoid, worked out before building
+
+**~8 m visibility is unplayable, arithmetically.** `LEG.spawnMin` is 9 m and
+`spawnMax` 40 m, so an 8 m far plane puts the *entire* spawn range outside
+visibility — every enemy is born invisible.
+
+Edge arrows do not rescue it. `EDGE_ARROW_MIN` is 0.34 rad ≈ 19.5° of
+bearing, and arrows only appear *beyond* that. The 80° vertical FOV at
+402×874 is ~42° horizontal, so the screen half-width is ~21°: the arrow
+threshold sits just inside the screen edge, by design, so arrows mark
+genuinely off-screen threats. An enemy dead ahead at 12 m in an 8 m blackout
+therefore gets **no arrow and no pixels** — and dead ahead is the common case,
+because the corridor runs forward. Arrows solve flanks, not the axis the game
+is built along.
+
+So blackout should be about **light**, not distance — cut the strips hard,
+keep the far plane above the derived floor, and deliver "the freeze is a
+torch" by having the freeze *extend* visibility rather than by making the
+baseline lethal. Avoid `#ff2d1a` for emergency strips: red means threat in
+this game, and a corridor lit in the signal colour destroys enemy-reading at
+exactly the moment it is hardest.
+
+## 5. Higher-fidelity characters — **engine side done; needs your asset**
+
+The engine work is finished and tested. `lib/GLTFLoader.js`,
+`lib/SkeletonUtils.js` and `lib/BufferGeometryUtils.js` are vendored from
+three r170 with only their import specifiers rewritten, and `src/characters.js`
+loads, clones per enemy, maps the four named material slots, and drives named
+clips with crossfades.
+
+It is **completely inert without the asset** — the change is purely additive,
+`src/main.js` and `index.html` are untouched, and the running game fetches
+none of it. Verified against a hand-authored fixture that the Khronos glTF
+validator passes clean, plus a second fixture using the mangled names Blender
+actually exports (`MAT_CHEST.001`), which the loader now tolerates.
+
+What is left is wiring it into enemy rendering, and that needs the real model
+to judge. Two risks to check the moment the file lands: **Draco or KTX2
+compression** would need a decoder vendored separately, and clip names must
+match `walk` / `aim` / `idle` / `fire` / `lunge` / `hit`.
 
 **Blender is.** Our enemies are box puppets whose limbs are rotated by
 arithmetic — no hands, no weapon actually held, no animation blending. Fixing
