@@ -17,10 +17,10 @@ is wrong the fix is a keyframe drag in the Scarcity Console, not new content.
 
 ---
 
-## 0b. The look jump — one cause fixed, one smoothed
+## 0b. The look jump — two causes fixed, one smoothed
 
-There were **two** causes, and they overlapped, which is why the first fix
-helped without curing it. Kept at the top because fluidity of look and
+There were **three** causes, overlapping, which is why each fix helped
+without curing it. Kept at the top because fluidity of look and
 movement outranks everything else here.
 
 ### Cause 1 — the time button ate the first 26 px (fixed)
@@ -37,7 +37,37 @@ The pointer is a look pointer from the first pixel, and if the gesture turns
 out to be a press its rotation is **handed back** on release, so a tap costs
 your aim nothing. No dead zone on a drag, no nudge on a tap.
 
-### Cause 2 — input starves for ~350 ms after a fresh touch (smoothed only)
+### Cause 2 — the aim assist fired the instant you re-planted (fixed)
+
+The one that only happens **with enemies on screen**, which is the clue that
+found it. There is a soft aim assist: after a stretch of free aiming it eases
+the crosshair onto the nearest target inside a 0.3 rad cone. It is gated on
+`input.lookIdle > 2.5 s`.
+
+`lookIdle` was wall clock. It kept counting while your thumb was **off the
+glass**, so any pause longer than 2.5 s armed the assist to fire on the very
+frame you touched down again — and freeze, lift, read the frozen scene,
+re-plant is a pause of exactly that shape. The camera then eased toward a
+target on its own until your first drag sample reset the timer. No target in
+the cone, no drift: hence blank wall fine, enemies not.
+
+Measured across sixteen runs of the flow, before the fix: **12 of 16 drifted
+1.1–6.5 degrees with no input at all.** The four clean ones were enemies
+outside the cone, an empty corridor, and pauses shorter than the delay —
+exactly the cases that felt fine in play. After: 0 in all sixteen.
+
+The fix is that `lookIdle` now measures what its name and its comment always
+claimed — **seconds of continuous holding without a manual correction** — so
+it resets when the thumb leaves. The assist itself is untouched and still
+engages after 2.5 s of holding still (verified: 15.5 degrees onto a target
+2.2 m off the crosshair at 9 m).
+
+**Still worth a decision:** the assist's comment says "slow-motion only" but
+the code gates on `playing`, so it also runs in normal time. Comment and code
+disagree; one of them is wrong. Left alone rather than silently changing
+feel — say which you want.
+
+### Cause 3 — input starves for ~350 ms after a fresh touch (smoothed only)
 
 Measured frame by frame off a 60 fps screen recording of the real device:
 
@@ -62,7 +92,7 @@ arbitration on a touch that lands near the bottom edge — which is exactly
 where a right thumb re-plants after tapping the time button — or a stale
 cached build on the device.
 
-**What shipped for cause 2:** an oversized single sample is now paid out across
+**What shipped for cause 3:** an oversized single sample is now paid out across
 at least three frames rather than applied at once, so a starved burst reads
 as a fast pan instead of a cut. The common path is untouched — coalesced
 events mean genuine fast motion arrives as many small samples, so only a real

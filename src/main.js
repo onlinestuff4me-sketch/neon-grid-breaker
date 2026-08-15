@@ -6483,7 +6483,16 @@ function frame(now) {
   // --- player (real time)
   player.fireCd -= dt;
   player.iframes -= dt;
-  input.lookIdle += dt;
+  // Seconds of CONTINUOUS HOLDING without a manual correction — not wall
+  // clock. This gates the soft aim assist, and it used to keep counting while
+  // the thumb was off the glass. So any pause longer than AIM_ASSIST_DELAY
+  // armed the assist to fire on the very frame you touched down again, and
+  // freeze-lift-read-replant is a pause of exactly that shape. The result was
+  // the camera easing toward a target on its own the instant you re-planted
+  // to aim — and only when there WAS a target, which is why it happened
+  // looking at enemies and not at a blank wall.
+  if (input.holding) input.lookIdle += dt;
+  else input.lookIdle = 0;
   updateReload(dt);
   if (pendingFireUntil > performance.now() && player.fireCd <= 0 &&
       player.alive && game.state === 'play') {
