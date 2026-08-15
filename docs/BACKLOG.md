@@ -51,10 +51,12 @@ re-plant is a pause of exactly that shape. The camera then eased toward a
 target on its own until your first drag sample reset the timer. No target in
 the cone, no drift: hence blank wall fine, enemies not.
 
-Measured across sixteen runs of the flow, before the fix: **12 of 16 drifted
-1.1–6.5 degrees with no input at all.** The four clean ones were enemies
-outside the cone, an empty corridor, and pauses shorter than the delay —
-exactly the cases that felt fine in play. After: 0 in all sixteen.
+Measured across twenty-one runs of the flow — sixteen frozen, five in normal
+time. Before the fix: **12 of 16 frozen runs drifted 1.1–6.5 degrees with no
+input at all**, and **4 of 5 normal-time runs drifted 7.6–8.9 degrees**. The
+clean ones were enemies outside the cone, an empty corridor, and pauses
+shorter than the delay — exactly the cases that felt fine in play. After: 0
+in all twenty-one.
 
 The fix is that `lookIdle` now measures what its name and its comment always
 claimed — **seconds of continuous holding without a manual correction** — so
@@ -62,10 +64,15 @@ it resets when the thumb leaves. The assist itself is untouched and still
 engages after 2.5 s of holding still (verified: 15.5 degrees onto a target
 2.2 m off the crosshair at 9 m).
 
-**Still worth a decision:** the assist's comment says "slow-motion only" but
-the code gates on `playing`, so it also runs in normal time. Comment and code
-disagree; one of them is wrong. Left alone rather than silently changing
-feel — say which you want.
+**Decided:** the assist runs in **normal time and slow motion**, which is
+what the code always did — two comments claimed slow-motion only and were
+simply wrong. The playtester felt the drift in both modes, which settled it;
+the comments are now corrected to match.
+
+That decision matters because the bug was worse in normal time, not better:
+re-running the same flow unfrozen, before the fix, gave **7.6–8.9 degrees** of
+unasked drift against 1.1–6.5 in slow motion. Both are now 0, and the assist
+is verified to still engage in both modes after 2.5 s of holding still.
 
 ### Cause 3 — input starves for ~350 ms after a fresh touch (smoothed only)
 

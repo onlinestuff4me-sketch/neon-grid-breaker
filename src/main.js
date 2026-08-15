@@ -77,10 +77,15 @@ const BULLET_GRAVITY = 1.2;       // barely there, but long shots still settle
 // Run every clip dry and you are down to the knife.
 const CLIP = 'clip';   // a pistol magazine on the floor
 
-// Soft aim assist: the camera never swings on its own — after you stop
-// aiming for a while (in slow motion only), it gently settles the crosshair
-// onto a nearby target. It never pulls your pitch off the head, so headshots
-// stay yours. Off-screen threats get edge arrows.
+// Soft aim assist: after you have HELD without correcting for a while, it
+// gently settles the crosshair onto a nearby target. It never pulls your
+// pitch off the head, so headshots stay yours. Off-screen threats get edge
+// arrows.
+//
+// It runs in normal time as well as in slow motion. Two earlier comments here
+// claimed slow-motion only while the code never checked, and a playtester
+// felt it in both — so the code was right and the comments were wrong. Note
+// the gate is holding time, NOT wall clock: see input.lookIdle.
 const AIM_ASSIST_CONE = 0.3;      // radians off-crosshair where assist engages
 const AIM_ASSIST_RATE = 3.5;      // gentle easing rate
 const AIM_ASSIST_DELAY = 2.5;     // seconds of free aiming before it engages
@@ -6547,7 +6552,7 @@ function frame(now) {
     }
   }
 
-  // soft aim assist: slow-motion only, and only after a stretch of free
+  // soft aim assist: normal time AND slow motion, after a stretch of free
   // aiming — then it gently drifts the crosshair onto the nearest target.
   // Pitch is never corrected while you're aiming anywhere on the body column
   // (chest to top of head), so lining up headshots is never fought.
