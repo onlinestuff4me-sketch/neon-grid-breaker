@@ -13,7 +13,7 @@
 
 import * as THREE from '../lib/three.module.min.js';
 import { WEAPONS, TYPE_INTRO, TYPE_SHARE, TYPE_DROP, DROPS, RAMP, COMP, PACING, TIME, LEG, SHATTER,
-  VIS, scarcity } from './balance.js';
+  VIS, scarcity, condTax } from './balance.js';
 import { composeProtocol, newRunMemory, enemyRoster, ELEMENTS } from './protocols.js';
 import { haptic, persist, hydrateStorage, shellSetup, isNative } from './native.js';
 
@@ -3088,7 +3088,8 @@ function killEnemy(i, impulseDir) {
     // kills buy time — but they buy LESS of it as you go deeper, which is
     // what turns the freeze from a habit into a decision
     slowBank = Math.min(SLOWMO.cap,
-      slowBank + SLOWMO.bonus * scarcity('timeGain', game.mode === 'hall' ? game.wave : 1));
+      slowBank + SLOWMO.bonus * scarcity('timeGain', game.mode === 'hall' ? game.wave : 1)
+        * condTax(legCondition(), 'timeGain'));
   }
   if (game.state !== 'menu') vibrate(15);   // every kill lands in the thumb
   spawnShatter(e.pos, impulseDir);
@@ -3102,10 +3103,19 @@ function killEnemy(i, impulseDir) {
   // SCARCITY: the tap closes with depth. This is the lever the whole game
   // hangs off — once clips stop arriving you start hiding, picking shots and
   // spending the freeze to line them up, which is the actual game.
+  //
+  // A CONDITION taxes the same curves a second time. Fog and blackout used to
+  // change only what you could see, which makes them a lighting effect; what
+  // makes them conditions is that they change what you can afford. A fog leg
+  // at door 6 pays the door-6 rate AND the fog rate.
   const door = game.mode === 'hall' ? game.wave : 1;
+  const cond = legCondition();
   if (typeof drop === 'string') spawnPickup(e.pos, drop);           // named loot
-  else if (kind && r < drop * scarcity('weaponDrop', door)) spawnPickup(e.pos, kind);
-  else if (armed && r < DROPS.clipRate * scarcity('ammoDrop', door)) spawnPickup(e.pos, CLIP);
+  else if (kind && r < drop * scarcity('weaponDrop', door) * condTax(cond, 'weaponDrop')) {
+    spawnPickup(e.pos, kind);
+  } else if (armed && r < DROPS.clipRate * scarcity('ammoDrop', door) * condTax(cond, 'ammoDrop')) {
+    spawnPickup(e.pos, CLIP);
+  }
   scene.remove(e.g);
   enemies.splice(i, 1);
   game.kills++;
@@ -6530,6 +6540,14 @@ let gradeWant = null, condNow = null, gradeK = 0;
 // is born outside sight, and the door waits on an empty floor.
 const visFloor = () => LEG.spawnMin + VIS.farMargin;
 
+// The condition the leg you are standing in is under, or null. Read by the
+// visibility rig, the contacts and the drop tax alike, so there is one answer.
+function legCondition() {
+  if (game.mode !== 'hall' || !hall) return null;
+  const L = hall.legs[hall.cur];
+  return (L && L.proto && L.proto.condition && L.proto.condition.id) || null;
+}
+
 // The floor is only enforced on the REVEALED state: unfrozen you are meant to
 // be blind, and it is the freeze that has to guarantee a leg is finishable.
 function legVisibility(L, frozen) {
@@ -6624,8 +6642,7 @@ function applyLegVisibility(snap) {
   fogWant.near = v.near; fogWant.far = v.far; fogWant.amb = v.amb; fogWant.surf = v.surf;
   fogWant.col.setHex(v.col);
   gradeWant = v.grade;
-  condNow = (hall.legs[hall.cur] && hall.legs[hall.cur].proto
-    && hall.legs[hall.cur].proto.condition && hall.legs[hall.cur].proto.condition.id) || null;
+  condNow = legCondition();
   if (snap) {
     scene.fog.near = v.near; scene.fog.far = v.far;
     hemi.intensity = HEMI_BASE * v.amb;

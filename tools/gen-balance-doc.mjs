@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
   WEAPONS, TYPE_INTRO, TYPE_SHARE, TYPE_DROP, DROPS, RAMP, COMP, LEG, PACING, TIME,
-  SHATTER, SCARCITY, VIS, scarcity,
+  SHATTER, SCARCITY, CONDITION_TAX, VIS, scarcity,
 } from '../src/balance.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -92,6 +92,18 @@ Raw keyframes:
 
 \`\`\`js
 ${Object.entries(SCARCITY).map(([k, v]) => `${k.padEnd(11)}: ${JSON.stringify(v)}`).join('\n')}
+\`\`\`
+
+### The condition tax
+
+A condition multiplies the same curves a **second** time, so a fog leg at
+door 6 pays the door-6 rate *and* the fog rate. A condition that only changes
+what you can see is a lighting effect; changing what you can **afford** is
+what makes it a condition. Blackout is the only one that taxes time, because
+in a blackout the freeze is how you see — light itself costs you seconds.
+
+\`\`\`js
+${Object.entries(CONDITION_TAX).map(([k, v]) => `${k.padEnd(9)}: ${JSON.stringify(v)}`).join('\n')}
 \`\`\`
 
 ## Weapons

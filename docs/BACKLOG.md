@@ -315,6 +315,31 @@ Two mechanical notes for whoever tunes this next:
   Otherwise it silently draws opaque, and a multiply pass paints over the
   frame instead of grading it.
 
+### The condition tax — what makes a condition a condition
+
+Second playtest note, and the design direction it settled:
+
+> "Fog and Blackout could use higher stakes: lower visibility, far fewer ammo
+> drops. In general that's where the fun in this game lies — finding ways to
+> increase the stakes so that you have to conserve your resources and be
+> strategic (by hiding, choosing shots carefully, using slow-motion
+> strategically)."
+
+A condition that only changes what you can **see** is a lighting effect. What
+makes it a condition is that it changes what you can **afford**. So
+`CONDITION_TAX` stacks a second multiplier on the same `SCARCITY` curves the
+rest of the game already runs on — a fog leg at door 6 pays the door-6 rate
+*and* the fog rate.
+
+Blackout is harder on every line, and it is the only one that taxes **time**:
+in a blackout the freeze is how you see, so charging more for it means light
+itself costs you seconds. That is the whole condition in one number.
+
+Visibility came down with it — fog 8 → **6 m**, blackout 10 → **7 m**, the
+reveals 26 → 22 and 34 → 30. At a 7 m dark plane even every *other* cell left
+stretches with no visible emergency light, so blackout now battens every
+cell; a line of dim embers receding into black is the better read anyway.
+
 Also fixed in the same pass: the emergency strips were the full 1.5 × 2.6 m
 ceiling recess filled with flat amber, which the playtest called out as an
 orange slab rather than a light. A blackout gets a 0.34 × 1.5 m batten. And

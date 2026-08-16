@@ -163,9 +163,9 @@ export const VIS = {
   // FOG. Close enough to be on you. The freeze does not lift it -- it bores a
   // TUNNEL through it, clear down the middle of the screen and still soup at
   // the edges, so seeing means pointing.
-  fogNear: 3,
-  fogFar: 8,
-  fogFrozenFar: 26,
+  fogNear: 2,
+  fogFar: 6,
+  fogFrozenFar: 22,
   // Fog gets its own colour, darker and greyer than the corridor's own air.
   // At the corridor's pale daylight blue a fogged frame measured BRIGHTER
   // than a clear one (161.7 against 154.6 mean luminance) -- the screen lit
@@ -179,25 +179,30 @@ export const VIS = {
   // the light rig all come down together, and the freeze lifts all three at
   // once behind a night-vision grade. Distance comes down too, now that the
   // freeze is guaranteed to buy it back.
-  blackNear: 1,
-  blackFar: 10,
-  blackFrozenFar: 34,
+  blackNear: 0.8,
+  blackFar: 7,
+  blackFrozenFar: 30,
   // Spacing is read against blackFar, not chosen for sparseness: a strip
   // further out than the far plane is fogged to nothing, so the corridor
   // reads as "unlit" rather than "emergency lighting" and there is no
-  // landmark to move between. Cells are 4 m and the dark plane is 10 m, so
-  // every other cell is the only spacing that keeps the next one in sight.
-  // Sparseness is not what makes this a blackout: the darkened surfaces, the
-  // near-black fog colour and the cut light rig are.
-  blackLitEvery: 2,              // cells between surviving strips
+  // landmark to move between. Cells are 4 m; at a 7 m dark plane even every
+  // OTHER cell leaves stretches with no visible light at all, so every cell
+  // gets one. Sparseness is not what makes this a blackout -- the darkened
+  // surfaces, the near-black fog colour and the cut light rig are -- and a
+  // line of dim embers receding into black is the better read anyway.
+  blackLitEvery: 1,              // cells between surviving strips
   // Emergency lighting, deliberately amber and not the signal red: in a world
   // this pale red means threat, and a corridor lit in the threat colour would
   // wreck enemy-reading exactly when the darkness already makes it hardest.
   // Playtest called the first pass "orange" -- it was the full 1.5 x 2.6 m
   // ceiling panel filled with flat #ff8c3a, which reads as a painted slab
   // rather than a light. A blackout gets a narrow batten instead.
-  blackLight: 0xff8a2e,
-  blackBatten: [0.34, 1.5],      // w x d in metres, against the lit 1.5 x 2.6
+  // Size matters more than colour here. At every-cell spacing the NEAREST
+  // batten is directly overhead and in frame, so a 0.34 x 1.5 m panel of flat
+  // amber is a hanging orange block rather than a light fitting -- the same
+  // failure as the full recess, just smaller. Down to a third of that area.
+  blackLight: 0xf07a1e,
+  blackBatten: [0.22, 0.9],      // w x d in metres, against the lit 1.5 x 2.6
   // The fog COLOUR matters as much as its distance. Left at the corridor's
   // pale daylight blue, a blacked-out corridor fades into a bright haze that
   // reads as light at the end of the tunnel -- the opposite of the intent.
@@ -294,6 +299,33 @@ export const SCARCITY = {
   // decides whether a fight is a queue or a swarm, so it moves least.
   groupSize:  [[1, 1.0], [4, 1.1], [8, 1.25], [12, 1.4]],
 };
+
+// THE CONDITION TAX — a second multiplier on the same curves.
+//
+// A condition that only changes what you can SEE is a lighting effect. What
+// makes it a condition is that it changes what you can AFFORD. Playtest, and
+// the design direction it settled:
+//
+//   "Fog and Blackout could use higher stakes: lower visibility, far fewer
+//    ammo drops. In general that's where the fun in this game lies -- finding
+//    ways to increase the stakes so that you have to conserve your resources
+//    and be strategic (hiding, choosing shots carefully, using slow-motion
+//    strategically)."
+//
+// So these stack on top of SCARCITY: a fog leg at door 6 pays the door-6 rate
+// AND the fog rate. Blackout is the harder of the two on every line, and it
+// is the only one that taxes TIME -- in a blackout the freeze is how you SEE,
+// so charging more for it means light itself costs you seconds. That is the
+// whole condition in one number.
+export const CONDITION_TAX = {
+  fog:      { ammoDrop: 0.42, weaponDrop: 0.62, timeGain: 0.90 },
+  blackout: { ammoDrop: 0.32, weaponDrop: 0.52, timeGain: 0.82 },
+};
+
+export function condTax(cond, curve) {
+  const t = cond && CONDITION_TAX[cond];
+  return (t && t[curve] !== undefined) ? t[curve] : 1;
+}
 
 // Linear interpolation across the keyframes, flat before the first and after
 // the last. Door numbers are 1-based.
