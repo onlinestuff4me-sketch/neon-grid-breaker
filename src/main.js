@@ -77,18 +77,28 @@ const BULLET_GRAVITY = 1.2;       // barely there, but long shots still settle
 // Run every clip dry and you are down to the knife.
 const CLIP = 'clip';   // a pistol magazine on the floor
 
-// Soft aim assist: after you have HELD without correcting for a while, it
-// gently settles the crosshair onto a nearby target. It never pulls your
+// Soft aim assist — MAGNETISM, not auto-aim. While you are dragging the view,
+// a target inside the cone bends the drag toward itself. It never pulls your
 // pitch off the head, so headshots stay yours. Off-screen threats get edge
-// arrows.
+// arrows. It runs in normal time as well as in slow motion.
 //
-// It runs in normal time as well as in slow motion. Two earlier comments here
-// claimed slow-motion only while the code never checked, and a playtester
-// felt it in both — so the code was right and the comments were wrong. Note
-// the gate is holding time, NOT wall clock: see input.lookIdle.
+// It used to work the other way round: hold WITHOUT correcting for 2.5 s and
+// it settled the crosshair on its own. That is a camera that moves when your
+// thumb does not, and it is the "jitter with enemies on screen" the playtest
+// kept reporting — measured at 13.5 degrees of unasked-for rotation over five
+// still seconds with a single enemy 2.2 m off-axis, and exactly zero with an
+// empty corridor, which is why it only ever showed up looking at someone. It
+// also bit hardest right after a freeze, because stopped time is precisely
+// when you hold still for longer than 2.5 s.
+//
+// Coupling it to look travel instead makes the rule simple: a still thumb
+// never moves the camera, and the help arrives while you are already turning.
 const AIM_ASSIST_CONE = 0.3;      // radians off-crosshair where assist engages
-const AIM_ASSIST_RATE = 3.5;      // gentle easing rate
-const AIM_ASSIST_DELAY = 2.5;     // seconds of free aiming before it engages
+const AIM_ASSIST_RATE = 3.5;      // gentle easing rate, at full drive
+const AIM_ASSIST_RAMP = 4;        // px of look travel in a frame for full drive
+const AIM_ASSIST_TAPER = 26;      // ...above this, drive falls off: a sweep PAST
+                                  // a target must not stick to it
+let assistGain = 0;               // eased drive, so acquiring is not a step
 const EDGE_ARROW_MIN = 0.34;      // bearing (rad) beyond which an enemy gets an arrow
 const FOV_NORMAL = 80;
 const FOV_SLOW = 66;              // bullet-time zoom
@@ -3666,6 +3676,8 @@ const input = {
   holding: false,
   stickX: 0, stickY: 0,         // -1..1 move-stick deflection
   lookIdle: 99,                 // seconds since the last manual look drag
+  lookPx: 0,                    // look travel applied this frame; drives the assist
+  lookYaw: 0,                   // ...signed, so the assist can never resist a turn
 };
 let sprintTo = null;            // pickup currently being sprinted to
 let sprintStuckT = 0;           // time spent blocked against a wall mid-sprint
@@ -3916,7 +3928,7 @@ function movePointer(p, cx, cy) {
     if (p.role === 'move') sprintTo = null;   // manual move cancels a sprint
     // apply the couple of pixels that assigned the role, so even the very
     // first sample of a flick counts
-    if (p.role === 'look') applyLook(p.x - dx - p.sx, p.y - dy - p.sy);
+    if (p.role === 'look') applyLook(p.x - dx - p.sx, p.y - dy - p.sy, gap);
   }
   if (p.role === 'move') {
     let ddx = p.x - p.ox, ddy = p.y - p.oy;
@@ -3930,7 +3942,7 @@ function movePointer(p, cx, cy) {
     input.stickY = ddy / STICK_RADIUS;
     stickUI(true, p.ox, p.oy, p.x, p.y);
   } else if (p.role === 'look') {
-    applyLook(dx, dy);
+    applyLook(dx, dy, gap);
   }
 }
 
@@ -3960,22 +3972,45 @@ function movePointer(p, cx, cy) {
 // whole thing — which is precisely when this happens, because a starved
 // event stream and a long frame travel together. A per-frame budget spreads
 // a burst over at least three frames whatever the frame rate is doing.
-const LOOK_SNAP_PX = 6;        // a single sample bigger than this is spread
-const LOOK_DRAIN_FRAC = 0.34;  // ...over three frames, more if it is large
+// ---------------------------------------------------------------------------
+// SIZE ALONE IS NOT THE TEST. The paragraph above says a burst is recognised
+// "because of coalesced events: only a real gap in the event stream can
+// produce one big delta" — but the first version never actually looked at the
+// gap, only at the pixels, and 6 px is not big. Measured on a plain 7 px per
+// frame drag (a SLOW aim, not a flick): 70 samples, 70 "bursts", and 13.6 px
+// of camera permanently owed to the thumb. Every ordinary aiming drag was
+// going down the smoothing path, and under the uneven sample delivery a real
+// phone produces that measured 19% variation in the per-frame step and 28%
+// frame-to-frame roughness. The smoothing meant to remove a jump was itself
+// the jitter.
+//
+// So the discriminator is now the one the comment always claimed: a sample is
+// a burst when it is big AND late. A starved stream (the measured case was a
+// ~350 ms hole) trips it; a fast flick delivered every 8-16 ms does not.
+const LOOK_SNAP_PX = 10;       // a late sample bigger than this is spread
+const LOOK_GAP_MS = 28;        // ...and only if the stream went quiet for this
+const LOOK_DRAIN_MIN = 6;      // px per frame the drain always manages...
+const LOOK_DRAIN_FRAC = 0.34;  // ...so three frames, more if it is large
 let lookPendX = 0, lookPendY = 0;
 // How often the event stream starves, and by how much. Cheap enough to leave
 // in: the next time this is investigated it should start from a number.
 const lookStats = { bursts: 0, worstPx: 0, lastAt: 0 };
 
-function applyLook(dx, dy) {
-  if (Math.abs(dx) <= LOOK_SNAP_PX && Math.abs(dy) <= LOOK_SNAP_PX) {
-    lookNow(dx, dy);   // the common path, untouched
+function applyLook(dx, dy, gap) {
+  // Once anything is queued, everything queues. A mixed path applies later
+  // small samples AHEAD of earlier large ones, which reorders a 1-D motion
+  // stream — the camera runs, waits, runs. Order is worth more than latency.
+  const queued = lookPendX !== 0 || lookPendY !== 0;
+  const big = Math.hypot(dx, dy) > LOOK_SNAP_PX && (gap === undefined || gap > LOOK_GAP_MS);
+  if (!queued && !big) {
+    lookNow(dx, dy);   // the common path: no added latency at all
     return;
   }
-  const px = Math.hypot(dx, dy);
-  lookStats.bursts++;
-  lookStats.worstPx = Math.max(lookStats.worstPx, +px.toFixed(1));
-  lookStats.lastAt = performance.now();
+  if (big) {
+    lookStats.bursts++;
+    lookStats.worstPx = Math.max(lookStats.worstPx, +Math.hypot(dx, dy).toFixed(1));
+    lookStats.lastAt = performance.now();
+  }
   lookPendX += dx; lookPendY += dy;
 }
 
@@ -3985,6 +4020,8 @@ function lookNow(dx, dy) {
   player.pitch -= (dy / w) * LOOK_SENS_Y;
   player.pitch = Math.min(Math.max(player.pitch, -PITCH_LIMIT), PITCH_LIMIT);
   input.lookIdle = 0;
+  input.lookPx += Math.hypot(dx, dy);   // this frame's look travel; drives the assist
+  input.lookYaw -= (dx / w) * LOOK_SENS;   // ...and its direction, so it never fights you
 }
 
 // Drained once per rendered frame, like the rest of the camera — freezing the
@@ -3994,7 +4031,7 @@ function drainLook() {
   const len = Math.hypot(lookPendX, lookPendY);
   // one budget for the whole 2-D delta, so the direction of the sweep is
   // preserved instead of x and y draining at different speeds
-  const step = Math.min(len, Math.max(LOOK_SNAP_PX, len * LOOK_DRAIN_FRAC));
+  const step = Math.min(len, Math.max(LOOK_DRAIN_MIN, len * LOOK_DRAIN_FRAC));
   const f = step / len;
   const ax = lookPendX * f, ay = lookPendY * f;
   lookPendX -= ax; lookPendY -= ay;
@@ -6705,12 +6742,21 @@ function frame(now) {
     }
   }
 
-  // soft aim assist: normal time AND slow motion, after a stretch of free
-  // aiming — then it gently drifts the crosshair onto the nearest target.
-  // Pitch is never corrected while you're aiming anywhere on the body column
-  // (chest to top of head), so lining up headshots is never fought.
-  if (player.alive && playing && enemies.length &&
-      input.holding && input.lookIdle > AIM_ASSIST_DELAY) {
+  // soft aim assist: normal time AND slow motion, in proportion to how much
+  // you are ALREADY turning. Pitch is never corrected while you're aiming
+  // anywhere on the body column (chest to top of head), so lining up
+  // headshots is never fought.
+  const lookPx = input.lookPx, lookYaw = input.lookYaw;
+  input.lookPx = 0; input.lookYaw = 0;
+  const driveWant = Math.min(1, lookPx / AIM_ASSIST_RAMP) *
+    Math.min(1, AIM_ASSIST_TAPER / Math.max(lookPx, AIM_ASSIST_TAPER));
+  // Eased, and asymmetrically: ~125 ms to come on so acquiring a target is
+  // not a step in the middle of a sweep, ~40 ms to let go so stopping your
+  // thumb still stops the camera.
+  assistGain += (driveWant - assistGain) *
+    (1 - Math.exp(-(driveWant > assistGain ? 8 : 25) * dt));
+  const drive = assistGain;
+  if (player.alive && playing && enemies.length && drive > 0.02) {
     let best = null, bestAng = AIM_ASSIST_CONE, bestYawD = 0, bestDist = 1;
     for (const e of enemies) {
       const dx = e.pos.x - player.pos.x, dz = e.pos.z - player.pos.z;
@@ -6723,8 +6769,13 @@ function frame(now) {
       if (ang < bestAng) { bestAng = ang; best = e; bestYawD = dYaw; bestDist = dist; }
     }
     if (best) {
-      const k = 1 - Math.exp(-AIM_ASSIST_RATE * dt);
-      player.yaw += bestYawD * k;
+      const k = (1 - Math.exp(-AIM_ASSIST_RATE * dt)) * drive;
+      // Only ever in the direction you are ALREADY turning. Magnetism that
+      // also pulls back when you sweep away is "stickiness", and it made a
+      // steady 4 px drag arrive in steps that varied better than two to one
+      // — the drag was being fought. It may speed you onto a target; it may
+      // never slow you off one.
+      if (lookYaw * bestYawD > 0) player.yaw += bestYawD * k;
       const pitchChest = Math.atan2(1.15 - EYE_HEIGHT, bestDist);
       const pitchHeadTop = Math.atan2(1.62 * best.g.scale.y + 0.2 - EYE_HEIGHT, bestDist);
       const lo = Math.min(pitchChest, pitchHeadTop), hi = Math.max(pitchChest, pitchHeadTop);
