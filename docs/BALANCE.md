@@ -131,7 +131,7 @@ a flat 0.4×. An enemy must be in view for
 | Knob | Value | Meaning |
 |---|---|---|
 | `hallNear` / `hallFar` | 14 / 55 m | the ordinary corridor |
-| `fogNear` / `fogFar` | 3 / 12 m | a **fog** leg — what its archive line promises |
+| `fogNear` / `fogFar` | 3 / 8 m | a **fog** leg — what its archive line promises |
 | `farMargin` | 3 m | the far plane is never nearer than `spawnMin + this` |
 | `tau` | 0.45 s | eased on a time constant, so every leg change lands in ~1.3 s |
 
@@ -143,12 +143,12 @@ gets no arrow and no pixels.
 
 | Knob | Dark | Frozen | Meaning |
 |---|---|---|---|
-| far plane | 20 m | 40 m | **stopping time is the torch** |
-| light intensity | 0.3× | 0.52× | hemisphere, sun and fill together |
-| surface colour | 0.34× | 0.62× | ceiling and beams are unlit materials, so only colour reaches them |
-| fog colour | `#0d1418` | — | left pale, the corridor faded into a bright haze that read as light at the end of the tunnel |
-| lit strips | every 4 cells | — | 16 m apart, inside the 20 m range — at 8 and at 5 the next strip was fogged to nothing |
-| strip colour | `#ff8c3a` | — | emergency amber, deliberately not the signal red |
+| far plane | 10 m | 34 m | **stopping time is the torch** |
+| light intensity | 0.14× | 0.5× | hemisphere, sun and fill together |
+| surface colour | 0.15× | 0.5× | ceiling and beams are unlit materials, so only colour reaches them |
+| fog colour | `#060a0d` | — | left pale, the corridor faded into a bright haze that read as light at the end of the tunnel |
+| lit strips | every 2 cells | — | 8 m apart, inside the 10 m range — at 8 and at 5 the next strip was fogged to nothing |
+| strip colour | `#ff8a2e` | — | emergency amber, deliberately not the signal red |
 
 Measured on a real frame: a blackout corridor is **40% of a lit one's mean
 luminance**, with the emergency strips the only warm pixels in view.

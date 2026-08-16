@@ -38,7 +38,7 @@ export const ELEMENTS = [
   { id: 'dimStrips', name: 'DIM STRIPS', kind: 'condition', tier: 1, minDoor: 3, unlockAt: 15, weight: 6, impl: true,
     archive: 'Illumination at half. Power is needed elsewhere.' },
   { id: 'fog', name: 'FOG', kind: 'condition', tier: 2, minDoor: 13, unlockAt: 120, weight: 5, impl: false,
-    archive: 'Suppressant discharged. Visibility twelve metres.' },
+    archive: 'Suppressant discharged. Visibility eight metres. Stop the clock and it parts.' },
   { id: 'blackout', name: 'BLACKOUT', kind: 'condition', tier: 3, minDoor: 15, unlockAt: 180, weight: 4, impl: false,
     archive: 'Emergency lighting only. Compliance is not required to see.' },
   { id: 'flood', name: 'FLOOD', kind: 'condition', tier: 4, minDoor: 11, unlockAt: 200, weight: 2, impl: false,

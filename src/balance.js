@@ -138,55 +138,103 @@ export const LEG = {
   spawnMax: 40,                    // and the furthest
 };
 
-// VISIBILITY, and the condition that changes it.
+// VISIBILITY, and the conditions that change it.
 //
 // FOG was registered as shipped and was never implemented: `cond` was only
 // ever compared against 'dimStrips', so a fog leg rendered as a plain
-// corridor while the archive told the player "Visibility twelve metres". This
-// is the mechanism it should always have had.
+// corridor while the archive told the player "Visibility twelve metres".
 //
-// The number that governs safety is LEG.spawnMin. A body is born 9-40 m away
-// and the door opens only on an empty floor, so a far plane below the spawn
-// floor means enemies are born invisible and a leg can become unfinishable.
-// `farFloor` therefore derives the minimum from the spawn distance rather
-// than trusting a hand-picked number to stay correct if spawnMin ever moves.
+// The first working version was then too kind to be a condition at all. A
+// body is born 9-40 m away (LEG.spawnMin/spawnMax) and the door opens only on
+// an empty floor, so the far plane was floored at spawnMin + margin to keep
+// every enemy visible from birth -- which pinned fog at 12 m, i.e. exactly
+// the distance at which nothing about the fight changes. Playtest: "there's
+// plenty of visibility, they don't feel different enough from normal."
+//
+// The floor is now only enforced on the REVEALED state. Unfrozen, you see
+// almost nothing; frozen, you always see at least spawnMin + margin, so the
+// freeze is what makes a leg finishable and stopping time stops being purely
+// defensive. Enemies outside sight are not lost, they are reduced to a
+// CONTACT -- one fog-exempt pinprick at head height that gives you a bearing
+// and nothing else: not what they are, not how far, not where the head is.
 export const VIS = {
   hallNear: 14, hallFar: 55,     // the ordinary corridor
-  fogNear: 3,                    // close enough to feel like it is on you
-  fogFar: 12,                    // exactly what the archive line promises
-  farMargin: 3,                  // ...and never nearer than spawnMin + this
 
-  // BLACKOUT is about LIGHT, not distance. Pulling the far plane down to the
-  // 8 m the design note first asked for would put the ENTIRE 9-40 m spawn
-  // range outside sight, so every body would be born invisible; and edge
-  // arrows cannot cover it, because their 19.5 deg bearing threshold sits
-  // just inside the ~21 deg screen half-width, so an enemy dead ahead gets no
-  // arrow and no pixels. Dead ahead is the common case in a corridor.
-  //
-  // So the corridor goes dark and stays legible, and the freeze is what buys
-  // back the distance. That is the design intent — it changes what stopping
-  // time is FOR — delivered without making the baseline a soft-lock.
-  blackNear: 2,
-  blackFar: 20,                  // dark, but every spawn is still findable
-  blackFrozenFar: 40,            // stop time and the corridor opens up
-  // Spacing has to be read against blackFar, not chosen for sparseness. At 8
-  // cells (32 m) and then at 5 (20 m) the next surviving strip sat at or past
-  // the fog plane, so it was fogged to nothing and the corridor read as
-  // "unlit" rather than "emergency lighting" — no landmark, nothing to move
-  // between. At 4 cells the next one is 16 m out, inside the 20 m range.
+  // FOG. Close enough to be on you. The freeze does not lift it -- it bores a
+  // TUNNEL through it, clear down the middle of the screen and still soup at
+  // the edges, so seeing means pointing.
+  fogNear: 3,
+  fogFar: 8,
+  fogFrozenFar: 26,
+  // Fog gets its own colour, darker and greyer than the corridor's own air.
+  // At the corridor's pale daylight blue a fogged frame measured BRIGHTER
+  // than a clear one (161.7 against 154.6 mean luminance) -- the screen lit
+  // up when visibility fell, which is exactly backwards.
+  fogCol: 0x93a3ab,
+  fogAmbient: 0.82,
+
+  farMargin: 3,                  // the revealed state never goes below spawnMin + this
+
+  // BLACKOUT is about LIGHT, not distance -- the surfaces, the fog colour and
+  // the light rig all come down together, and the freeze lifts all three at
+  // once behind a night-vision grade. Distance comes down too, now that the
+  // freeze is guaranteed to buy it back.
+  blackNear: 1,
+  blackFar: 10,
+  blackFrozenFar: 34,
+  // Spacing is read against blackFar, not chosen for sparseness: a strip
+  // further out than the far plane is fogged to nothing, so the corridor
+  // reads as "unlit" rather than "emergency lighting" and there is no
+  // landmark to move between. Cells are 4 m and the dark plane is 10 m, so
+  // every other cell is the only spacing that keeps the next one in sight.
   // Sparseness is not what makes this a blackout: the darkened surfaces, the
-  // near-black fog colour and the cut light intensity are.
-  blackLitEvery: 4,              // cells between surviving strips (normal: 2)
-  blackLight: 0xff8c3a,          // emergency amber, deliberately NOT signal red
+  // near-black fog colour and the cut light rig are.
+  blackLitEvery: 2,              // cells between surviving strips
+  // Emergency lighting, deliberately amber and not the signal red: in a world
+  // this pale red means threat, and a corridor lit in the threat colour would
+  // wreck enemy-reading exactly when the darkness already makes it hardest.
+  // Playtest called the first pass "orange" -- it was the full 1.5 x 2.6 m
+  // ceiling panel filled with flat #ff8c3a, which reads as a painted slab
+  // rather than a light. A blackout gets a narrow batten instead.
+  blackLight: 0xff8a2e,
+  blackBatten: [0.34, 1.5],      // w x d in metres, against the lit 1.5 x 2.6
   // The fog COLOUR matters as much as its distance. Left at the corridor's
   // pale daylight blue, a blacked-out corridor fades into a bright haze that
-  // reads as light at the end of the tunnel — the opposite of the intent.
-  blackFog: 0x0d1418,            // near-black, faintly cold
+  // reads as light at the end of the tunnel -- the opposite of the intent.
+  blackFog: 0x060a0d,            // near-black, faintly cold
   hallFog: 0xa8cadb,             // the ordinary corridor's air
-  blackSurface: 0.34,            // colour multiplier on the corridor surfaces
-  blackFrozenSurface: 0.62,      // ...lifted by the freeze, with everything else
-  blackAmbient: 0.30,            // light multiplier while blacked out
-  blackFrozenAmbient: 0.52,      // ...lifted with the freeze, like the fog
+  blackSurface: 0.15,            // colour multiplier on the corridor surfaces
+  blackFrozenSurface: 0.50,      // ...lifted by the freeze, with everything else
+  blackAmbient: 0.14,            // light multiplier while blacked out
+  blackFrozenAmbient: 0.50,      // ...lifted with the freeze, like the fog
+
+  // CONTACTS: what is left of an enemy you cannot see. Fades in across the
+  // far plane so it never competes with a body you can already read.
+  // Where a contact starts to show, as a fraction of the far plane. FOG is
+  // limited by DISTANCE, so it starts at the edge of sight. BLACKOUT is
+  // limited by LIGHT: a body at 6 m is inside the 10 m plane and still
+  // unreadable at 0.15 surface brightness, so waiting for the plane would
+  // leave a band where he is neither visible nor marked. It starts close.
+  contactInFog: 0.76,
+  contactInBlack: 0.34,
+  contactOut: 1.02,              // ...and where it is fully up
+  contactSize: 0.30,             // metres; a pinprick at 30 m, still small at 8
+  contactY: 1.55,                // head height, so it reads as a person
+  contactFogCol: 0xe6f2f8, contactFogAmt: 0.7,
+  contactBlackCol: 0xff6a24, contactBlackAmt: 0.95,
+
+  // THE REVEAL. Both conditions get a screen-space grade while time is
+  // stopped, so the freeze looks like equipment rather than a fog slider.
+  // NIGHT VISION is a multiply (tint + vignette + scanlines) plus an additive
+  // phosphor grain; the FOG TUNNEL is the fog colour alpha-blended back over
+  // everything outside a soft central disc.
+  nvTint: 0x2bff5e,              // multiply at the centre: kills red and blue
+  nvEdge: 0x05200e,              // ...and at the rim, which is the vignette
+  nvScan: 0.14,                  // scanline depth
+  nvGlow: 0x2bff7a, nvGrain: 0.13,
+  tunnelR0: 0.30, tunnelR1: 1.10, tunnelMax: 0.97,
+  gradeTau: 0.20,                // seconds; the grade comes up faster than the air
+
   // A flat metres-per-second rate is wrong here: the same rate has to cover a
   // 3 m change and a 43 m one, and at any speed that suits the small change
   // the big one takes ~17 s to arrive. Eased on a time constant instead, so
@@ -303,6 +351,13 @@ export const TIME = {
   bonus: 2,            // seconds refunded per kill
   cap: 10,             // bank ceiling
   drain: 1,            // seconds spent per second frozen, before scaling
+  // The bank running out is what kills you in a blackout, and a bar quietly
+  // shrinking at the top of the screen is not a warning when you are looking
+  // down a corridor. These thresholds are in SECONDS LEFT, not in fraction of
+  // the bar: the bar's full height is `cap`, which you rarely hold, so a
+  // fraction of it would warn at wildly different real times.
+  low: 2.5,            // meter pulses
+  crit: 1.2,           // ...twice as fast, and the whole meter blinks
   slowScale: 0.05,     // world speed while standing still
   moveScale: 0.3,      // world speed at full stick
 };

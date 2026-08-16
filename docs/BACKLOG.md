@@ -17,7 +17,7 @@ is wrong the fix is a keyframe drag in the Scarcity Console, not new content.
 
 ---
 
-## 0b. The look jump — two causes fixed, one smoothed
+## 0b. The look jump — four causes, all fixed
 
 There were **three** causes, overlapping, which is why each fix helped
 without curing it. Kept at the top because fluidity of look and
@@ -60,9 +60,9 @@ in all twenty-one.
 
 The fix is that `lookIdle` now measures what its name and its comment always
 claimed — **seconds of continuous holding without a manual correction** — so
-it resets when the thumb leaves. The assist itself is untouched and still
-engages after 2.5 s of holding still (verified: 15.5 degrees onto a target
-2.2 m off the crosshair at 9 m).
+it resets when the thumb leaves. The assist itself was untouched at this
+point, and still engaged after 2.5 s of holding still — which turned out to
+be cause 4.
 
 **Decided:** the assist runs in **normal time and slow motion**, which is
 what the code always did — two comments claimed slow-motion only and were
@@ -192,6 +192,48 @@ once the geometry exists.
 | Gallery / stairwell / spiral | forms | New skeletons. Stairwell needs vertical movement, which is the only one here that touches the physics. |
 | Turret drop, flood, dead air | mixed | Later. Flood and dead air both need systems that do not exist yet. |
 
+### Cause 4 — the assist was auto-aim on idle, not magnetism (fixed)
+
+Cause 2 stopped the assist firing on the frame you re-planted. It did not
+stop it firing 2.5 s *later*, and stopped time is exactly when you hold still
+for longer than that. **Measured: a perfectly still thumb with one gunner
+2.2 m off-axis rotated the view 13.49° over five seconds, and 0.00° down an
+empty corridor.** That is the whole "jitter with enemies in view" report, and
+it is a camera that moves when your thumb does not.
+
+The assist is now coupled to **look travel**, not to idle time:
+
+* full strength while you are dragging, nothing at all while you are not;
+* eased in over ~125 ms so acquiring a target is not a step mid-sweep, and out
+  over ~40 ms so letting go of the drag stops the camera;
+* **one-directional** — it may speed you *onto* a target, never slow you *off*
+  one. Two-to-one variation in a steady 4 px drag was the assist fighting a
+  turn away from a target (spread 2.12 → 1.14).
+
+It still helps: a short drag toward a target that leaves 4.0° of error
+unassisted now leaves 0.7–1.2°.
+
+### Cause 3 — the burst smoothing was catching ordinary drags (fixed)
+
+The smoothing added for cause 3 claimed to recognise a starved event stream
+"because only a real gap can produce one big delta" — but it only ever
+measured the **delta**, never the **gap**, against a 6 px threshold. A plain
+7 px-per-frame aim (a slow drag, not a flick) registered **70 bursts in 70
+frames** and left the camera **13.6 px permanently behind the thumb**. Under
+the uneven sample delivery a real phone produces, that measured **19%
+variation in the per-frame step and 28% frame-to-frame roughness**. The
+smoothing meant to remove a jump *was* the jitter.
+
+It now requires both: bigger than 10 px **and** later than 28 ms. And once
+anything is queued, everything queues — a mixed path applies later small
+samples ahead of earlier large ones and reorders a one-dimensional motion
+stream.
+
+Per-frame roughness on a constant-velocity drag, across all eight
+combinations of normal/slow × 0/3 enemies × even/uneven delivery: **28.4% →
+0.0%**. A genuine 15 px starved burst is still spread over three frames,
+3.76° being the largest single step.
+
 ### FOG was a lie, and is now fixed
 
 `fog` shipped as `impl: true` and was never implemented — the leg condition
@@ -204,11 +246,12 @@ plane can never fall below `LEG.spawnMin + margin`. See `docs/BALANCE.md`.
 That mechanism is what blackout needs, so blackout is now mostly a lighting
 job rather than a from-scratch build.
 
-### Blackout: the number to avoid, worked out before building
+### Blackout: the number to avoid, and how it was got round anyway
 
-**~8 m visibility is unplayable, arithmetically.** `LEG.spawnMin` is 9 m and
-`spawnMax` 40 m, so an 8 m far plane puts the *entire* spawn range outside
-visibility — every enemy is born invisible.
+**~8 m visibility is unplayable, arithmetically — unless something replaces
+the pixels.** `LEG.spawnMin` is 9 m and `spawnMax` 40 m, so an 8 m far plane
+puts the *entire* spawn range outside visibility — every enemy is born
+invisible.
 
 Edge arrows do not rescue it. `EDGE_ARROW_MIN` is 0.34 rad ≈ 19.5° of
 bearing, and arrows only appear *beyond* that. The 80° vertical FOV at
@@ -219,12 +262,65 @@ therefore gets **no arrow and no pixels** — and dead ahead is the common case,
 because the corridor runs forward. Arrows solve flanks, not the axis the game
 is built along.
 
-So blackout should be about **light**, not distance — cut the strips hard,
-keep the far plane above the derived floor, and deliver "the freeze is a
-torch" by having the freeze *extend* visibility rather than by making the
-baseline lethal. Avoid `#ff2d1a` for emergency strips: red means threat in
-this game, and a corridor lit in the signal colour destroys enemy-reading at
-exactly the moment it is hardest.
+So blackout is about **light**, not distance. Avoid `#ff2d1a` for emergency
+strips: red means threat in this game, and a corridor lit in the signal
+colour destroys enemy-reading at exactly the moment it is hardest.
+
+### The handicap pass — playtest said neither condition felt like one
+
+> "Both Fog and Blackout need much more of a handicap... there's plenty of
+> visibility, they don't feel different enough from normal gameplay."
+
+Correct, and the reason was the safety floor above: it clamped fog to exactly
+`spawnMin + margin` = 12 m, which is the distance at which nothing about the
+fight changes. Three things had to move together.
+
+1. **The floor is now enforced only on the REVEALED state.** Unfrozen you are
+   meant to be blind; frozen you always get at least `spawnMin + margin`. So
+   the freeze is what makes a leg finishable, which is the design the
+   condition was always reaching for. Fog runs at **8 m** and opens to 26;
+   blackout at **10 m** and opens to 34, with surfaces at 0.15 and lights at
+   0.14 (a blackout corridor measures **17%** of a lit one).
+2. **Contacts** replace the pixels the murk takes. One fog-exempt pinprick at
+   head height per enemy, depth-tested so a wall still hides it. It carries a
+   bearing and nothing else — not the type, not the range, not where the head
+   is. Fog's fades in at the edge of sight; blackout's starts much closer,
+   because blackout is limited by *light*, so a body at 6 m is inside the
+   plane and still unreadable.
+3. **The reveal is a screen-space grade**, so stopping time looks like
+   equipment coming on. Blackout gets **night vision** (a multiply for tint,
+   vignette and scanlines, plus an additive phosphor grain); fog gets a
+   **tunnel** (the fog colour alpha-blended back over everything outside a
+   soft central disc, so seeing means pointing). Neither reads the
+   framebuffer, so no render target is needed and the scene still goes
+   straight to the screen when no ripple wants the refraction pass. Both are
+   compiled in `warmUp()` — a shader that first compiles on the frame the
+   player freezes is the stall this project has already paid for once.
+
+Three things fought the grades and all three had to stand down while one is
+up: the `body.slowmo` canvas CSS filter (`sepia .35 hue-rotate -28deg`, which
+halved the phosphor's saturation and dragged it 28° toward red), the red
+bullet-time `#tint` vignette (green went olive, grey fog went salmon), and the
+ripple quads, which `collectRippleFX` had not run to update and were still
+holding the previous frame's uniforms over a stale render target.
+
+Two mechanical notes for whoever tunes this next:
+
+* **The vignette must not be aspect-corrected.** A true screen-space circle on
+  402 × 874 reaches the left and right edges at 0.46 of its vertical radius,
+  so a vignette tuned to bite top and bottom covered **10%** of the sides
+  where 90% was wanted. An ellipse matched to the frame is what a vignette
+  means here.
+* **three only honours `material.blending` when `transparent: true`.**
+  Otherwise it silently draws opaque, and a multiply pass paints over the
+  frame instead of grading it.
+
+Also fixed in the same pass: the emergency strips were the full 1.5 × 2.6 m
+ceiling recess filled with flat amber, which the playtest called out as an
+orange slab rather than a light. A blackout gets a 0.34 × 1.5 m batten. And
+the slow-mo bank now **pulses below 2.5 s and blinks below 1.2 s** — the bank
+running out is what kills you in the dark, and a bar quietly shrinking at the
+top of the screen is not a warning when you are looking down a corridor.
 
 ## 5. Higher-fidelity characters — **engine side done; needs your asset**
 

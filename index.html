@@ -22,6 +22,11 @@
   /* bullet time reads as its own world: drained color pushed warm-red with a
      hint of negative — like the air itself changed */
   body.slowmo #game canvas { filter:saturate(.5) contrast(1.12) sepia(.35) hue-rotate(-28deg) invert(.06); }
+  /* ...but not when a condition's own reveal is up. This filter is a sepia
+     hue-rotate: it desaturated the night-vision phosphor by half and dragged
+     it 28 degrees toward red, and it turned a cold grey fog wash salmon. The
+     grade is that leg's bullet-time look and it does the whole job itself. */
+  body.grading #game canvas { filter:none; }
 
   /* cinematic letterbox bars that slide in during bullet time */
   .lbar { position:fixed; left:0; right:0; height:7vh; background:#0c0d10; z-index:5;
@@ -155,6 +160,19 @@
                box-shadow:0 0 18px rgba(255,45,26,.5); }
   body.slowmo #slowfill { background:#ff4a35; }
   body.slowmo #slowmeter { background:rgba(238,240,243,.25); }
+  /* RUNNING DRY. The bank emptying is the only thing that can kill you in a
+     blackout, and a bar quietly shrinking at the top of the screen is not a
+     warning — you are looking down the corridor, not at the HUD. Below a
+     quarter it pulses; below an eighth it pulses twice as fast, and the whole
+     meter blinks with it, so the alarm arrives in peripheral vision. */
+  @keyframes lowbank { 0%,100% { opacity:1; }   50% { opacity:.25; } }
+  @keyframes lowglow { 0%,100% { box-shadow:0 0 18px rgba(255,45,26,.5); }
+                       50% { box-shadow:0 0 26px 4px rgba(255,45,26,.85); } }
+  #slowmeter.low #slowfill  { animation:lowbank .62s ease-in-out infinite; }
+  #slowmeter.crit #slowfill { animation:lowbank .28s ease-in-out infinite;
+                              background:#ff6a4a; }
+  body.slowmo #slowmeter.low  { animation:lowglow .62s ease-in-out infinite; }
+  body.slowmo #slowmeter.crit { animation:lowglow .28s ease-in-out infinite; }
   #timebtn.empty::before { background:#9aa0ab; }
   @keyframes tpulse { 0%,100% { box-shadow:0 0 0 0 rgba(255,45,26,.55); }
                       55% { box-shadow:0 0 0 14px rgba(255,45,26,0); } }
@@ -211,6 +229,10 @@
   #tint { position:fixed; inset:0; pointer-events:none; opacity:0;
           background:radial-gradient(ellipse at center, rgba(255,70,45,0) 32%, rgba(185,42,26,.24) 70%, rgba(70,10,8,.55) 100%); }
   #redflash { position:fixed; inset:0; pointer-events:none; opacity:0; background:radial-gradient(ellipse at center, rgba(255,45,26,.25) 0%, rgba(255,45,26,.75) 100%); }
+  /* Under either reveal the red bullet-time rim lands on top of the grade’s own
+     rim and both turn to mud — green went olive, grey fog went salmon. The
+     freeze already reads as a freeze when the corridor changes. */
+  body.grading #tint { opacity:0 !important; }
 
   /* ---- full screen overlays ---- */
   #overlay { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center;

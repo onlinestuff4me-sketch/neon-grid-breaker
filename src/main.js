@@ -1405,7 +1405,126 @@ function initRippleFX() {
     fxScene.add(m);
     fxQuads.push(m);
   }
+  initGradeFX(quadGeo, size);
 }
+// --- THE REVEAL -----------------------------------------------------------
+// Stopping time inside a condition is meant to look like equipment coming on,
+// not like a fog slider moving. Two full-screen grades, both driven by the
+// same eased gradeK, both cheap enough to leave on a phone: neither reads the
+// framebuffer, so no extra render target is needed and the scene can still go
+// straight to the screen when no ripple wants the refraction pass.
+//
+// NIGHT VISION is a MULTIPLY: the tint kills red and blue (which is what
+// makes a monochrome phosphor image), the rim colour is the vignette, and the
+// scanlines ride on top. Then one ADDITIVE pass for grain and the centre
+// bloom, because multiply can only ever darken.
+//
+// THE FOG TUNNEL is an alpha blend of the fog colour back over everything
+// outside a soft central disc. The scene behind it has already been rendered
+// with the far plane opened up, so the middle of the screen clears and the
+// edges stay soup: seeing through fog means pointing at what you want to see.
+let gradeMul = null, gradeTun = null;
+// The reveal is ONE quad per condition, not two. Night vision started as a
+// multiply for the tint plus an additive pass for phosphor grain and a centre
+// bloom, and measured 42.9% of a frame against 26.6% for the fog tunnel's
+// single quad -- the second pass was the whole difference. Grain that only
+// ever darkens still reads as grain, so it folds into the multiply and the
+// bloom goes. There is also a self-limiter below: I cannot profile a real
+// phone from here, so the effect has to be able to get out of the way, and
+// the condition still works without it because the far plane and the light
+// rig open up either way.
+const GRADE_COMMON = `
+  precision mediump float;
+  varying vec2 vUv;
+  uniform float uAspect, uK;
+  ${LINEAR_TO_SRGB}
+  // NOT aspect-corrected, deliberately. A true screen-space circle on a 402 x
+  // 874 frame reaches the left and right edges at 0.46 of its vertical
+  // radius, so a vignette tuned to bite at the top and bottom does almost
+  // nothing at the sides -- measured: 10% coverage where 90% was wanted, and
+  // the "tunnel" left the corridor's flanks wide open. An ellipse that
+  // matches the frame is what a vignette actually means here: 1.0 at every
+  // edge, 1.41 in the corners, whatever the phone's aspect.
+  float radial() { return length(vUv - 0.5) * 2.0; }
+`;
+function initGradeFX(quadGeo, size) {
+  const mk = (frag, uniforms, blending, order) => {
+    const m = new THREE.Mesh(quadGeo, new THREE.ShaderMaterial({
+      // transparent:true is not decoration -- three only honours `blending` at
+      // all when a material is transparent, and silently draws opaque
+      // otherwise. Both grades composite, so both must say so.
+      uniforms, blending, transparent: true,
+      vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+      fragmentShader: frag, depthTest: false, depthWrite: false,
+    }));
+    m.frustumCulled = false;
+    m.renderOrder = order;
+    m.visible = false;
+    fxScene.add(m);
+    return m;
+  };
+  const aspect = { value: size.x / size.y };
+  // NIGHT VISION. The tint kills red and blue, which is what makes a
+  // monochrome phosphor image; the rim colour is the vignette; scanlines and
+  // grain ride on top. All of it darkens, so all of it is one multiply.
+  gradeMul = mk(`${GRADE_COMMON}
+    uniform vec3 uTint, uEdge;
+    uniform float uScan, uGrain, uT;
+    void main() {
+      float r = radial();
+      vec3 c = mix(toSRGB(uTint), toSRGB(uEdge), smoothstep(0.35, 1.15, r));
+      float s = 1.0 - uScan * (0.5 + 0.5 * sin(vUv.y * 900.0 + uT * 3.0));
+      float g = fract(sin(dot(vUv + uT, vec2(12.9898, 78.233))) * 43758.5453);
+      s *= 1.0 - uGrain * g;
+      gl_FragColor = vec4(mix(vec3(1.0), c * s, uK), 1.0);
+    }`,
+  { uAspect: aspect, uK: { value: 0 }, uT: { value: 0 },
+    uTint: { value: new THREE.Color(VIS.nvTint) },
+    uEdge: { value: new THREE.Color(VIS.nvEdge) },
+    uScan: { value: VIS.nvScan }, uGrain: { value: VIS.nvGrain } }, THREE.MultiplyBlending, 90);
+  // THE FOG TUNNEL. The fog colour alpha-blended back over everything outside
+  // a soft central disc. The scene behind it has already been rendered with
+  // the far plane opened up, so the middle of the screen clears and the edges
+  // stay soup: seeing through fog means pointing at what you want to see.
+  // Premultiplied, because the renderer runs with premultipliedAlpha (the
+  // default) and an un-premultiplied vec4 comes out both too bright and the
+  // wrong hue -- measured as a warm brown edge where a cold grey one was
+  // asked for.
+  gradeTun = mk(`${GRADE_COMMON}
+    uniform vec3 uFog;
+    uniform float uR0, uR1, uMax;
+    void main() {
+      float a = smoothstep(uR0, uR1, radial()) * uMax * uK;
+      gl_FragColor = vec4(toSRGB(uFog) * a, a);
+    }`,
+  { uAspect: aspect, uK: { value: 0 },
+    uFog: { value: new THREE.Color(VIS.hallFog) },
+    uR0: { value: VIS.tunnelR0 }, uR1: { value: VIS.tunnelR1 },
+    uMax: { value: VIS.tunnelMax } }, THREE.NormalBlending, 91);
+}
+let gradeOff = false;      // test hook: A/B the reveal's cost against itself
+let gradeAllowed = true;   // self-limiter: off for the rest of the run if slow
+let gradeSlowT = 0, dtCalm = 0.0167;
+// Returns true if anything has to be composited on top of the scene.
+function updateGradeFX(nowMs) {
+  if (!gradeMul) return false;
+  const nv = gradeAllowed && !gradeOff && gradeK > 0 && gradeWant === 'nv';
+  const tun = gradeAllowed && !gradeOff && gradeK > 0 && gradeWant === 'tunnel';
+  gradeMul.visible = nv;
+  gradeTun.visible = tun;
+  if (nv) {
+    gradeMul.material.uniforms.uK.value = gradeK;
+    // Grain has to move or it reads as dirt on the lens. Stepped, not
+    // continuous: a phosphor image flickers, it does not slide.
+    gradeMul.material.uniforms.uT.value = Math.floor(nowMs / 55) * 0.137;
+  }
+  if (tun) {
+    gradeTun.material.uniforms.uK.value = gradeK;
+    gradeTun.material.uniforms.uFog.value.copy(scene.fog.color);
+  }
+  return nv || tun;
+}
+
 function resizeRippleFX() {
   if (!rippleRT) return;
   const size = new THREE.Vector2();
@@ -1414,6 +1533,10 @@ function resizeRippleFX() {
   for (const q of fxQuads) {
     q.material.uniforms.uRes.value.set(size.x, size.y);
     q.material.uniforms.uAspect.value = size.x / size.y;
+  }
+  const a = size.x / size.y;
+  for (const q of [gradeMul, gradeTun]) {
+    if (q) q.material.uniforms.uAspect.value = a;
   }
 }
 const _vFx = new THREE.Vector3();
@@ -1469,6 +1592,9 @@ function collectRippleFX() {
 // catches up in one jump — which is indistinguishable from input sticking.
 function warmUp() {
   try {
+    // A contact sprite has its own program too; put one in the scene before
+    // the compile so it is not the first freeze in fog that pays for it.
+    if (contacts.length === 0) { takeContact(0).visible = true; }
     renderer.compile(scene, camera);
     if (!rippleRT) initRippleFX();
     // draw one throwaway frame through the whole post path so the refraction
@@ -1483,6 +1609,19 @@ function warmUp() {
     renderer.setRenderTarget(null);
     renderer.render(fxScene, fxCam);
     for (const q of fxQuads) q.visible = false;
+    // ...and the same for the reveal grades, or the first freeze inside a
+    // condition would compile three shaders on the frame it lands on. Drawn
+    // at uK = 0, so they are compiled without being seen.
+    const grades = [gradeMul, gradeTun].filter(Boolean);
+    for (const q of grades) { q.material.uniforms.uK.value = 0; q.visible = true; }
+    if (grades.length) {
+      const auto = renderer.autoClear;
+      renderer.autoClear = false;
+      renderer.render(fxScene, fxCam);
+      renderer.autoClear = auto;
+    }
+    for (const q of grades) q.visible = false;
+    if (contacts.length) contacts[0].visible = false;
   } catch { /* a warm-up must never be able to break a boot */ }
 }
 
@@ -1493,10 +1632,50 @@ function renderFrame(dt) {
   // from here, so the effect has to be able to get out of the way.
   if (fxOn && dt > 0.028) { fxSlowT += dt; if (fxSlowT > 2.5) fxOn = false; }
   else fxSlowT = Math.max(0, fxSlowT - dt);
+  const graded = updateGradeFX(performance.now());
+  // Same bargain the refraction pass makes: if frames stay long while the
+  // grade is up, it gives up for the rest of the run. The condition still
+  // works without it — the far plane and the light rig open up either way —
+  // so the worst case is a plainer reveal, never a stutter.
+  //
+  // But the test has to be the grade's MARGINAL cost, not the absolute frame
+  // time. An absolute threshold copied from the refraction pass meant any
+  // device already at 30 fps lost the effect the moment it appeared, and it
+  // fired every time in the headless harness — which is uniformly slow, not
+  // slow BECAUSE of this. So it compares against a calm baseline measured
+  // while no grade is up.
+  if (!graded) {
+    dtCalm += (Math.min(dt, 0.1) - dtCalm) * 0.05;
+    gradeSlowT = Math.max(0, gradeSlowT - dt);
+  } else if (dt > Math.max(0.028, dtCalm * 1.6)) {
+    gradeSlowT += dt;
+    if (gradeSlowT > 3) gradeAllowed = false;
+  } else {
+    gradeSlowT = Math.max(0, gradeSlowT - dt);
+  }
   const n = (fxOn && ripples.length) ? collectRippleFX() : 0;
-  if (n === 0) {                     // nothing to bend: straight to the screen
+  if (n === 0 && !graded) {          // nothing to bend: straight to the screen
     renderer.setRenderTarget(null);
     renderer.render(scene, camera);
+    return;
+  }
+  if (n === 0) {
+    // A grade with no ripples needs no render target — draw the world to the
+    // screen and lay the grade quads over it. The blit has to sit out, or it
+    // would paint an empty texture over the frame we just drew — and so do
+    // the ripple quads, which collectRippleFX has not run to update and are
+    // still holding last frame's uniforms over a stale render target. Leaving
+    // them in smeared an old frame's muzzle flashes across the grade, which
+    // is why a cold grey fog wash measured warm brown at the edges.
+    renderer.setRenderTarget(null);
+    renderer.render(scene, camera);
+    fxBlit.visible = false;
+    for (const q of fxQuads) q.visible = false;
+    const auto = renderer.autoClear;
+    renderer.autoClear = false;
+    renderer.render(fxScene, fxCam);
+    renderer.autoClear = auto;
+    fxBlit.visible = true;
     return;
   }
   renderer.setRenderTarget(rippleRT);
@@ -5099,7 +5278,8 @@ let timeLocked = false;
 // Button mode runs on a slow-mo bank: each wave charges it to BASE seconds,
 // it drains in real time while locked, and every kill pours BONUS back in.
 // Empty bank -> time snaps back (the usual resume sound/visuals fire).
-const SLOWMO = { base: TIME.base, bonus: TIME.bonus, cap: TIME.cap, drain: TIME.drain };
+const SLOWMO = { base: TIME.base, bonus: TIME.bonus, cap: TIME.cap, drain: TIME.drain,
+  low: TIME.low, crit: TIME.crit };
 let slowBank = SLOWMO.base;
 
 function setTimeLocked(v) {
@@ -5156,6 +5336,14 @@ function updateModeUI() {
 function updateSlowMeter() {
   el.slowfill.style.width = Math.max(0, Math.min(1, slowBank / SLOWMO.cap)) * 100 + '%';
   el.timebtn.classList.toggle('empty', slowBank <= 0);
+  // Running dry is measured in SECONDS LEFT, not in fraction of the bar: the
+  // bar's full height is the cap, which you rarely hold, so a fraction of it
+  // would warn at wildly different real times. These are seconds of frozen
+  // world at wave-1 cost, which is what the player is actually spending.
+  const low = slowBank > 0 && slowBank <= SLOWMO.low;
+  const crit = slowBank > 0 && slowBank <= SLOWMO.crit;
+  el.slowmeter.classList.toggle('low', low && !crit);
+  el.slowmeter.classList.toggle('crit', crit);
 }
 let demoT = 0, demoSpawnT = 0.3, demoKillT = 4;   // menu attract-mode clocks
 
@@ -5780,6 +5968,7 @@ function setEnvironment(env) {
     fill.intensity = FILL_BASE; darkNow = 1; setDarkness(1); }
   fogWant.col.setHex(inHall ? VIS.hallFog : CITY_FOG_HEX);
   scene.fog.color.copy(fogWant.col);
+  if (!inHall) { gradeWant = null; condNow = null; gradeK = 0; }   // updateFog hides them next frame
   if (!inHall && hall) {
     for (const L of hall.legs) {
       if (!L) continue;
@@ -5980,7 +6169,12 @@ function buildHallLeg(sgx, sgz, proto) {
     const lit = cond === 'blackout' ? (gx + gz) % VIS.blackLitEvery === 0
       : cond === 'dimStrips' ? (gx + gz) % 4 === 0
       : (gx + gz) % 2 === 0;
-    if (lit) lights.push([x, H - 0.04, z, 1.5, 0.08, 2.6]);
+    // A blackout gets a narrow BATTEN, not the full panel. Filling the whole
+    // 1.5 x 2.6 m recess with flat amber read as a painted orange slab rather
+    // than as a light — the playtest called it out by name.
+    if (lit) lights.push(cond === 'blackout'
+      ? [x, H - 0.04, z, VIS.blackBatten[0], 0.08, VIS.blackBatten[1]]
+      : [x, H - 0.04, z, 1.5, 0.08, 2.6]);
     // Half the portrait frame is ceiling, and it was one flat slab. A drop
     // beam on every cell the strips skip gives it a 4 m rhythm and puts the
     // soffit at 2.80 m — the clear height measured off the reference. Visual
@@ -6328,28 +6522,100 @@ const fogWant = { near: VIS.hallNear, far: VIS.hallFar, amb: 1, surf: 1,
   col: new THREE.Color(VIS.hallFog) };
 const HEMI_BASE = hemi.intensity, SUN_BASE = sun.intensity, FILL_BASE = fill.intensity;
 let darkNow = 1;
+// Which screen-space reveal the current leg wants ('nv' | 'tunnel' | null),
+// which condition it is under, and how far up the grade has eased.
+let gradeWant = null, condNow = null, gradeK = 0;
 
 // The floor every condition is held above: below `spawnMin + margin` a body
 // is born outside sight, and the door waits on an empty floor.
 const visFloor = () => LEG.spawnMin + VIS.farMargin;
 
+// The floor is only enforced on the REVEALED state: unfrozen you are meant to
+// be blind, and it is the freeze that has to guarantee a leg is finishable.
 function legVisibility(L, frozen) {
   const cond = L && L.proto && L.proto.condition && L.proto.condition.id;
   if (cond === 'fog') {
-    return { near: VIS.fogNear, far: Math.max(VIS.fogFar, visFloor()), amb: 1, surf: 1, col: VIS.hallFog };
+    return {
+      near: VIS.fogNear,
+      far: frozen ? Math.max(VIS.fogFrozenFar, visFloor()) : VIS.fogFar,
+      amb: VIS.fogAmbient, surf: 1, col: VIS.fogCol,
+      grade: frozen ? 'tunnel' : null,
+    };
   }
   if (cond === 'blackout') {
     // Stopping time is the torch. This is the whole point of the condition:
     // the freeze stops being purely defensive and becomes how you SEE.
     return {
       near: VIS.blackNear,
-      far: Math.max(frozen ? VIS.blackFrozenFar : VIS.blackFar, visFloor()),
+      far: frozen ? Math.max(VIS.blackFrozenFar, visFloor()) : VIS.blackFar,
       amb: frozen ? VIS.blackFrozenAmbient : VIS.blackAmbient,
       surf: frozen ? VIS.blackFrozenSurface : VIS.blackSurface,
-      col: VIS.blackFog,
+      col: VIS.blackFog, grade: frozen ? 'nv' : null,
     };
   }
-  return { near: VIS.hallNear, far: VIS.hallFar, amb: 1, surf: 1, col: VIS.hallFog };
+  return { near: VIS.hallNear, far: VIS.hallFar, amb: 1, surf: 1, col: VIS.hallFog, grade: null };
+}
+
+// --- CONTACTS -------------------------------------------------------------
+// What is left of an enemy the murk has taken. One fog-exempt pinprick at head
+// height, so a leg stays finishable at any visibility without handing the
+// player a wallhack: it is depth-tested, so a wall still hides it, and it
+// carries a bearing and nothing else — not the type, not the range, not where
+// the head is. It fades in only as a body leaves sight, so it never competes
+// with an enemy you can already read.
+let contactTex = null;
+const contacts = [];
+function makeContactTex() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d');
+  const rg = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  rg.addColorStop(0, 'rgba(255,255,255,1)');
+  rg.addColorStop(0.35, 'rgba(255,255,255,0.55)');
+  rg.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = rg;
+  g.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(c);
+}
+function takeContact(i) {
+  while (contacts.length <= i) {
+    if (!contactTex) contactTex = makeContactTex();
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: contactTex, transparent: true, depthWrite: false,
+      fog: false,          // the whole point: the murk does not eat it
+      blending: THREE.AdditiveBlending,
+    }));
+    s.scale.setScalar(VIS.contactSize);
+    s.visible = false;
+    scene.add(s);
+    contacts.push(s);
+  }
+  return contacts[i];
+}
+function updateContacts() {
+  let n = 0;
+  const on = condNow === 'fog' || condNow === 'blackout';
+  if (on && player.alive && (game.state === 'play' || game.state === 'intro')) {
+    const far = scene.fog.far;
+    const black = condNow === 'blackout';
+    const hex = black ? VIS.contactBlackCol : VIS.contactFogCol;
+    const amt = black ? VIS.contactBlackAmt : VIS.contactFogAmt;
+    const inAt = black ? VIS.contactInBlack : VIS.contactInFog;
+    for (const e of enemies) {
+      if (!e.alive) continue;
+      const d = Math.hypot(e.pos.x - player.pos.x, e.pos.z - player.pos.z);
+      // 0 while he is inside sight, 1 once the air has taken him
+      const t01 = (d - far * inAt) / (far * (VIS.contactOut - inAt));
+      const a = Math.min(1, Math.max(0, t01));
+      if (a <= 0.02) continue;
+      const s = takeContact(n++);
+      s.position.set(e.pos.x, VIS.contactY, e.pos.z);
+      s.material.color.setHex(hex);
+      s.material.opacity = a * a * amt;   // squared: it arrives late and softly
+      s.visible = true;
+    }
+  }
+  for (let i = n; i < contacts.length; i++) contacts[i].visible = false;
 }
 
 function applyLegVisibility(snap) {
@@ -6357,6 +6623,9 @@ function applyLegVisibility(snap) {
   const v = legVisibility(hall.legs[hall.cur], timeLocked || timeScale < 0.55);
   fogWant.near = v.near; fogWant.far = v.far; fogWant.amb = v.amb; fogWant.surf = v.surf;
   fogWant.col.setHex(v.col);
+  gradeWant = v.grade;
+  condNow = (hall.legs[hall.cur] && hall.legs[hall.cur].proto
+    && hall.legs[hall.cur].proto.condition && hall.legs[hall.cur].proto.condition.id) || null;
   if (snap) {
     scene.fog.near = v.near; scene.fog.far = v.far;
     hemi.intensity = HEMI_BASE * v.amb;
@@ -6388,6 +6657,13 @@ function updateFog(dtReal) {
   setDarkness(darkNow);
   scene.fog.color.lerp(fogWant.col, k);
   renderer.setClearColor(scene.fog.color, 1);
+  // The grade comes up faster than the air does: the equipment switching on
+  // should read as instant next to the corridor slowly opening out.
+  const gk = 1 - Math.exp(-dtReal / VIS.gradeTau);
+  gradeK += ((gradeWant ? 1 : 0) - gradeK) * gk;
+  if (gradeK < 0.004) gradeK = 0;
+  document.body.classList.toggle('grading', !!gradeWant && gradeK > 0.4);
+  updateContacts();
 }
 
 function openHallDoor() {
@@ -7056,7 +7332,13 @@ window.__ts = {
   fog: () => ({ near: +scene.fog.near.toFixed(2), far: +scene.fog.far.toFixed(2),
     wantNear: fogWant.near, wantFar: fogWant.far,
     cond: (hall && hall.legs[hall.cur] && hall.legs[hall.cur].proto
-      && hall.legs[hall.cur].proto.condition || {}).id || null }),
+      && hall.legs[hall.cur].proto.condition || {}).id || null,
+    amb: +hemi.intensity.toFixed(3), surf: +darkNow.toFixed(3),
+    grade: gradeWant, gradeK: +gradeK.toFixed(3),
+    contacts: contacts.filter((c) => c.visible).length }),
+  setGrade: (v) => { gradeOff = !v; gradeAllowed = true; gradeSlowT = 0; },
+  gradeState: () => ({ allowed: gradeAllowed, slowT: +gradeSlowT.toFixed(2),
+    calm: +dtCalm.toFixed(4) }),
   restartHall: () => { setEnvironment('city'); clearField(); initHall(); },
   killAt: (i) => killEnemy(i, _v1.set(0, 0.5, -1).normalize()),
   banner: showBanner,
