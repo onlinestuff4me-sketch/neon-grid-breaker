@@ -252,8 +252,23 @@
   #tutormsg.right { top:38%; left:52%; right:0; font-size:min(7.4vw,32px); }
   #tutormsg.meter { top:calc(env(safe-area-inset-top, 0px) + 62px);
                     font-size:min(5.4vw,24px); }
-  #tutormsg.btn   { top:auto; bottom:calc(env(safe-area-inset-bottom, 0px) + 26vh);
-                    font-size:min(6.6vw,30px); }
+  /* The button prompt sat low enough that the viewmodel ran through it, and
+     it could not go lower because that is where the left thumb lives. It goes
+     UP instead, into clear frame, in the button's own red, pulsing with it —
+     and an arrow travels from the words to the button so the two are read as
+     one thing. */
+  #tutormsg.btn   { top:44%; font-size:min(7.2vw,33px); color:#ff2d1a;
+                    text-shadow:0 2px 18px rgba(238,240,243,.75); }
+  body.slowmo #tutormsg.btn { color:#ff5d4a; text-shadow:0 2px 18px rgba(12,13,16,.8); }
+  #tutorarrow { position:absolute; right:16vw; top:52%; font-size:34px; font-weight:900;
+                color:#ff2d1a; opacity:0; pointer-events:none;
+                transform:rotate(38deg); }
+  #tutorarrow.on { animation:arrowrun 1.05s ease-in-out infinite; }
+  @keyframes arrowrun {
+    0%   { opacity:0;  transform:translate(0,0) rotate(38deg); }
+    25%  { opacity:1; }
+    100% { opacity:0;  transform:translate(4.5vw,9vh) rotate(38deg); }
+  }
   @keyframes tutorpulse { 0%,100% { opacity:1; } 50% { opacity:.32; } }
   #tutormsg.pulse { animation:tutorpulse 1.05s ease-in-out infinite; }
 
@@ -439,7 +454,7 @@
   <div id="flash"></div>
   <div id="warn"></div>
   <div id="banner"></div>
-  <div id="tutor"><div id="tutorline"></div><div id="tutorhand"></div><div id="tutormsg"></div></div>
+  <div id="tutor"><div id="tutorline"></div><div id="tutorhand"></div><div id="tutorarrow">➜</div><div id="tutormsg"></div></div>
   <div id="ammo">PISTOL · ∞</div>
   <div id="reloadbar"><div id="reloadfill"></div></div>
   <div id="pausebtn">❚❚</div>

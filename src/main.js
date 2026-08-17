@@ -5425,10 +5425,9 @@ function updateModeUI() {
   // The onboarding hides the button and the meter until it has taught the
   // rest of the controls, and updateModeUI runs from several places that
   // would otherwise hand them straight back.
-  const hidden = tutorStep === 'move' || tutorStep === 'look' || tutorStep === 'shoot';
-  const on = timeMode === 'toggle' && inRun && !hidden;
-  el.timebtn.style.display = on ? 'flex' : 'none';
-  el.slowmeter.style.display = on ? 'block' : 'none';
+  const on = timeMode === 'toggle' && inRun;
+  el.timebtn.style.display = (on && !tutorBefore('incoming')) ? 'flex' : 'none';
+  el.slowmeter.style.display = (on && !tutorBefore('dodged')) ? 'block' : 'none';
   el.gtime.style.display = timeMode === 'toggle' ? '' : 'none';
 }
 function updateSlowMeter() {
@@ -5456,54 +5455,143 @@ function updateSlowMeter() {
 // told what the freeze is for cannot be expected to dodge.
 // ---------------------------------------------------------------------------
 const TUTOR = {
+  hallCells: 9,         // the straight teaching hallway, in 4 m cells
   moveNeeded: 2.2,      // metres walked before step 1 is satisfied
   lookNeeded: 0.9,      // radians of yaw swept before step 2 is
-  drainFrom: 1.0,       // the meter demo runs the bank from full...
-  drainTo: 0,           // ...to empty, so the cost is felt before it matters
-  drainSecs: 3.4,
-  refillTo: 0.5,        // fraction of the cap that ends the shatter step
-  dodgeBullet: 0.8,     // enemy rounds run this much slower during the dodge
-  gunRise: 0.5,         // seconds for the weapon to come up
+  barrierAt: 3,         // cells down the hallway the barrier sits
+  barrierH: 1.05,       // low enough to see and shoot over
+  enemyBack: 1.4,       // metres in front of the door the first one stands
+  // Rounds during the onboarding are SLOW in both clocks. The lesson is
+  // "step out of the way", and a round you cannot see arrive teaches nothing.
+  bulletMul: 0.42,
+  sideOffset: 1.15,     // the first shot goes past one shoulder, not into you
+  fireGap: 2.6,         // seconds between shots while a step is waiting
+  refillTo: 0.5,        // fraction of the cap the shatter lesson tops up to
+  refillSecs: 1.1,      // ...visibly, over this long
+  gunRise: 0.55,        // seconds for the weapon to come up
 };
+// The whole sequence, in order. Each one waits on the player DOING the thing.
+const TUTOR_ORDER = ['move', 'look', 'approach', 'incoming', 'dodged',
+  'shoot', 'shattered', 'advance', 'room', 'roomTwo', 'done'];
 let tutorStep = null;      // null = not onboarding
 let tutorT = 0, tutorSub = 0;
 let tutorMoved = 0, tutorLooked = 0, tutorFired = false, tutorFroze = false;
+let tutorShotsDodged = 0, tutorKills = 0, tutorResumed = false;
+let tutorMark = null;      // the enemy this step is about
+let tutorBar = null;       // the barrier mesh + obstacle
 let tutorArmed = false;    // set from Settings; consumed by the next run
 let tutorSeen = false;
+let tutorShaping = false, tutorLegsBuilt = 0;
 try {
   tutorSeen = localStorage.getItem('timeshard_taught') === '1';
   tutorArmed = localStorage.getItem('timeshard_tutarm') === '1';
 } catch { /* private */ }
 
-// What the rest of the game asks about the tutorial.
+// What the rest of the game asks about the onboarding.
 const tutorActive = () => tutorStep !== null;
-const tutorHoldsFire = () => tutorStep !== null && tutorStep !== 'dodge';
-const tutorHoldsSpawns = () => tutorStep !== null &&
-  tutorStep !== 'shatter' && tutorStep !== 'dodge';
-const tutorBulletScale = () => (tutorStep === 'dodge' ? TUTOR.dodgeBullet : 1);
+// Every "is this on screen yet" question is answered from the sequence order,
+// not from a hand-written list of step names. The first version listed them,
+// the sequence was rewritten, and the gun and the meter both came back three
+// steps early because two of those lists were never updated.
+const tutorBefore = (step) => tutorStep !== null &&
+  TUTOR_ORDER.indexOf(tutorStep) < TUTOR_ORDER.indexOf(step);
+// Nobody fires on their own initiative during the onboarding — every shot in
+// it is fired BY the script, at a moment the script chose.
+const tutorHoldsFire = () => tutorStep !== null;
+const tutorHoldsSpawns = () => tutorStep !== null;
+const tutorBulletScale = () => (tutorStep !== null ? TUTOR.bulletMul : 1);
 
 function tutorMsg(html, where, pulse) {
   if (!el.tutormsg) return;
   el.tutormsg.innerHTML = html;
   el.tutormsg.className = `${where}${pulse ? ' pulse' : ''} show`;
+  if (el.tutorarrow) el.tutorarrow.classList.toggle('on', where === 'btn');
 }
-function tutorHideMsg() { if (el.tutormsg) el.tutormsg.className = ''; }
-function tutorHand(kind) {
-  if (!el.tutorhand) return;
-  el.tutorhand.className = kind ? `${kind} on` : '';
+function tutorHideMsg() {
+  if (el.tutormsg) el.tutormsg.className = '';
+  if (el.tutorarrow) el.tutorarrow.classList.remove('on');
 }
-function tutorLine(on) {
-  if (el.tutorline) el.tutorline.classList.toggle('on', !!on);
+function tutorHand(kind) { if (el.tutorhand) el.tutorhand.className = kind ? `${kind} on` : ''; }
+function tutorLine(on) { if (el.tutorline) el.tutorline.classList.toggle('on', !!on); }
+function tutorShowMeter(on) {
+  if (el.slowmeter) el.slowmeter.style.display = on ? 'block' : 'none';
+}
+function tutorShowGun(on) {
+  gun.visible = on;
+  if (el.ammo) el.ammo.style.display = on ? '' : 'none';
+}
+
+// --- the teaching hallway's furniture -------------------------------------
+// A low barrier across the corridor: high enough to stop you walking into the
+// lesson, low enough to see and shoot over, so it never hides the thing it is
+// keeping you back from.
+const TUTOR_BAR_MAT = new THREE.MeshLambertMaterial({ color: 0x3b4148 });
+function tutorBuildBarrier() {
+  if (tutorBar || game.mode !== 'hall' || !hall) return;
+  const L = hall.legs[hall.cur], C = HALL.cell;
+  // Between you and him, wherever the move lesson happened to leave you: a
+  // fixed offset from the player can land past the enemy if they walked far.
+  const enemyZ = L.door.z - TUTOR.enemyBack;
+  const z = Math.min(player.pos.z + TUTOR.barrierAt * C, enemyZ - 6);
+  const x = player.pos.x;
+  const m = new THREE.Mesh(new THREE.BoxGeometry(C + 0.4, TUTOR.barrierH, 0.5), TUTOR_BAR_MAT);
+  m.position.set(x, TUTOR.barrierH / 2, z);
+  scene.add(m);
+  const ob = { min: new THREE.Vector3(x - C / 2 - 0.2, 0, z - 0.25),
+    max: new THREE.Vector3(x + C / 2 + 0.2, TUTOR.barrierH, z + 0.25) };
+  L.obs.push(ob);
+  rebuildHallObstacles();
+  tutorBar = { m, ob, L, y: TUTOR.barrierH / 2 };
+}
+function tutorDropBarrier() {
+  if (!tutorBar) return;
+  const i = tutorBar.L.obs.indexOf(tutorBar.ob);
+  if (i >= 0) tutorBar.L.obs.splice(i, 1);
+  rebuildHallObstacles();
+  tutorBar.sinking = true;
+}
+function tutorUpdateBarrier(dtReal) {
+  if (!tutorBar || !tutorBar.sinking) return;
+  tutorBar.y -= dtReal * 1.8;
+  tutorBar.m.position.y = tutorBar.y;
+  if (tutorBar.y < -TUTOR.barrierH) { scene.remove(tutorBar.m); tutorBar = null; }
+}
+
+// --- the script's own trigger finger --------------------------------------
+// Every round fired during the onboarding comes from here, so its timing, its
+// speed and where it is aimed are all decisions rather than emergent AI.
+function tutorShot(e, sideOffset) {
+  if (!e || !e.alive) return;
+  const dx = player.pos.x - e.pos.x, dz = player.pos.z - e.pos.z;
+  e.g.rotation.y = Math.atan2(dx, dz) + Math.PI;   // face the shot
+  const origin = _v2.set(e.pos.x, 1.35, e.pos.z);
+  const target = _v3.set(player.pos.x + (sideOffset || 0), EYE_HEIGHT - 0.2, player.pos.z);
+  const d = target.sub(origin).normalize();
+  spawnBullet(origin, d, false, TUTOR.bulletMul);
+  muzzleFlash(origin.x, origin.y, origin.z, 0.85);
+  sfx.enemyShot();
+}
+// A body placed where the script wants it, standing still, waiting.
+function tutorPlaceEnemy(z) {
+  spawnEnemy('gunner');
+  const e = enemies[enemies.length - 1];
+  if (!e) return null;
+  e.state = 'idle';
+  e.hold = { x: player.pos.x, z };
+  e.pos.set(e.hold.x, 0, z);
+  e.g.position.set(e.hold.x, 0, z);
+  return e;
 }
 
 function startTutorial() {
   tutorStep = 'move';
   tutorT = 0; tutorSub = 0;
   tutorMoved = 0; tutorLooked = 0; tutorFired = false; tutorFroze = false;
+  tutorShotsDodged = 0; tutorKills = 0; tutorResumed = false; tutorMark = null;
   document.body.classList.add('tutoring');
-  gun.visible = false;
+  tutorShowGun(false);
   el.timebtn.style.display = 'none';
-  el.slowmeter.style.display = 'none';
+  tutorShowMeter(false);
   hideTimeTip();
   tutorLine(true);
   tutorMsg('DRAG TO MOVE', 'left');
@@ -5511,17 +5599,19 @@ function startTutorial() {
 }
 function endTutorial(taught = true) {
   tutorStep = null;
+  tutorShaping = false;
   document.body.classList.remove('tutoring');
   tutorHideMsg(); tutorHand(null); tutorLine(false);
-  el.timebtn.classList.remove('arrive');
-  gun.visible = true;
+  el.timebtn.classList.remove('arrive', 'hint');
+  tutorShowGun(true);
+  if (tutorBar) tutorDropBarrier();
   updateModeUI();
   tutorSeen = true;
   try { persist('timeshard_taught', '1'); } catch { /* private */ }
   tutorArmed = false;
   try { persist('timeshard_tutarm', ''); } catch { /* private */ }
   updateTutPill();
-  if (taught) showBanner('REACH THE RED DOOR', 2200);
+  if (taught) { const b = 'REACH THE RED DOOR'; setTimeout(() => showBanner(b, 2200), 60); }
 }
 function tutorNext(step) { tutorStep = step; tutorT = 0; tutorSub = 0; }
 
@@ -5530,7 +5620,14 @@ function tutorNext(step) { tutorStep = step; tutorT = 0; tutorSub = 0; }
 function updateTutorial(dtReal, movedM, yawDelta) {
   if (tutorStep === null) return;
   tutorT += dtReal;
+  tutorSub -= dtReal;
   if (!player.alive) { endTutorial(false); return; }
+  tutorUpdateBarrier(dtReal);
+  tutorShowMeter(!tutorBefore('dodged'));
+  if (el.ammo) el.ammo.style.display = tutorBefore('shoot') ? 'none' : '';
+  // anyone the script placed stands exactly where it put them
+  for (const e of enemies) if (e.hold) { e.pos.set(e.hold.x, 0, e.hold.z); e.g.position.set(e.hold.x, 0, e.hold.z); }
+
   switch (tutorStep) {
     case 'move':
       tutorMoved += movedM;
@@ -5540,69 +5637,142 @@ function updateTutorial(dtReal, movedM, yawDelta) {
         tutorHand('side');
       }
       break;
+
     case 'look':
       tutorLooked += Math.abs(yawDelta);
       if (tutorLooked > TUTOR.lookNeeded) {
-        tutorNext('shoot');
-        tutorLine(false);
-        tutorHand(null);
-        gun.visible = true;
-        gunRiseT = TUTOR.gunRise;      // the weapon comes up into frame
-        game.noFireBefore = 0;         // the opening grace must not block the lesson
-        tutorMsg('TAP TO SHOOT', 'mid');
+        tutorNext('approach');
+        tutorLine(false); tutorHand(null);
+        tutorHideMsg();
+        // the hallway's furniture: one body at the far end, one barrier
+        // between you and it
+        const L = hall.legs[hall.cur];
+        tutorBuildBarrier();
+        tutorMark = tutorPlaceEnemy(L.door.z - TUTOR.enemyBack);
+        tutorMsg('DOWN THE HALL', 'mid');
       }
       break;
-    case 'shoot':
-      if (tutorFired) {
-        tutorNext('freeze');
-        // the button's entrance: it was not on screen at all until now
+
+    case 'approach':
+      // the moment they can see him, he shoots — past one shoulder, slowly
+      if (tutorMark && tutorT > 1.1) {
+        tutorNext('incoming');
+        tutorHideMsg();
         updateModeUI();
         el.timebtn.classList.remove('arrive');
-        void el.timebtn.offsetWidth;   // restart the animation
-        el.timebtn.classList.add('arrive');
-        el.timebtn.classList.add('hint');
+        void el.timebtn.offsetWidth;
+        el.timebtn.classList.add('arrive', 'hint');
+        tutorShot(tutorMark, TUTOR.sideOffset);
+        tutorSub = TUTOR.fireGap;
         tutorMsg('TAP TO SLOW TIME', 'btn', true);
-        tutorHand(null);
       }
       break;
-    case 'freeze':
+
+    case 'incoming':
+      // keep firing, gently, until they use the button
+      if (tutorSub <= 0) { tutorShot(tutorMark, TUTOR.sideOffset); tutorSub = TUTOR.fireGap; }
       if (tutorFroze) {
-        tutorNext('meter');
+        tutorNext('dodged');
         el.timebtn.classList.remove('hint');
-        setTimeLocked(false);
-        slowBank = SLOWMO.cap * TUTOR.drainFrom;
+        tutorShowMeter(true);
         updateSlowMeter();
-        tutorMsg('USE YOUR TIME WISELY', 'meter', true);
+        tutorMsg('TAP TO RESUME TIME', 'btn', true);
       }
       break;
-    case 'meter': {
-      // the bank empties in front of them, once, with nothing else happening
-      const k = Math.min(1, tutorT / TUTOR.drainSecs);
-      slowBank = SLOWMO.cap * (TUTOR.drainFrom + (TUTOR.drainTo - TUTOR.drainFrom) * k);
-      updateSlowMeter();
-      if (k >= 1) {
-        tutorNext('shatter');
-        tutorMsg('SHATTER MORE<small>REFILL YOUR TIME METER</small>', 'mid', true);
+
+    case 'dodged':
+      // the bank is visibly draining now, which is the whole point of the beat
+      if (!timeLocked) {
+        tutorNext('shoot');
+        tutorResumed = true;
+        tutorHideMsg();
+        tutorShowGun(true);
+        gunRiseT = TUTOR.gunRise;
+        game.noFireBefore = 0;
+        tutorMsg('TAP TO SHOOT', 'mid', true);
       }
+      break;
+
+    case 'shoot':
+      if (!tutorMark || !tutorMark.alive || enemies.indexOf(tutorMark) < 0) {
+        tutorNext('shattered');
+        tutorMark = null;
+        tutorHideMsg();
+        tutorSub = 0.35;
+      }
+      break;
+
+    case 'shattered': {
+      // the meter fills back in front of them while the reason is on screen
+      if (tutorSub > 0) break;
+      const want = SLOWMO.cap * TUTOR.refillTo;
+      if (tutorT < TUTOR.refillSecs + 0.35) {
+        tutorMsg('SHATTER ENEMIES TO REFILL YOUR TIME', 'meter', true);
+        const k = Math.min(1, (tutorT - 0.35) / TUTOR.refillSecs);
+        slowBank = Math.max(slowBank, want * Math.max(0, k));
+        updateSlowMeter();
+        break;
+      }
+      slowBank = Math.max(slowBank, want);
+      updateSlowMeter();
+      tutorNext('advance');
+      tutorDropBarrier();
+      if (hall && hall.legs[hall.cur] && !hall.legs[hall.cur].door.open) openHallDoor();
+      tutorMsg('ENTER THE NEXT ROOM', 'mid');
       break;
     }
-    case 'shatter':
-      // bodies arrive and do not shoot; every kill visibly buys seconds back
-      if (enemies.length < 2 && tutorSub <= 0) { tutorSub = 1.1; spawnEnemy('gunner'); }
-      tutorSub -= dtReal;
-      if (slowBank >= SLOWMO.cap * TUTOR.refillTo) {
-        tutorNext('dodge');
+
+    case 'advance':
+      // wait for the crossing; crossHallDoor bumps doorsPassed
+      if (hall && hall.doorsPassed >= 1) {
+        tutorNext('room');
+        tutorHideMsg();
+        tutorSub = 1.0;
         tutorFroze = false;
-        el.timebtn.classList.add('hint');
-        tutorMsg('TAP TO SLOW TIME<small>AND WALK OUT OF THE ROUND</small>', 'btn', true);
       }
       break;
-    case 'dodge':
-      // now they shoot — slowed, so there is room to read the prompt and act
-      if (enemies.length < 2 && tutorSub <= 0) { tutorSub = 1.4; spawnEnemy('gunner'); }
-      tutorSub -= dtReal;
-      if (tutorFroze) endTutorial();
+
+    case 'room':
+      if (!tutorMark && tutorSub <= 0) {
+        tutorMark = tutorPlaceEnemy(player.pos.z + 9);
+        tutorSub = 0.8;
+      } else if (tutorMark && tutorSub <= 0) {
+        tutorShot(tutorMark, 0);
+        tutorSub = TUTOR.fireGap;
+        if (!tutorFroze) tutorMsg('TAP TO STOP TIME', 'btn', true);
+        else tutorMsg('SHATTER ENEMIES TO REFILL YOUR TIME', 'meter', true);
+      }
+      if (tutorFroze && el.tutormsg && el.tutormsg.classList.contains('btn')) {
+        tutorMsg('SHATTER ENEMIES TO REFILL YOUR TIME', 'meter', true);
+      }
+      if (tutorMark && (!tutorMark.alive || enemies.indexOf(tutorMark) < 0)) {
+        tutorNext('roomTwo');
+        tutorMark = null;
+        tutorSub = 1.2;
+      }
       break;
+
+    case 'roomTwo':
+      if (!tutorMark && tutorSub <= 0) {
+        tutorMark = tutorPlaceEnemy(player.pos.z + 8);
+        tutorSub = 0.8;
+      } else if (tutorMark && tutorSub <= 0) {
+        tutorShot(tutorMark, 0);
+        tutorSub = TUTOR.fireGap;
+      }
+      if (tutorMark && (!tutorMark.alive || enemies.indexOf(tutorMark) < 0)) {
+        tutorNext('done');
+        tutorMark = null;
+        if (hall && hall.legs[hall.cur] && !hall.legs[hall.cur].door.open) openHallDoor();
+        tutorMsg('TEST COMPLETE', 'mid');
+        tutorSub = 2.2;
+      }
+      break;
+
+    case 'done':
+      if (tutorSub <= 0) endTutorial(true);
+      break;
+
     default: break;
   }
 }
@@ -5655,6 +5825,7 @@ const el = {
   tutormsg: document.getElementById('tutormsg'),
   tutorhand: document.getElementById('tutorhand'),
   tutorline: document.getElementById('tutorline'),
+  tutorarrow: document.getElementById('tutorarrow'),
   tutlink: document.getElementById('tutlink'),
   slowfill: document.getElementById('slowfill'),
   flash: document.getElementById('flash'),
@@ -5941,6 +6112,10 @@ function legHeadline(proto) {
 }
 
 function showBanner(html, dur = 1600) {
+  // The onboarding owns the screen. "THE DOOR IS OPEN" landing on top of
+  // "DRAG TO MOVE" is two instructions at once, and the one the player needs
+  // is the smaller of the two.
+  if (tutorStep !== null) return;
   messageQueue.push({ html, dur });
   pumpMessages();
 }
@@ -6020,7 +6195,17 @@ let deathAt = 0;
 
 function hitPlayer(ended = false) {
   if (!player.alive || (player.iframes > 0 && !ended)) return;
-  if (tutorStep !== null) endTutorial(false);
+  // You cannot fail the onboarding. Being hit while learning to dodge stings
+  // — the screen flashes, the phone thumps — and then the lesson continues,
+  // because a first-time player who dies during the tutorial has learned
+  // only that the tutorial can be lost.
+  if (tutorStep !== null && !ended) {
+    player.iframes = 0.9;
+    el.redflash.style.opacity = '1';
+    setTimeout(() => { el.redflash.style.opacity = '0'; }, 130);
+    vibrate([40, 60, 40]);
+    return;
+  }
   player.alive = false;
   sprintTo = null;
   game.state = 'dead';
@@ -6309,19 +6494,25 @@ function genHallLeg(sgx, sgz, proto) {
   const form = (proto && proto.form && proto.form.id) || 'corridor';
   // FORM decides the skeleton: a service run turns constantly, a gauntlet is
   // one long straight with nowhere to hide, an atrium is mostly chamber.
-  const fwd = form === 'gauntlet'
-    ? LEG.fwdGauntlet + Math.floor(Math.random() * LEG.fwdGauntletVar)
-    : LEG.fwdBase + Math.floor(Math.random() * LEG.fwdVar);
+  // The onboarding hallway is dead straight, because every beat of it depends
+  // on the player seeing one enemy at the far end from the moment they turn
+  // to look. A procedurally jogged corridor cannot promise that.
+  const straight = !!(proto && proto.straight);
+  const fwd = straight ? TUTOR.hallCells
+    : form === 'gauntlet'
+      ? LEG.fwdGauntlet + Math.floor(Math.random() * LEG.fwdGauntletVar)
+      : LEG.fwdBase + Math.floor(Math.random() * LEG.fwdVar);
   let f = 0, jogs = 0;
   const doorways = [];         // interior openings that get a framed jamb
   const breaks = new Set();    // spine indices that must start a new stretch
   let vaultDone = false;
   while (f < fwd) {
-    const run = form === 'serviceRun'
-      ? LEG.runServiceRun + Math.floor(Math.random() * LEG.runServiceVar)
-      : form === 'gauntlet'
-        ? LEG.runGauntlet + Math.floor(Math.random() * LEG.runGauntletVar)
-        : LEG.runBase + Math.floor(Math.random() * LEG.runVar);
+    const run = straight ? 9999
+      : form === 'serviceRun'
+        ? LEG.runServiceRun + Math.floor(Math.random() * LEG.runServiceVar)
+        : form === 'gauntlet'
+          ? LEG.runGauntlet + Math.floor(Math.random() * LEG.runGauntletVar)
+          : LEG.runBase + Math.floor(Math.random() * LEG.runVar);
     for (let i = 0; i < run && f < fwd; i++) { gz++; f++; add(gx, gz); spine.push([gx, gz]); }
     if (f >= fwd - 4) break;   // leave the tail straight for the door sightline
     // THE VAULT: once per leg, the corridor stops being a corridor. It opens
@@ -6863,6 +7054,11 @@ function hallWave(n) {
 }
 
 function initHall() {
+  // Decided BEFORE the first leg is composed, because the onboarding shapes
+  // its own two legs (a straight hallway, then a room) and `forced` runs
+  // during construction.
+  tutorShaping = (!tutorSeen || tutorArmed) && timeMode === 'toggle';
+  tutorLegsBuilt = 0;
   game.wave = 1;
   game.state = 'intro';
   game.stateT = 0;
@@ -6896,7 +7092,7 @@ function initHall() {
   updateModeUI();
   // A first run teaches itself. So does one the player has re-armed from
   // Settings — which then disarms, because it is a one-shot, not a mode.
-  if ((!tutorSeen || tutorArmed) && timeMode === 'toggle') {
+  if (tutorShaping) {
     tutorPrevX = player.pos.x; tutorPrevZ = player.pos.z; tutorPrevYaw = player.yaw;
     startTutorial();
   } else {
@@ -6954,6 +7150,21 @@ function forced(proto) {
   // to door 13 can be played on door 1. The composer still cannot pick these
   // (impl: false), so a normal run is completely unaffected by their
   // existence — this is the only door into them until they are approved.
+  // THE ONBOARDING'S TWO LEGS: a straight hallway, then a room. Nothing else
+  // is allowed on them — no condition, no measure — because every one of them
+  // changes a rule the player has not been taught yet.
+  if (tutorShaping) {
+    proto.condition = null;
+    proto.measures = [];
+    if (tutorLegsBuilt === 0) {
+      proto.form = ELEMENTS.find((e) => e.id === 'corridor') || proto.form;
+      proto.straight = true;
+    } else if (tutorLegsBuilt === 1) {
+      proto.form = ELEMENTS.find((e) => e.id === 'vault') || proto.form;
+    }
+    tutorLegsBuilt++;
+    return proto;
+  }
   const pin = forcedCondition !== undefined ? forcedCondition : testCondition;
   if (pin && TEST_MEASURES.has(pin)) {
     const m = ELEMENTS.find((e) => e.id === pin);
@@ -7562,8 +7773,7 @@ function frame(now) {
     camera.position.set(Math.sin(a) * 12, 4.2 + Math.sin(demoT * 0.11), Math.cos(a) * 12);
     camera.lookAt(0, 1.2, 0);
   } else {
-    if (tutorStep === 'move' || tutorStep === 'look') gun.visible = false;
-    else gun.visible = true;
+    gun.visible = !tutorBefore('shoot');
     camera.position.set(player.pos.x, EYE_HEIGHT, player.pos.z);
     camera.rotation.order = 'YXZ';
     camera.rotation.y = player.yaw;
@@ -7850,6 +8060,7 @@ window.__ts = {
   tutor: () => ({ step: tutorStep, armed: tutorArmed, seen: tutorSeen,
     moved: +tutorMoved.toFixed(2), looked: +tutorLooked.toFixed(2) }),
   gunVisible: () => gun.visible,
+  tutorBar: () => (tutorBar ? +tutorBar.m.position.z.toFixed(1) : null),
   setTutorStep: (v) => { tutorStep = v; tutorT = 0; tutorSub = 0; },
   flash: (s = 1) => muzzleFlash(player.pos.x, 1.4, player.pos.z, s),
   muzzle: () => muzzleLights.map((m) => +m.l.intensity.toFixed(2)),
