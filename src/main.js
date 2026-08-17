@@ -5456,29 +5456,32 @@ function updateSlowMeter() {
 // ---------------------------------------------------------------------------
 const TUTOR = {
   hallCells: 9,         // the straight teaching hallway, in 4 m cells
-  moveNeeded: 2.2,      // metres walked before step 1 is satisfied
-  lookNeeded: 0.9,      // radians of yaw swept before step 2 is
-  barrierAt: 3,         // cells down the hallway the barrier sits
+  moveNeeded: 2.2,      // metres walked before the move lesson is satisfied
+  lookNeeded: 0.9,      // radians of yaw swept before the look lesson is
+  barrierAt: 3,         // cells down the hallway the barrier rises
   barrierH: 1.05,       // low enough to see and shoot over
+  barrierRise: 0.9,     // seconds it takes to come up out of the floor
   enemyBack: 1.4,       // metres in front of the door the first one stands
   // Rounds during the onboarding are SLOW in both clocks. The lesson is
   // "step out of the way", and a round you cannot see arrive teaches nothing.
   bulletMul: 0.42,
-  sideOffset: 1.15,     // the first shot goes past one shoulder, not into you
-  fireGap: 2.6,         // seconds between shots while a step is waiting
-  refillTo: 0.5,        // fraction of the cap the shatter lesson tops up to
-  refillSecs: 1.1,      // ...visibly, over this long
-  gunRise: 0.55,        // seconds for the weapon to come up
+  sideOffset: 0.9,      // the first shot goes past one shoulder, not into you
+  fireGap: 3.2,         // seconds between shots while a step is waiting
+  dodgeSecs: 2.6,       // how long "dodge the bullet" stays up
+  meterSecs: 16,        // the scripted meter drains from full over this long
+  warnAt: 0.5,          // ...and warns here
+  gunRise: 0.6,         // seconds for the weapon to swing up into frame
+  roomEnemies: 2,       // per room in the two rooms at the end
 };
-// The whole sequence, in order. Each one waits on the player DOING the thing.
-const TUTOR_ORDER = ['move', 'look', 'approach', 'incoming', 'dodged',
-  'shoot', 'shattered', 'advance', 'room', 'roomTwo', 'done'];
+// The whole sequence, in order. Each step waits on the player DOING the thing.
+const TUTOR_ORDER = ['move', 'look', 'barrier', 'incoming', 'dodge', 'gunup',
+  'shoot', 'meter', 'advance', 'roomA', 'roomB', 'done'];
 let tutorStep = null;      // null = not onboarding
 let tutorT = 0, tutorSub = 0;
 let tutorMoved = 0, tutorLooked = 0, tutorFired = false, tutorFroze = false;
-let tutorShotsDodged = 0, tutorKills = 0, tutorResumed = false;
 let tutorMark = null;      // the enemy this step is about
 let tutorBar = null;       // the barrier mesh + obstacle
+let tutorRoomLeft = 0;     // bodies still to shatter in this room
 let tutorArmed = false;    // set from Settings; consumed by the next run
 let tutorSeen = false;
 let tutorShaping = false, tutorLegsBuilt = 0;
@@ -5487,19 +5490,21 @@ try {
   tutorArmed = localStorage.getItem('timeshard_tutarm') === '1';
 } catch { /* private */ }
 
-// What the rest of the game asks about the onboarding.
 const tutorActive = () => tutorStep !== null;
 // Every "is this on screen yet" question is answered from the sequence order,
-// not from a hand-written list of step names. The first version listed them,
-// the sequence was rewritten, and the gun and the meter both came back three
-// steps early because two of those lists were never updated.
+// not from a hand-written list of step names — the first version listed them,
+// the sequence was rewritten, and two of those lists were never updated.
 const tutorBefore = (step) => tutorStep !== null &&
   TUTOR_ORDER.indexOf(tutorStep) < TUTOR_ORDER.indexOf(step);
-// Nobody fires on their own initiative during the onboarding — every shot in
-// it is fired BY the script, at a moment the script chose.
+// Nobody fires on their own initiative here: every round is fired BY the
+// script, at a moment the script chose.
 const tutorHoldsFire = () => tutorStep !== null;
 const tutorHoldsSpawns = () => tutorStep !== null;
 const tutorBulletScale = () => (tutorStep !== null ? TUTOR.bulletMul : 1);
+// THE FIRST FREEZE IS FREE. Until the meter lesson, stopping time costs
+// nothing at all — you are being taught what the button does, and a bank
+// quietly emptying underneath that is a second lesson nobody asked for.
+const tutorFreeIsFree = () => tutorBefore('meter');
 
 function tutorMsg(html, where, pulse) {
   if (!el.tutormsg) return;
@@ -5513,18 +5518,12 @@ function tutorHideMsg() {
 }
 function tutorHand(kind) { if (el.tutorhand) el.tutorhand.className = kind ? `${kind} on` : ''; }
 function tutorLine(on) { if (el.tutorline) el.tutorline.classList.toggle('on', !!on); }
-function tutorShowMeter(on) {
-  if (el.slowmeter) el.slowmeter.style.display = on ? 'block' : 'none';
-}
-function tutorShowGun(on) {
-  gun.visible = on;
-  if (el.ammo) el.ammo.style.display = on ? '' : 'none';
-}
+function tutorShowMeter(on) { if (el.slowmeter) el.slowmeter.style.display = on ? 'block' : 'none'; }
 
 // --- the teaching hallway's furniture -------------------------------------
-// A low barrier across the corridor: high enough to stop you walking into the
-// lesson, low enough to see and shoot over, so it never hides the thing it is
-// keeping you back from.
+// A low barrier that RISES out of the floor in front of you: high enough to
+// stop you walking into the lesson, low enough to see and shoot over, so it
+// never hides the thing it is keeping you back from.
 const TUTOR_BAR_MAT = new THREE.MeshLambertMaterial({ color: 0x3b4148 });
 function tutorBuildBarrier() {
   if (tutorBar || game.mode !== 'hall' || !hall) return;
@@ -5535,31 +5534,39 @@ function tutorBuildBarrier() {
   const z = Math.min(player.pos.z + TUTOR.barrierAt * C, enemyZ - 6);
   const x = player.pos.x;
   const m = new THREE.Mesh(new THREE.BoxGeometry(C + 0.4, TUTOR.barrierH, 0.5), TUTOR_BAR_MAT);
-  m.position.set(x, TUTOR.barrierH / 2, z);
+  m.position.set(x, -TUTOR.barrierH, z);
   scene.add(m);
   const ob = { min: new THREE.Vector3(x - C / 2 - 0.2, 0, z - 0.25),
     max: new THREE.Vector3(x + C / 2 + 0.2, TUTOR.barrierH, z + 0.25) };
   L.obs.push(ob);
   rebuildHallObstacles();
-  tutorBar = { m, ob, L, y: TUTOR.barrierH / 2 };
+  tutorBar = { m, ob, L, y: -TUTOR.barrierH, rising: true };
+  sfx.airlock();
 }
 function tutorDropBarrier() {
   if (!tutorBar) return;
   const i = tutorBar.L.obs.indexOf(tutorBar.ob);
   if (i >= 0) tutorBar.L.obs.splice(i, 1);
   rebuildHallObstacles();
+  tutorBar.rising = false;
   tutorBar.sinking = true;
+  sfx.airlock();
 }
 function tutorUpdateBarrier(dtReal) {
-  if (!tutorBar || !tutorBar.sinking) return;
-  tutorBar.y -= dtReal * 1.8;
+  if (!tutorBar) return;
+  const rate = TUTOR.barrierH * 2 / TUTOR.barrierRise;
+  if (tutorBar.rising) {
+    tutorBar.y = Math.min(TUTOR.barrierH / 2, tutorBar.y + dtReal * rate);
+    if (tutorBar.y >= TUTOR.barrierH / 2) tutorBar.rising = false;
+  } else if (tutorBar.sinking) {
+    tutorBar.y -= dtReal * rate;
+    if (tutorBar.y < -TUTOR.barrierH) { scene.remove(tutorBar.m); tutorBar = null; return; }
+  }
   tutorBar.m.position.y = tutorBar.y;
-  if (tutorBar.y < -TUTOR.barrierH) { scene.remove(tutorBar.m); tutorBar = null; }
 }
+const tutorBarUp = () => !!tutorBar && !tutorBar.rising && !tutorBar.sinking;
 
 // --- the script's own trigger finger --------------------------------------
-// Every round fired during the onboarding comes from here, so its timing, its
-// speed and where it is aimed are all decisions rather than emergent AI.
 function tutorShot(e, sideOffset) {
   if (!e || !e.alive) return;
   const dx = player.pos.x - e.pos.x, dz = player.pos.z - e.pos.z;
@@ -5571,25 +5578,31 @@ function tutorShot(e, sideOffset) {
   muzzleFlash(origin.x, origin.y, origin.z, 0.85);
   sfx.enemyShot();
 }
-// A body placed where the script wants it, standing still, waiting.
-function tutorPlaceEnemy(z) {
+function tutorPlaceEnemy(z, xOff = 0) {
   spawnEnemy('gunner');
   const e = enemies[enemies.length - 1];
   if (!e) return null;
-  e.state = 'idle';
-  e.hold = { x: player.pos.x, z };
+  e.hold = { x: player.pos.x + xOff, z };
   e.pos.set(e.hold.x, 0, z);
   e.g.position.set(e.hold.x, 0, z);
   return e;
+}
+// One or two, spread across the room, all of them standing still.
+function tutorFillRoom(n) {
+  tutorRoomLeft = 0;
+  for (let i = 0; i < n; i++) {
+    const e = tutorPlaceEnemy(player.pos.z + 8 + i * 2.5, (i - (n - 1) / 2) * 3.2);
+    if (e) tutorRoomLeft++;
+  }
 }
 
 function startTutorial() {
   tutorStep = 'move';
   tutorT = 0; tutorSub = 0;
   tutorMoved = 0; tutorLooked = 0; tutorFired = false; tutorFroze = false;
-  tutorShotsDodged = 0; tutorKills = 0; tutorResumed = false; tutorMark = null;
+  tutorMark = null; tutorRoomLeft = 0;
   document.body.classList.add('tutoring');
-  tutorShowGun(false);
+  gun.visible = false;
   el.timebtn.style.display = 'none';
   tutorShowMeter(false);
   hideTimeTip();
@@ -5603,8 +5616,10 @@ function endTutorial(taught = true) {
   document.body.classList.remove('tutoring');
   tutorHideMsg(); tutorHand(null); tutorLine(false);
   el.timebtn.classList.remove('arrive', 'hint');
-  tutorShowGun(true);
+  gun.visible = true;
+  if (el.ammo) el.ammo.style.display = '';
   if (tutorBar) tutorDropBarrier();
+  for (const e of enemies) e.hold = null;
   updateModeUI();
   tutorSeen = true;
   try { persist('timeshard_taught', '1'); } catch { /* private */ }
@@ -5614,6 +5629,12 @@ function endTutorial(taught = true) {
   if (taught) { const b = 'REACH THE RED DOOR'; setTimeout(() => showBanner(b, 2200), 60); }
 }
 function tutorNext(step) { tutorStep = step; tutorT = 0; tutorSub = 0; }
+function tutorRevealButton() {
+  updateModeUI();
+  el.timebtn.classList.remove('arrive');
+  void el.timebtn.offsetWidth;
+  el.timebtn.classList.add('arrive', 'hint');
+}
 
 // Driven on REAL time from the frame loop, after input and movement have been
 // applied, so "did they do it yet" is answered against this frame's state.
@@ -5623,9 +5644,8 @@ function updateTutorial(dtReal, movedM, yawDelta) {
   tutorSub -= dtReal;
   if (!player.alive) { endTutorial(false); return; }
   tutorUpdateBarrier(dtReal);
-  tutorShowMeter(!tutorBefore('dodged'));
-  if (el.ammo) el.ammo.style.display = tutorBefore('shoot') ? 'none' : '';
-  // anyone the script placed stands exactly where it put them
+  tutorShowMeter(!tutorBefore('meter'));
+  if (el.ammo) el.ammo.style.display = tutorBefore('gunup') ? 'none' : '';
   for (const e of enemies) if (e.hold) { e.pos.set(e.hold.x, 0, e.hold.z); e.g.position.set(e.hold.x, 0, e.hold.z); }
 
   switch (tutorStep) {
@@ -5641,27 +5661,19 @@ function updateTutorial(dtReal, movedM, yawDelta) {
     case 'look':
       tutorLooked += Math.abs(yawDelta);
       if (tutorLooked > TUTOR.lookNeeded) {
-        tutorNext('approach');
+        tutorNext('barrier');
         tutorLine(false); tutorHand(null);
         tutorHideMsg();
-        // the hallway's furniture: one body at the far end, one barrier
-        // between you and it
-        const L = hall.legs[hall.cur];
-        tutorBuildBarrier();
-        tutorMark = tutorPlaceEnemy(L.door.z - TUTOR.enemyBack);
-        tutorMsg('DOWN THE HALL', 'mid');
+        tutorBuildBarrier();   // it rises before anyone appears behind it
       }
       break;
 
-    case 'approach':
-      // the moment they can see him, he shoots — past one shoulder, slowly
-      if (tutorMark && tutorT > 1.1) {
+    case 'barrier':
+      if (tutorBarUp()) {
         tutorNext('incoming');
-        tutorHideMsg();
-        updateModeUI();
-        el.timebtn.classList.remove('arrive');
-        void el.timebtn.offsetWidth;
-        el.timebtn.classList.add('arrive', 'hint');
+        const L = hall.legs[hall.cur];
+        tutorMark = tutorPlaceEnemy(L.door.z - TUTOR.enemyBack);
+        tutorRevealButton();
         tutorShot(tutorMark, TUTOR.sideOffset);
         tutorSub = TUTOR.fireGap;
         tutorMsg('TAP TO SLOW TIME', 'btn', true);
@@ -5669,105 +5681,100 @@ function updateTutorial(dtReal, movedM, yawDelta) {
       break;
 
     case 'incoming':
-      // keep firing, gently, until they use the button
       if (tutorSub <= 0) { tutorShot(tutorMark, TUTOR.sideOffset); tutorSub = TUTOR.fireGap; }
       if (tutorFroze) {
-        tutorNext('dodged');
+        tutorNext('dodge');
         el.timebtn.classList.remove('hint');
-        tutorShowMeter(true);
-        updateSlowMeter();
-        tutorMsg('TAP TO RESUME TIME', 'btn', true);
+        tutorMsg('DODGE THE BULLET', 'mid');
+        tutorSub = TUTOR.dodgeSecs;
       }
       break;
 
-    case 'dodged':
-      // the bank is visibly draining now, which is the whole point of the beat
-      if (!timeLocked) {
-        tutorNext('shoot');
-        tutorResumed = true;
+    case 'dodge':
+      if (tutorSub <= 0) {
+        tutorNext('gunup');
         tutorHideMsg();
-        tutorShowGun(true);
-        gunRiseT = TUTOR.gunRise;
+        gunRiseT = TUTOR.gunRise;   // the reload rig, swinging it up into frame
         game.noFireBefore = 0;
+      }
+      break;
+
+    case 'gunup':
+      if (gunRiseT <= 0) {
+        tutorNext('shoot');
         tutorMsg('TAP TO SHOOT', 'mid', true);
       }
       break;
 
     case 'shoot':
       if (!tutorMark || !tutorMark.alive || enemies.indexOf(tutorMark) < 0) {
-        tutorNext('shattered');
         tutorMark = null;
+        tutorNext('meter');
         tutorHideMsg();
-        tutorSub = 0.35;
+        // the meter arrives full and drains in front of them, on the script's
+        // clock rather than the game's, so the lesson lands at a readable pace
+        slowBank = SLOWMO.cap;
+        setTimeLocked(true);
+        updateSlowMeter();
+        tutorMsg('TAP TO RESUME TIME', 'btn', true);
       }
       break;
 
-    case 'shattered': {
-      // the meter fills back in front of them while the reason is on screen
-      if (tutorSub > 0) break;
-      const want = SLOWMO.cap * TUTOR.refillTo;
-      if (tutorT < TUTOR.refillSecs + 0.35) {
-        tutorMsg('SHATTER ENEMIES TO REFILL YOUR TIME', 'meter', true);
-        const k = Math.min(1, (tutorT - 0.35) / TUTOR.refillSecs);
-        slowBank = Math.max(slowBank, want * Math.max(0, k));
-        updateSlowMeter();
-        break;
-      }
-      slowBank = Math.max(slowBank, want);
+    case 'meter': {
+      const k = Math.min(1, tutorT / TUTOR.meterSecs);
+      slowBank = SLOWMO.cap * (1 - k);
       updateSlowMeter();
-      tutorNext('advance');
-      tutorDropBarrier();
-      if (hall && hall.legs[hall.cur] && !hall.legs[hall.cur].door.open) openHallDoor();
-      tutorMsg('ENTER THE NEXT ROOM', 'mid');
+      if (k >= 1 - TUTOR.warnAt && el.tutormsg && !el.tutormsg.classList.contains('meter')) {
+        tutorMsg('YOUR TIME METER IS RUNNING OUT', 'meter', true);
+      }
+      if (!timeLocked || k >= 1) {
+        tutorNext('advance');
+        slowBank = Math.max(slowBank, SLOWMO.base);
+        setTimeLocked(false);
+        updateSlowMeter();
+        tutorDropBarrier();
+        if (hall && hall.legs[hall.cur] && !hall.legs[hall.cur].door.open) openHallDoor();
+        tutorMsg('ENTER THE NEXT ROOM', 'mid');
+      }
       break;
     }
 
     case 'advance':
-      // wait for the crossing; crossHallDoor bumps doorsPassed
       if (hall && hall.doorsPassed >= 1) {
-        tutorNext('room');
+        tutorNext('roomA');
         tutorHideMsg();
-        tutorSub = 1.0;
-        tutorFroze = false;
+        tutorSub = 1.1;
       }
       break;
 
-    case 'room':
-      if (!tutorMark && tutorSub <= 0) {
-        tutorMark = tutorPlaceEnemy(player.pos.z + 9);
-        tutorSub = 0.8;
-      } else if (tutorMark && tutorSub <= 0) {
-        tutorShot(tutorMark, 0);
-        tutorSub = TUTOR.fireGap;
-        if (!tutorFroze) tutorMsg('TAP TO STOP TIME', 'btn', true);
-        else tutorMsg('SHATTER ENEMIES TO REFILL YOUR TIME', 'meter', true);
+    case 'roomA':
+    case 'roomB': {
+      const isB = tutorStep === 'roomB';
+      if (tutorRoomLeft === 0 && tutorSub > 0) break;
+      if (tutorRoomLeft === 0 && !enemies.length) {
+        tutorFillRoom(TUTOR.roomEnemies);
+        tutorSub = 1.6;
+        break;
       }
-      if (tutorFroze && el.tutormsg && el.tutormsg.classList.contains('btn')) {
-        tutorMsg('SHATTER ENEMIES TO REFILL YOUR TIME', 'meter', true);
-      }
-      if (tutorMark && (!tutorMark.alive || enemies.indexOf(tutorMark) < 0)) {
-        tutorNext('roomTwo');
-        tutorMark = null;
-        tutorSub = 1.2;
-      }
-      break;
-
-    case 'roomTwo':
-      if (!tutorMark && tutorSub <= 0) {
-        tutorMark = tutorPlaceEnemy(player.pos.z + 8);
-        tutorSub = 0.8;
-      } else if (tutorMark && tutorSub <= 0) {
-        tutorShot(tutorMark, 0);
+      // a shot now and then, always slow, never a volley
+      if (tutorSub <= 0 && enemies.length) {
+        tutorShot(enemies[0], (Math.random() - 0.5) * 1.4);
         tutorSub = TUTOR.fireGap;
       }
-      if (tutorMark && (!tutorMark.alive || enemies.indexOf(tutorMark) < 0)) {
-        tutorNext('done');
-        tutorMark = null;
+      if (!enemies.length) {
+        tutorRoomLeft = 0;
         if (hall && hall.legs[hall.cur] && !hall.legs[hall.cur].door.open) openHallDoor();
-        tutorMsg('TEST COMPLETE', 'mid');
-        tutorSub = 2.2;
+        if (!isB) {
+          if (hall.doorsPassed >= 2) { tutorNext('roomB'); tutorSub = 1.4; }
+          else tutorMsg('ENTER THE NEXT ROOM', 'mid');
+        } else {
+          tutorNext('done');
+          tutorMsg('TEST COMPLETE', 'mid');
+          tutorSub = 2.2;
+        }
       }
       break;
+    }
 
     case 'done':
       if (tutorSub <= 0) endTutorial(true);
@@ -7159,7 +7166,7 @@ function forced(proto) {
     if (tutorLegsBuilt === 0) {
       proto.form = ELEMENTS.find((e) => e.id === 'corridor') || proto.form;
       proto.straight = true;
-    } else if (tutorLegsBuilt === 1) {
+    } else {
       proto.form = ELEMENTS.find((e) => e.id === 'vault') || proto.form;
     }
     tutorLegsBuilt++;
@@ -7608,7 +7615,9 @@ function frame(now) {
   const playing = game.state === 'play' || game.state === 'intro';
   // button mode: the bank drains in real time while locked; empty = snap back
   if (timeMode === 'toggle' && playing) {
-    if (timeLocked) {
+    if (timeLocked && tutorFreeIsFree()) {
+      // The onboarding's first freeze costs nothing: see tutorFreeIsFree.
+    } else if (timeLocked) {
       // the tank drains slower early on — nearly double the frozen seconds
       // on the opening waves, full price once the run heats up. Rush hour is
       // built AROUND frozen time (it's how you see the sleepers), so its
@@ -7805,9 +7814,12 @@ function frame(now) {
   // back up as the fresh magazine seats — every weapon uses the same rig
   const spec = WEAPONS[player.weapon];
   const rp = player.reloadT > 0 ? 1 - player.reloadT / spec.reload : 1;
+  // The onboarding draws the weapon with the SAME rig — it swings up from
+  // below the frame exactly as a fresh magazine seating does, so the first
+  // time you see your gun and every reload after it read as one motion.
   const fold = player.reloadT > 0
     ? Math.sin(Math.min(rp, 1) * Math.PI) ** 0.6   // out and back within the reload
-    : 0;
+    : (gunRiseT > 0 ? Math.min(1, gunRiseT / TUTOR.gunRise) ** 0.6 : 0);
   const bob = Math.cos(now * 0.0017) * 0.004;
   if (spec.melee) {
     // The knife has no recoil and nothing to rack, so it gets its own path:
@@ -7832,15 +7844,7 @@ function frame(now) {
     gun.rotation.x = gunKick * 0.22 - fold * 1.15;
     gun.rotation.z = 0;
   }
-  // The tutorial draws the weapon up into frame the first time you see it.
-  // Applied here, as an offset on top of whatever the viewmodel just wrote,
-  // because the viewmodel sets an absolute position every single frame.
-  if (gunRiseT > 0) {
-    gunRiseT = Math.max(0, gunRiseT - dt);
-    const k = gunRiseT / TUTOR.gunRise;
-    gun.position.y -= k * k * 0.6;
-    gun.rotation.x -= k * 0.5;
-  }
+  if (gunRiseT > 0) gunRiseT = Math.max(0, gunRiseT - dt);
 
   // --- world (scaled time)
   if (playing) {

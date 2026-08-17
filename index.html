@@ -260,15 +260,23 @@
   #tutormsg.btn   { top:44%; font-size:min(7.2vw,33px); color:#ff2d1a;
                     text-shadow:0 2px 18px rgba(238,240,243,.75); }
   body.slowmo #tutormsg.btn { color:#ff5d4a; text-shadow:0 2px 18px rgba(12,13,16,.8); }
-  #tutorarrow { position:absolute; right:16vw; top:52%; font-size:34px; font-weight:900;
+  /* Straight down at the button, from directly above it. The time button is
+     146px wide sitting at right:-14px, so its centre line is 59px in from the
+     right edge; the arrow is 38px wide, so right:40px puts the two on the
+     same axis whatever the screen width. */
+  #tutorarrow { position:absolute; right:40px; width:38px; text-align:center;
+                bottom:calc(env(safe-area-inset-bottom, 0px) + 3.4vh + 152px);
+                font-size:38px; line-height:1; font-weight:900;
                 color:#ff2d1a; opacity:0; pointer-events:none;
-                transform:rotate(38deg); }
-  #tutorarrow.on { animation:arrowrun 1.05s ease-in-out infinite; }
-  @keyframes arrowrun {
-    0%   { opacity:0;  transform:translate(0,0) rotate(38deg); }
-    25%  { opacity:1; }
-    100% { opacity:0;  transform:translate(4.5vw,9vh) rotate(38deg); }
+                text-shadow:0 2px 14px rgba(238,240,243,.8); }
+  #tutorarrow.on { animation:arrowdrop 1.05s ease-in-out infinite; }
+  @keyframes arrowdrop {
+    0%   { opacity:0; transform:translateY(-14px); }
+    30%  { opacity:1; }
+    100% { opacity:0; transform:translateY(16px); }
   }
+  /* the running-out warning sits under the meter and shares its alarm */
+  #tutormsg.meter { color:#ff2d1a; }
   @keyframes tutorpulse { 0%,100% { opacity:1; } 50% { opacity:.32; } }
   #tutormsg.pulse { animation:tutorpulse 1.05s ease-in-out infinite; }
 
@@ -454,7 +462,7 @@
   <div id="flash"></div>
   <div id="warn"></div>
   <div id="banner"></div>
-  <div id="tutor"><div id="tutorline"></div><div id="tutorhand"></div><div id="tutorarrow">➜</div><div id="tutormsg"></div></div>
+  <div id="tutor"><div id="tutorline"></div><div id="tutorhand"></div><div id="tutorarrow">▼</div><div id="tutormsg"></div></div>
   <div id="ammo">PISTOL · ∞</div>
   <div id="reloadbar"><div id="reloadfill"></div></div>
   <div id="pausebtn">❚❚</div>
