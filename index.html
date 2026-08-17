@@ -225,6 +225,58 @@
   /* the warn flash shares the channel, so it shares the safe zone */
   #warn { top:auto; bottom:60%; }
 
+  /* ---- ONBOARDING ------------------------------------------------------
+     A first run teaches the four controls in order, each step waiting on the
+     player actually doing the thing rather than on a timer. The dotted line
+     appears with the first step and stays for the second, because the whole
+     point of it is that the two halves of the glass do different jobs. */
+  #tutor { position:fixed; inset:0; z-index:11; pointer-events:none; display:none; }
+  body.tutoring #tutor { display:block; }
+  #tutorline { position:absolute; left:50%; top:0; bottom:0; width:0;
+               border-left:2px dashed rgba(22,24,29,.30); opacity:0;
+               transition:opacity .45s ease; }
+  #tutorline.on { opacity:1; }
+  body.slowmo #tutorline { border-left-color:rgba(238,240,243,.42); }
+  #tutormsg { position:absolute; left:0; right:0; text-align:center;
+              font-weight:900; letter-spacing:.06em; color:#16181d;
+              font-size:min(9.5vw,44px); line-height:1.06; opacity:0;
+              transition:opacity .35s ease, transform .35s ease;
+              transform:translateY(8px); padding:0 18px; }
+  #tutormsg.show { opacity:1; transform:none; }
+  #tutormsg small { display:block; margin-top:10px; font-size:min(3.6vw,15px);
+                    letter-spacing:.3em; color:#ff2d1a; }
+  body.slowmo #tutormsg { color:#eef0f3; }
+  /* where a step wants its words */
+  #tutormsg.mid   { top:26%; }
+  #tutormsg.left  { top:38%; right:52%; left:0; font-size:min(7.4vw,32px); }
+  #tutormsg.right { top:38%; left:52%; right:0; font-size:min(7.4vw,32px); }
+  #tutormsg.meter { top:calc(env(safe-area-inset-top, 0px) + 62px);
+                    font-size:min(5.4vw,24px); }
+  #tutormsg.btn   { top:auto; bottom:calc(env(safe-area-inset-bottom, 0px) + 26vh);
+                    font-size:min(6.6vw,30px); }
+  @keyframes tutorpulse { 0%,100% { opacity:1; } 50% { opacity:.32; } }
+  #tutormsg.pulse { animation:tutorpulse 1.05s ease-in-out infinite; }
+
+  /* the simulated thumb: a soft disc with a ring, moved by keyframes */
+  #tutorhand { position:absolute; width:74px; height:74px; margin:-37px 0 0 -37px;
+               border-radius:50%; opacity:0; transition:opacity .3s ease;
+               background:radial-gradient(circle, rgba(22,24,29,.34) 0%, rgba(22,24,29,.16) 55%, rgba(22,24,29,0) 70%);
+               box-shadow:inset 0 0 0 2px rgba(22,24,29,.34); }
+  body.slowmo #tutorhand { background:radial-gradient(circle, rgba(238,240,243,.42) 0%, rgba(238,240,243,.2) 55%, rgba(238,240,243,0) 70%);
+               box-shadow:inset 0 0 0 2px rgba(238,240,243,.5); }
+  #tutorhand.on { opacity:1; }
+  @keyframes handup   { 0% { transform:translateY(46px); }  60% { transform:translateY(-46px); } 100% { transform:translateY(-46px); opacity:0; } }
+  @keyframes handside { 0% { transform:translateX(52px); }  50% { transform:translateX(-52px); } 100% { transform:translateX(52px); } }
+  @keyframes handtap  { 0%,72% { transform:scale(1); opacity:.95; } 84% { transform:scale(.62); opacity:1; } 100% { transform:scale(1); opacity:.95; } }
+  #tutorhand.up   { left:26%; top:58%; animation:handup 1.9s ease-in-out infinite; }
+  #tutorhand.side { left:74%; top:52%; animation:handside 2.3s ease-in-out infinite; }
+  #tutorhand.tap  { animation:handtap 1.15s ease-in-out infinite; }
+  /* the time button's grand entrance */
+  @keyframes tbarrive { 0% { transform:scale(.2); opacity:0; }
+                        60% { transform:scale(1.14); opacity:1; }
+                        100% { transform:scale(1); opacity:1; } }
+  #timebtn.arrive { animation:tbarrive .62s cubic-bezier(.2,1.4,.4,1) both; }
+
   /* ---- slow-mo tint & damage flash ---- */
   #tint { position:fixed; inset:0; pointer-events:none; opacity:0;
           background:radial-gradient(ellipse at center, rgba(255,70,45,0) 32%, rgba(185,42,26,.24) 70%, rgba(70,10,8,.55) 100%); }
@@ -387,6 +439,7 @@
   <div id="flash"></div>
   <div id="warn"></div>
   <div id="banner"></div>
+  <div id="tutor"><div id="tutorline"></div><div id="tutorhand"></div><div id="tutormsg"></div></div>
   <div id="ammo">PISTOL · ∞</div>
   <div id="reloadbar"><div id="reloadfill"></div></div>
   <div id="pausebtn">❚❚</div>
@@ -493,7 +546,8 @@
     <div class="setrow"><span>EFFECTS</span><input type="range" id="setsfx" min="0" max="1" step="0.05" value="1"></div>
     <div class="setrow"><span>HAPTICS</span><div id="sethaptics" class="setpill on">ON</div></div>
     <div class="setrow"><span>TIME</span><div id="modelink" class="setpill on">BUTTON</div></div>
-    <div class="setrow"><span>CONDITIONS</span><div id="condlink" class="setpill">OFF</div></div>
+    <div class="setrow"><span>TEST</span><div id="condlink" class="setpill">OFF</div></div>
+    <div class="setrow"><span>TUTORIAL</span><div id="tutlink" class="setpill">OFF</div></div>
     <div class="htpclose">TAP OUTSIDE TO CLOSE</div>
   </div>
 </div>

@@ -182,27 +182,20 @@ export const VIS = {
   blackNear: 0.8,
   blackFar: 7,
   blackFrozenFar: 30,
-  // Spacing is read against blackFar, not chosen for sparseness: a strip
-  // further out than the far plane is fogged to nothing, so the corridor
-  // reads as "unlit" rather than "emergency lighting" and there is no
-  // landmark to move between. Cells are 4 m; at a 7 m dark plane even every
-  // OTHER cell leaves stretches with no visible light at all, so every cell
-  // gets one. Sparseness is not what makes this a blackout -- the darkened
-  // surfaces, the near-black fog colour and the cut light rig are -- and a
-  // line of dim embers receding into black is the better read anyway.
-  blackLitEvery: 1,              // cells between surviving strips
-  // Emergency lighting, deliberately amber and not the signal red: in a world
-  // this pale red means threat, and a corridor lit in the threat colour would
-  // wreck enemy-reading exactly when the darkness already makes it hardest.
-  // Playtest called the first pass "orange" -- it was the full 1.5 x 2.6 m
-  // ceiling panel filled with flat #ff8c3a, which reads as a painted slab
-  // rather than a light. A blackout gets a narrow batten instead.
-  // Size matters more than colour here. At every-cell spacing the NEAREST
-  // batten is directly overhead and in frame, so a 0.34 x 1.5 m panel of flat
-  // amber is a hanging orange block rather than a light fitting -- the same
-  // failure as the full recess, just smaller. Down to a third of that area.
-  blackLight: 0xf07a1e,
-  blackBatten: [0.22, 0.9],      // w x d in metres, against the lit 1.5 x 2.6
+  // THERE IS NO EMERGENCY LIGHTING. Three passes tried to keep some -- the
+  // full ceiling recess in amber, then a batten, then a smaller batten -- and
+  // the playtest rejected every one by the same name: "the yellow overhead
+  // lights are jarringly wrong here, either should be a dark gray or just
+  // removed". Right, and for a reason worth writing down: a light that is ON
+  // is a promise the room can be read, and a blackout's whole proposition is
+  // that it cannot.
+  //
+  // So the fixtures stay, at the corridor's own rhythm and in its own shape,
+  // in a dark unlit grey. They are ceiling detail you notice when the freeze
+  // brings the lights up, and they read as exactly what they are: panels that
+  // are switched off. What lights a blackout now is gunfire -- see MUZZLE.
+  blackLitEvery: 2,              // the ordinary corridor's rhythm
+  blackLight: 0x23272c,          // a panel that is off, not a panel that is amber
   // The fog COLOUR matters as much as its distance. Left at the corridor's
   // pale daylight blue, a blacked-out corridor fades into a bright haze that
   // reads as light at the end of the tunnel -- the opposite of the intent.
@@ -212,6 +205,24 @@ export const VIS = {
   blackFrozenSurface: 0.50,      // ...lifted by the freeze, with everything else
   blackAmbient: 0.14,            // light multiplier while blacked out
   blackFrozenAmbient: 0.50,      // ...lifted with the freeze, like the fog
+
+  // MUZZLE FLASH. With no emergency lighting, gunfire is the only thing that
+  // lights a dark corridor -- yours and theirs alike, which makes firing a
+  // real decision: every shot you take shows you the room and shows them you.
+  // Point lights are created ONCE at boot and never added or removed, because
+  // changing a scene's light count recompiles every material in it, and doing
+  // that on the frame someone pulls a trigger is the exact stall this project
+  // keeps hunting. They idle at zero intensity instead.
+  // THREE, not more. Every extra light is a per-fragment term in every lit
+  // material for the whole run, not just while it is flashing -- three
+  // compiles against the light COUNT. Three covers the realistic overlap (you
+  // and one shooter, or a burst weapon's stutter) and stops there.
+  muzzleLights: 3,               // how many can overlap
+  muzzleRange: 26,               // metres
+  muzzleColor: 0xffd9a0,
+  muzzleLife: 0.085,             // seconds, real time
+  muzzlePlain: 2.2,              // intensity in an ordinary corridor
+  muzzleDark: 9.0,               // ...and in fog or a blackout, where it matters
 
   // CONTACTS: what is left of an enemy you cannot see. Fades in across the
   // far plane so it never competes with a body you can already read.
@@ -259,6 +270,33 @@ export const PACING = {
 };
 
 // ===========================================================================
+// THE GRINDER — the first element that attacks the slow-mo mechanic itself.
+//
+// A sanitation unit spanning the whole width of the leg, walking toward the
+// door behind you with two counter-rotating blade drums. Contact kills
+// instantly. It runs on REAL time and therefore DOES NOT STOP WHILE TIME IS
+// FROZEN, because it is the building, not a person -- which is the whole
+// point of it. Every second you spend frozen lining up a shot is a second of
+// ground given away, so the freeze stops being free and starts being a trade.
+//
+// It is not an obstacle, deliberately. A moving solid box would resolve the
+// player out of itself and could eject them to the wrong side; a lethal plane
+// cannot, and "you cannot go back" is expressed by the fact that going back
+// kills you rather than by a collision the player can fight.
+export const GRIND = {
+  speed: 1.15,         // m/s, real time. Walk pace is 4.6, so it is outrunnable
+  wake: 3.0,           // seconds after entering the leg before it starts
+  startBehind: 11,     // metres behind you when it wakes
+  killAhead: 1.0,      // the drum face plus its reach
+  h: 2.9,              // housing height (corridor clear height is 2.80)
+  drumY: [0.85, 2.0],  // two drums, counter-rotating
+  drumR: 0.52,
+  blades: 7,           // per drum
+  bladeT: 0.07,        // blade plate thickness (m)
+  spin: 8.5,           // rad/s
+  hazard: 0.16,        // height of the red hazard bars, top and bottom
+};
+
 // SCARCITY — the primary balance levers, and the reason the game gets good
 // ===========================================================================
 //
@@ -317,9 +355,17 @@ export const SCARCITY = {
 // is the only one that taxes TIME -- in a blackout the freeze is how you SEE,
 // so charging more for it means light itself costs you seconds. That is the
 // whole condition in one number.
+//
+// `groupSize` is the one that goes DOWN. Playtest: "groups of enemies made it
+// easier, because I could take out lots of them at once (especially with a
+// knife) -- it's actually harder, and more fun, if you space them out so you
+// only encounter 1-2 at a time." Exactly right, and it is specific to the
+// dark: a clump is a single problem you solve once, whereas two bodies met
+// separately are two searches, two decisions, and two chances to be flanked
+// by the one you have not found yet.
 export const CONDITION_TAX = {
-  fog:      { ammoDrop: 0.42, weaponDrop: 0.62, timeGain: 0.90 },
-  blackout: { ammoDrop: 0.32, weaponDrop: 0.52, timeGain: 0.82 },
+  fog:      { ammoDrop: 0.42, weaponDrop: 0.62, timeGain: 0.90, groupSize: 0.45 },
+  blackout: { ammoDrop: 0.32, weaponDrop: 0.52, timeGain: 0.82, groupSize: 0.38 },
 };
 
 export function condTax(cond, curve) {

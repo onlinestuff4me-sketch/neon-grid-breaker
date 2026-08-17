@@ -69,8 +69,8 @@ what makes it a condition. Blackout is the only one that taxes time, because
 in a blackout the freeze is how you see — light itself costs you seconds.
 
 ```js
-fog      : {"ammoDrop":0.42,"weaponDrop":0.62,"timeGain":0.9}
-blackout : {"ammoDrop":0.32,"weaponDrop":0.52,"timeGain":0.82}
+fog      : {"ammoDrop":0.42,"weaponDrop":0.62,"timeGain":0.9,"groupSize":0.45}
+blackout : {"ammoDrop":0.32,"weaponDrop":0.52,"timeGain":0.82,"groupSize":0.38}
 ```
 
 ## Weapons
@@ -160,8 +160,8 @@ gets no arrow and no pixels.
 | light intensity | 0.14× | 0.5× | hemisphere, sun and fill together |
 | surface colour | 0.15× | 0.5× | ceiling and beams are unlit materials, so only colour reaches them |
 | fog colour | `#060a0d` | — | left pale, the corridor faded into a bright haze that read as light at the end of the tunnel |
-| lit strips | every 1 cells | — | 4 m apart, inside the 7 m range — at 8 and at 5 the next strip was fogged to nothing |
-| strip colour | `#f07a1e` | — | emergency amber, deliberately not the signal red |
+| lit strips | every 2 cells | — | 8 m apart, inside the 7 m range — at 8 and at 5 the next strip was fogged to nothing |
+| strip colour | `#23272c` | — | emergency amber, deliberately not the signal red |
 
 Measured on a real frame: a blackout corridor is **40% of a lit one's mean
 luminance**, with the emergency strips the only warm pixels in view.

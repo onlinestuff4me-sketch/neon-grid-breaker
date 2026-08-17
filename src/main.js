@@ -13,7 +13,7 @@
 
 import * as THREE from '../lib/three.module.min.js';
 import { WEAPONS, TYPE_INTRO, TYPE_SHARE, TYPE_DROP, DROPS, RAMP, COMP, PACING, TIME, LEG, SHATTER,
-  VIS, scarcity, condTax } from './balance.js';
+  VIS, GRIND, scarcity, condTax } from './balance.js';
 import { composeProtocol, newRunMemory, enemyRoster, ELEMENTS } from './protocols.js';
 import { haptic, persist, hydrateStorage, shellSetup, isNative } from './native.js';
 
@@ -98,6 +98,14 @@ const AIM_ASSIST_RATE = 3.5;      // gentle easing rate, at full drive
 const AIM_ASSIST_RAMP = 4;        // px of look travel in a frame for full drive
 const AIM_ASSIST_TAPER = 26;      // ...above this, drive falls off: a sweep PAST
                                   // a target must not stick to it
+// THE ASSIST MAY NEVER OUT-TURN YOU. Its correction is proportional to how far
+// OFF the target is, not to how much you are turning, so a body appearing at
+// the edge of the 0.3 rad cone produced a ~1 deg-per-frame nudge on top of a
+// gentle 1 deg-per-frame track -- it doubled your turn rate for a moment, which
+// is a lurch, and it landed exactly when someone walked into view. Capping the
+// correction at a fraction of your OWN yaw this frame makes it a nudge at every
+// speed: proportional by construction, and zero when you are still.
+const AIM_ASSIST_SHARE = 0.5;     // most it may add, as a fraction of your turn
 let assistGain = 0;               // eased drive, so acquiring is not a step
 const EDGE_ARROW_MIN = 0.34;      // bearing (rad) beyond which an enemy gets an arrow
 const FOV_NORMAL = 80;
@@ -141,6 +149,48 @@ scene.add(sun);
 const fill = new THREE.DirectionalLight(0xd6f0ff, 0.18);
 fill.position.set(-6, 10, -8);
 scene.add(fill);
+
+// MUZZLE FLASH — the only thing that lights a blacked-out corridor.
+//
+// Created here, at boot, and never added to or removed from the scene again.
+// three compiles a material's shader against the scene's LIGHT COUNT, so
+// adding a light later recompiles every material in it — and doing that on
+// the frame someone pulls a trigger is precisely the stall this project has
+// spent two rounds hunting. They idle at zero intensity instead, which costs
+// a uniform and nothing else.
+//
+// It cuts both ways on purpose: your shot shows you the room, and their shot
+// shows you where they are. In the dark, firing is information you give as
+// well as get.
+const muzzleLights = [];
+for (let i = 0; i < VIS.muzzleLights; i++) {
+  const l = new THREE.PointLight(VIS.muzzleColor, 0, VIS.muzzleRange, 1.15);
+  l.position.set(0, 1.4, 0);
+  scene.add(l);
+  muzzleLights.push({ l, t: 0, peak: 0, life: VIS.muzzleLife });
+}
+let muzzleNext = 0;
+function muzzleFlash(x, y, z, scale = 1) {
+  // round-robin rather than "the dimmest": a burst of shots should read as a
+  // stutter of separate flashes, not as one that keeps being restarted
+  const m = muzzleLights[muzzleNext++ % muzzleLights.length];
+  m.l.position.set(x, y, z);
+  // the life is captured per flash, not read back from VIS on the way out:
+  // otherwise retuning it mid-run rescales flashes already in the air
+  m.t = m.life = VIS.muzzleLife;
+  const dark = condNow === 'fog' || condNow === 'blackout';
+  m.peak = (dark ? VIS.muzzleDark : VIS.muzzlePlain) * scale;
+}
+function updateMuzzleFlashes(dtReal) {
+  for (const m of muzzleLights) {
+    if (m.t <= 0) { if (m.l.intensity) m.l.intensity = 0; continue; }
+    m.t -= dtReal;
+    // squared decay: a hard spike and a fast fall, which is what a muzzle
+    // flash looks like and what keeps it from reading as a lamp
+    const k = Math.max(0, m.t / m.life);
+    m.l.intensity = m.peak * k * k;
+  }
+}
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -571,6 +621,7 @@ setLayout();
 // Small math helpers
 // ---------------------------------------------------------------------------
 const _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3();
+const _vMuz = new THREE.Vector3();
 
 // Squared distance between segments p1->q1 and p2->q2 (Ericson, RTCD 5.1.9).
 // Pure scalar math — must not touch the shared _v* scratch vectors, since
@@ -1087,7 +1138,7 @@ function takePickup(type) {
 function dropToKnife() {
   recordMet(['knife']);
   setWeapon('knife', 0);
-  showBanner('OUT OF AMMO<small>THE KNIFE IS ALL YOU HAVE</small>', 1700);
+  showBanner('KNIFE ONLY', 1700);
   vibrate([40, 40, 40]);
 }
 
@@ -2111,7 +2162,7 @@ function spawnPickup(pos, type = 'shotgun') {
   pickups.push({ g, spin, ring, type, t: Math.random() * 6, life: PICKUP_LIFE });
   if (!spawnPickup.hinted) {   // one-time tutorial nudge
     spawnPickup.hinted = true;
-    showBanner('WEAPON DROP<small>WALK OVER IT TO TAKE IT</small>', 1600);
+    showBanner('WALK OVER IT TO TAKE IT', 1800);
   }
 }
 
@@ -2948,7 +2999,7 @@ function initRush() {
   slowBank = SLOWMO.base;
   updateSlowMeter();
   updateModeUI();   // shows the time button + meter in button mode
-  showBanner('RUSH HOUR<small>FREEZE TIME<br>GHOST THROUGH THE CROWD</small>', 3200);
+  showBanner('FREEZE AND WALK THROUGH THEM', 2800);
 }
 // THE MARK: one face in the crowd is the one that matters. It only shows
 // itself inside frozen time, so the loop is — freeze, ghost through the
@@ -2962,7 +3013,7 @@ function pickMark() {
   if (!pool.length) return;
   rushMark = pool[Math.floor(Math.random() * pool.length)];
   markPin.visible = false;
-  showBanner('NEW MARK<small>FREEZE TIME TO FIND THEM</small>', 1800);
+  showBanner('FREEZE TO FIND THE MARK', 1800);
   sfx.alert();
 }
 
@@ -2990,7 +3041,7 @@ function markDown() {
   rushMark = null;
   markPin.visible = false;
   markRespawnT = 3.5;
-  showBanner('MARK DOWN<small>+' + RUSH.markBonus + 'S</small>', 1500);
+  showBanner('MARK DOWN · +' + RUSH.markBonus + 'S', 1400);
   vibrate([20, 40, 20]);
 }
 
@@ -3178,8 +3229,9 @@ function enemyFire(e, toPlayer) {
       d.z += (Math.random() - 0.5) * 2 * spec.spread;
       d.normalize();
     }
-    spawnBullet(origin, d, false, spec.mul || 1);
+    spawnBullet(origin, d, false, (spec.mul || 1) * tutorBulletScale());
   }
+  muzzleFlash(origin.x, origin.y, origin.z, 0.85);
   sfx.enemyShot();
 }
 
@@ -3368,7 +3420,7 @@ function updateEnemy(e, sdt) {
       e.seenT = los ? (e.seenT || 0) + sdt : 0;
       if (e.type !== 'rusher' && dist < e.engageDist && e.fireCd <= 0 &&
           (!ENEMY_TYPES[e.type].shielded || Math.cos(e.g.rotation.y - wantYaw) > 0.8) &&
-          performance.now() >= game.noFireBefore &&
+          performance.now() >= game.noFireBefore && !tutorHoldsFire() &&
           los && e.seenT > RAMP.sightGrace) {
         // take turns on the trigger: only a couple of guns telegraph at once,
         // so fire arrives as a steady stream you can dodge, never a volley
@@ -3575,6 +3627,14 @@ function playerFire() {
   }
   gunKick = spec.kick;
   muzzle.material.opacity = 1;
+  tutorFired = true;
+  // your own shot lights the room too — the flash sits a little ahead of the
+  // camera rather than at the viewmodel, so it throws light down the corridor
+  // instead of blowing out the gun in your hands
+  {
+    const mp = muzzle.getWorldPosition(_vMuz);
+    muzzleFlash(mp.x, mp.y, mp.z, 1);
+  }
   sfx.shot(player.weapon);
   vibrate(spec.pellets > 1 ? 26 : 12);
   // the heavy fires a staggered burst, the way its owner does — three
@@ -3900,6 +3960,10 @@ function onPointerDown(ev) {
       if (ev.target.closest && ev.target.closest('#condlink')) {
         const i = COND_CYCLE.indexOf(testCondition);
         setTestCondition(COND_CYCLE[(i + 1) % COND_CYCLE.length]);
+        vibrate(12);
+      }
+      if (ev.target.closest && ev.target.closest('#tutlink')) {
+        setTutorArmed(!tutorArmed);
         vibrate(12);
       }
       if (ev.target.closest && ev.target.closest('#modelink')) {
@@ -4327,10 +4391,16 @@ function tryUnlockAudio() {
 }
 for (const n of unlockEvs) window.addEventListener(n, tryUnlockAudio, { capture: true, passive: true });
 
-// Settings > CONDITIONS. null is off; otherwise every corridor leg is pinned
-// to this condition. A playtest switch, so built-but-unapproved content can
-// be judged without waiting for door 13 or touching the main flow.
-const COND_CYCLE = [null, 'fog', 'blackout'];
+// Settings > TEST. null is off; otherwise every corridor leg is pinned to
+// this element. A playtest switch, so built-but-unapproved content can be
+// judged on door 1 instead of waiting for door 13 and eighty lifetime doors,
+// and without the composer ever being able to pick it in a normal run.
+//
+// It carries MEASURES as well as conditions now, because the grinder has the
+// same problem the conditions had: gated to door 6 at lifetime 80, it would
+// be unplayable for a fortnight of testing.
+const COND_CYCLE = [null, 'fog', 'blackout', 'grinder'];
+const TEST_MEASURES = new Set(['grinder']);
 let testCondition = null;
 try {
   const v = localStorage.getItem('timeshard_cond');
@@ -4345,6 +4415,19 @@ function updateCondPill() {
   if (!el.condlink) return;
   el.condlink.textContent = testCondition ? testCondition.toUpperCase() : 'OFF';
   el.condlink.classList.toggle('on', !!testCondition);
+}
+
+// Settings > TUTORIAL. Arms the onboarding for the NEXT run and then clears
+// itself, so it is a one-shot rather than a mode you can forget you are in.
+function updateTutPill() {
+  if (!el.tutlink) return;
+  el.tutlink.textContent = tutorArmed ? 'NEXT RUN' : 'OFF';
+  el.tutlink.classList.toggle('on', tutorArmed);
+}
+function setTutorArmed(v) {
+  tutorArmed = v;
+  try { persist('timeshard_tutarm', v ? '1' : ''); } catch { /* private mode */ }
+  updateTutPill();
 }
 
 let hapticsOn = true;
@@ -5320,6 +5403,7 @@ function closePause() {
 }
 function openSettings() {
   updateCondPill();
+  updateTutPill();
   const v = sfx.vols();
   el.setmusic.value = v.music;
   el.setsfx.value = v.sfx;
@@ -5338,7 +5422,11 @@ function updateModeUI() {
   el.modelink.classList.toggle('on', timeMode === 'toggle');
   if (game.state === 'menu') el.overlay.querySelector('.sub').textContent = taglineFor();
   const inRun = game.state === 'play' || game.state === 'intro' || game.state === 'clear';
-  const on = timeMode === 'toggle' && inRun;
+  // The onboarding hides the button and the meter until it has taught the
+  // rest of the controls, and updateModeUI runs from several places that
+  // would otherwise hand them straight back.
+  const hidden = tutorStep === 'move' || tutorStep === 'look' || tutorStep === 'shoot';
+  const on = timeMode === 'toggle' && inRun && !hidden;
   el.timebtn.style.display = on ? 'flex' : 'none';
   el.slowmeter.style.display = on ? 'block' : 'none';
   el.gtime.style.display = timeMode === 'toggle' ? '' : 'none';
@@ -5355,6 +5443,173 @@ function updateSlowMeter() {
   el.slowmeter.classList.toggle('low', low && !crit);
   el.slowmeter.classList.toggle('crit', crit);
 }
+// ---------------------------------------------------------------------------
+// ONBOARDING
+//
+// Four controls, taught in the order you need them, each step waiting on the
+// player DOING the thing rather than on a clock. Nothing here is a modal: the
+// game is running underneath the whole time, which is the only way a control
+// tutorial can teach the feel of the control.
+//
+// The corridor is held empty until the shatter step, and the enemies that do
+// arrive hold their fire until the last one — a player who has not yet been
+// told what the freeze is for cannot be expected to dodge.
+// ---------------------------------------------------------------------------
+const TUTOR = {
+  moveNeeded: 2.2,      // metres walked before step 1 is satisfied
+  lookNeeded: 0.9,      // radians of yaw swept before step 2 is
+  drainFrom: 1.0,       // the meter demo runs the bank from full...
+  drainTo: 0,           // ...to empty, so the cost is felt before it matters
+  drainSecs: 3.4,
+  refillTo: 0.5,        // fraction of the cap that ends the shatter step
+  dodgeBullet: 0.8,     // enemy rounds run this much slower during the dodge
+  gunRise: 0.5,         // seconds for the weapon to come up
+};
+let tutorStep = null;      // null = not onboarding
+let tutorT = 0, tutorSub = 0;
+let tutorMoved = 0, tutorLooked = 0, tutorFired = false, tutorFroze = false;
+let tutorArmed = false;    // set from Settings; consumed by the next run
+let tutorSeen = false;
+try {
+  tutorSeen = localStorage.getItem('timeshard_taught') === '1';
+  tutorArmed = localStorage.getItem('timeshard_tutarm') === '1';
+} catch { /* private */ }
+
+// What the rest of the game asks about the tutorial.
+const tutorActive = () => tutorStep !== null;
+const tutorHoldsFire = () => tutorStep !== null && tutorStep !== 'dodge';
+const tutorHoldsSpawns = () => tutorStep !== null &&
+  tutorStep !== 'shatter' && tutorStep !== 'dodge';
+const tutorBulletScale = () => (tutorStep === 'dodge' ? TUTOR.dodgeBullet : 1);
+
+function tutorMsg(html, where, pulse) {
+  if (!el.tutormsg) return;
+  el.tutormsg.innerHTML = html;
+  el.tutormsg.className = `${where}${pulse ? ' pulse' : ''} show`;
+}
+function tutorHideMsg() { if (el.tutormsg) el.tutormsg.className = ''; }
+function tutorHand(kind) {
+  if (!el.tutorhand) return;
+  el.tutorhand.className = kind ? `${kind} on` : '';
+}
+function tutorLine(on) {
+  if (el.tutorline) el.tutorline.classList.toggle('on', !!on);
+}
+
+function startTutorial() {
+  tutorStep = 'move';
+  tutorT = 0; tutorSub = 0;
+  tutorMoved = 0; tutorLooked = 0; tutorFired = false; tutorFroze = false;
+  document.body.classList.add('tutoring');
+  gun.visible = false;
+  el.timebtn.style.display = 'none';
+  el.slowmeter.style.display = 'none';
+  hideTimeTip();
+  tutorLine(true);
+  tutorMsg('DRAG TO MOVE', 'left');
+  tutorHand('up');
+}
+function endTutorial(taught = true) {
+  tutorStep = null;
+  document.body.classList.remove('tutoring');
+  tutorHideMsg(); tutorHand(null); tutorLine(false);
+  el.timebtn.classList.remove('arrive');
+  gun.visible = true;
+  updateModeUI();
+  tutorSeen = true;
+  try { persist('timeshard_taught', '1'); } catch { /* private */ }
+  tutorArmed = false;
+  try { persist('timeshard_tutarm', ''); } catch { /* private */ }
+  updateTutPill();
+  if (taught) showBanner('REACH THE RED DOOR', 2200);
+}
+function tutorNext(step) { tutorStep = step; tutorT = 0; tutorSub = 0; }
+
+// Driven on REAL time from the frame loop, after input and movement have been
+// applied, so "did they do it yet" is answered against this frame's state.
+function updateTutorial(dtReal, movedM, yawDelta) {
+  if (tutorStep === null) return;
+  tutorT += dtReal;
+  if (!player.alive) { endTutorial(false); return; }
+  switch (tutorStep) {
+    case 'move':
+      tutorMoved += movedM;
+      if (tutorMoved > TUTOR.moveNeeded) {
+        tutorNext('look');
+        tutorMsg('DRAG TO LOOK', 'right');
+        tutorHand('side');
+      }
+      break;
+    case 'look':
+      tutorLooked += Math.abs(yawDelta);
+      if (tutorLooked > TUTOR.lookNeeded) {
+        tutorNext('shoot');
+        tutorLine(false);
+        tutorHand(null);
+        gun.visible = true;
+        gunRiseT = TUTOR.gunRise;      // the weapon comes up into frame
+        game.noFireBefore = 0;         // the opening grace must not block the lesson
+        tutorMsg('TAP TO SHOOT', 'mid');
+      }
+      break;
+    case 'shoot':
+      if (tutorFired) {
+        tutorNext('freeze');
+        // the button's entrance: it was not on screen at all until now
+        updateModeUI();
+        el.timebtn.classList.remove('arrive');
+        void el.timebtn.offsetWidth;   // restart the animation
+        el.timebtn.classList.add('arrive');
+        el.timebtn.classList.add('hint');
+        tutorMsg('TAP TO SLOW TIME', 'btn', true);
+        tutorHand(null);
+      }
+      break;
+    case 'freeze':
+      if (tutorFroze) {
+        tutorNext('meter');
+        el.timebtn.classList.remove('hint');
+        setTimeLocked(false);
+        slowBank = SLOWMO.cap * TUTOR.drainFrom;
+        updateSlowMeter();
+        tutorMsg('USE YOUR TIME WISELY', 'meter', true);
+      }
+      break;
+    case 'meter': {
+      // the bank empties in front of them, once, with nothing else happening
+      const k = Math.min(1, tutorT / TUTOR.drainSecs);
+      slowBank = SLOWMO.cap * (TUTOR.drainFrom + (TUTOR.drainTo - TUTOR.drainFrom) * k);
+      updateSlowMeter();
+      if (k >= 1) {
+        tutorNext('shatter');
+        tutorMsg('SHATTER MORE<small>REFILL YOUR TIME METER</small>', 'mid', true);
+      }
+      break;
+    }
+    case 'shatter':
+      // bodies arrive and do not shoot; every kill visibly buys seconds back
+      if (enemies.length < 2 && tutorSub <= 0) { tutorSub = 1.1; spawnEnemy('gunner'); }
+      tutorSub -= dtReal;
+      if (slowBank >= SLOWMO.cap * TUTOR.refillTo) {
+        tutorNext('dodge');
+        tutorFroze = false;
+        el.timebtn.classList.add('hint');
+        tutorMsg('TAP TO SLOW TIME<small>AND WALK OUT OF THE ROUND</small>', 'btn', true);
+      }
+      break;
+    case 'dodge':
+      // now they shoot — slowed, so there is room to read the prompt and act
+      if (enemies.length < 2 && tutorSub <= 0) { tutorSub = 1.4; spawnEnemy('gunner'); }
+      tutorSub -= dtReal;
+      if (tutorFroze) endTutorial();
+      break;
+    default: break;
+  }
+}
+
+let gunRiseT = 0;   // seconds left of the weapon's rise into frame
+let tutorPrevX = 0, tutorPrevZ = 0, tutorPrevYaw = 0;
+
 let demoT = 0, demoSpawnT = 0.3, demoKillT = 4;   // menu attract-mode clocks
 
 // New players were missing the time button entirely. It now re-teaches
@@ -5362,6 +5617,7 @@ let demoT = 0, demoSpawnT = 0.3, demoKillT = 4;   // menu attract-mode clocks
 let timeUses = 0;
 try { timeUses = parseInt(localStorage.getItem('timeshard_timeuses') || '0', 10) || 0; } catch { /* private */ }
 function noteTimeUse() {
+  tutorFroze = true;
   if (timeUses >= 99) return;
   timeUses++;
   try { localStorage.setItem('timeshard_timeuses', String(timeUses)); } catch { /* private */ }
@@ -5396,6 +5652,10 @@ const el = {
   condlink: document.getElementById('condlink'),
   gtime: document.getElementById('gtime'),
   slowmeter: document.getElementById('slowmeter'),
+  tutormsg: document.getElementById('tutormsg'),
+  tutorhand: document.getElementById('tutorhand'),
+  tutorline: document.getElementById('tutorline'),
+  tutlink: document.getElementById('tutlink'),
   slowfill: document.getElementById('slowfill'),
   flash: document.getElementById('flash'),
   banner: document.getElementById('banner'),
@@ -5643,6 +5903,43 @@ function killWord() {
 // messageBusyUntil, read by the spawner).
 let messageBusyUntil = 0;
 const messageQueue = [];
+// ONE LINE, THE NEWEST THING, AND WHAT TO DO ABOUT IT.
+//
+// The door banner used to read "CHECKPOINT / DOOR 6 / CORRIDOR · FOG · ALCOVES"
+// — three lines listing everything the leg is, in a moment where you are
+// walking into a fight and reading none of it. Playtest: "simplify our
+// messages upon entering each room, so that the text is clear, just one line,
+// the most important thing that's new, actionable, in just a few words."
+//
+// So there is a priority, not a list: a CONDITION changes how you play, so it
+// wins; then a MEASURE, which changes what the building does to you; then the
+// FORM; and if the leg is plain, the door number is the news.
+const LEG_HEADLINES = {
+  fog: 'FOG · FREEZE TO SEE',
+  blackout: 'BLACKOUT · FREEZE TO SEE',
+  dimStrips: 'LIGHTS AT HALF',
+  flood: 'FLOODED · YOU ARE SLOW',
+  deadAir: 'DEAD AIR · YOU WON\'T HEAR THEM',
+  oneWaySeal: 'IT SEALS BEHIND YOU',
+  grinder: 'GRINDER · KEEP MOVING',
+  breachWalls: 'THEY COME THROUGH THE WALLS',
+  turretDrop: 'TURRET · IT DOES NOT RELOAD',
+  vault: 'PILLARS ARE YOUR ONLY COVER',
+  gauntlet: 'NO COVER · DO NOT STOP',
+  atrium: 'IT OPENS UP',
+  serviceRun: 'TIGHT TURNS',
+  gallery: 'THEY CAN SEE THE WHOLE RUN',
+  stairwell: 'MIND THE LEVEL ABOVE',
+  spiral: 'NO STRAIGHT LINE OUT',
+};
+function legHeadline(proto) {
+  const pick = (e) => e && LEG_HEADLINES[e.id];
+  const line = pick(proto && proto.condition)
+    || (proto && proto.measures || []).map(pick).find(Boolean)
+    || pick(proto && proto.form);
+  return line || `DOOR ${hall ? hall.doorsPassed : 1}`;
+}
+
 function showBanner(html, dur = 1600) {
   messageQueue.push({ html, dur });
   pumpMessages();
@@ -5690,7 +5987,7 @@ function startWave(n, quiet = false) {   // quiet: the clear card already announ
     try { persist('timeshard_best', String(n)); } catch { /* private mode */ }
   }
   if (!quiet) {
-    showBanner(`WAVE ${n}<small>THEY ARE COMING</small>`, 1500);
+    showBanner(`WAVE ${n}`, 1300);
     showTimeTip();
     if (n > 1) sfx.wave();   // wave 1 is the onboarding — it starts silent
   }
@@ -5710,9 +6007,11 @@ function maxAlive() {
   // how many can be ON you at once — the dial that decides whether a fight
   // is a queue or a swarm, so it is the one that moves least
   if (game.mode === 'hall') {
-    return Math.max(2, Math.round(
+    // A condition thins the crowd as well as the loot: two bodies met
+    // separately are two searches, where a clump is one problem solved once.
+    return Math.max(1, Math.round(
       Math.min(PACING.hallAliveBase + Math.floor(game.wave / 2), PACING.hallAliveCap)
-      * scarcity('groupSize', game.wave)));
+      * scarcity('groupSize', game.wave) * condTax(legCondition(), 'groupSize')));
   }
   return Math.min(PACING.cityAliveBase + Math.floor(game.wave / 2), PACING.cityAliveCap);
 }
@@ -5721,6 +6020,7 @@ let deathAt = 0;
 
 function hitPlayer(ended = false) {
   if (!player.alive || (player.iframes > 0 && !ended)) return;
+  if (tutorStep !== null) endTutorial(false);
   player.alive = false;
   sprintTo = null;
   game.state = 'dead';
@@ -6179,12 +6479,10 @@ function buildHallLeg(sgx, sgz, proto) {
     const lit = cond === 'blackout' ? (gx + gz) % VIS.blackLitEvery === 0
       : cond === 'dimStrips' ? (gx + gz) % 4 === 0
       : (gx + gz) % 2 === 0;
-    // A blackout gets a narrow BATTEN, not the full panel. Filling the whole
-    // 1.5 x 2.6 m recess with flat amber read as a painted orange slab rather
-    // than as a light — the playtest called it out by name.
-    if (lit) lights.push(cond === 'blackout'
-      ? [x, H - 0.04, z, VIS.blackBatten[0], 0.08, VIS.blackBatten[1]]
-      : [x, H - 0.04, z, 1.5, 0.08, 2.6]);
+    // The panel is the same shape in every corridor. In a blackout it is
+    // simply switched off (VIS.blackLight is a dark grey, not an amber), so
+    // it reads as a fitting rather than as emergency lighting.
+    if (lit) lights.push([x, H - 0.04, z, 1.5, 0.08, 2.6]);
     // Half the portrait frame is ceiling, and it was one flat slab. A drop
     // beam on every cell the strips skip gives it a 4 m rhythm and puts the
     // soffit at 2.80 m — the clear height measured off the reference. Visual
@@ -6294,6 +6592,11 @@ function buildHallLeg(sgx, sgz, proto) {
           max: new THREE.Vector3(sx + 1, H, sz + 0.2) } };
     }
   }
+  // THE GRINDER wakes behind wherever you enter the leg, spanning its whole
+  // width. Built here so it is part of the leg and dies with it.
+  const grind = measures.has('grinder')
+    ? buildGrinder(cells, sgz - Math.ceil(GRIND.startBehind / C)) : null;
+
   const black = cond === 'blackout';
   const meshes = [
     mergedCityMesh(walls, black ? HALL_WALL_DARK : HALL_WALL_MAT),
@@ -6313,8 +6616,118 @@ function buildHallLeg(sgx, sgz, proto) {
       max: new THREE.Vector3(dx0 + 1, H, dz0 + 0.2),
     },
   };
-  return { cells, approach, stretches, doorways, pillars, meshes, obs, door, seal, endGx, endGz, proto,
-    retired: false, nextBuilt: false };
+  return { cells, approach, stretches, doorways, pillars, meshes, obs, door, seal, grind,
+    endGx, endGz, proto, retired: false, nextBuilt: false };
+}
+
+// ---------------------------------------------------------------------------
+// THE GRINDER
+//
+// "A slab that seals the leg behind you and advances -- and does not stop
+// while time is frozen, because it is the building, not a person."
+//
+// Built once per leg that asks for it, spanning the leg's FULL x extent so no
+// branch lane can be used to slip round it, and parked behind the player's
+// start. It wakes a few seconds in, then walks toward the door on real time.
+// ---------------------------------------------------------------------------
+const GRIND_HOUSING = new THREE.MeshLambertMaterial({ color: 0x2e323a });
+// The blades and the hazard bars are UNLIT on purpose. A blackout leg has no
+// working lights, and a lethal object you cannot see is not a hazard, it is a
+// bug — these two read at any brightness the corridor happens to be at.
+const GRIND_BLADE = new THREE.MeshBasicMaterial({ color: 0xd6dde2 });
+const GRIND_HAZARD = new THREE.MeshBasicMaterial({ color: 0xff2d1a });
+
+function buildGrinder(cells, startGz) {
+  const C = HALL.cell, H = HALL.h;
+  let minGx = Infinity, maxGx = -Infinity;
+  for (const [gx] of cells) { minGx = Math.min(minGx, gx); maxGx = Math.max(maxGx, gx); }
+  // full width of the leg plus a cell of overlap either side: there is no
+  // gap to squeeze through, at any row, however the corridor jogs
+  const x0 = (minGx - 0.6) * C, x1 = (maxGx + 0.6) * C;
+  const w = x1 - x0, cx = (x0 + x1) / 2;
+  const g = new THREE.Group();
+
+  const box = (mat, sx, sy, sz, px, py, pz) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), mat);
+    m.position.set(px, py, pz);
+    return m;
+  };
+  // housing: a back plate with the drum bay cut out by simply framing it
+  g.add(box(GRIND_HOUSING, w, 0.34, 0.55, cx - (x0 + x1) / 2, GRIND.h - 0.17, -0.1));
+  g.add(box(GRIND_HOUSING, w, 0.3, 0.55, 0, 0.15, -0.1));
+  g.add(box(GRIND_HOUSING, w, GRIND.h, 0.16, 0, GRIND.h / 2, -0.42));   // back plate
+  // hazard bars, top and bottom, so it is unmistakable in the dark
+  g.add(box(GRIND_HAZARD, w, GRIND.hazard, 0.1, 0, GRIND.h - 0.36, 0.2));
+  g.add(box(GRIND_HAZARD, w, GRIND.hazard, 0.1, 0, 0.36, 0.2));
+
+  // two drums of radial blades, counter-rotating about the corridor's x axis
+  const drums = [];
+  for (let d = 0; d < GRIND.drumY.length; d++) {
+    const drum = new THREE.Group();
+    drum.position.set(0, GRIND.drumY[d], 0);
+    drum.add(box(GRIND_HOUSING, w, 0.26, 0.26, 0, 0, 0));          // the shaft
+    for (let i = 0; i < GRIND.blades; i++) {
+      const a = (i / GRIND.blades) * Math.PI * 2;
+      // each blade is its own plate standing off the shaft, so the tips read
+      // as separate teeth rather than as one disc
+      const b = box(GRIND_BLADE, w - 0.1, GRIND.drumR, GRIND.bladeT, 0, GRIND.drumR / 2 + 0.1, 0);
+      const arm = new THREE.Group();
+      arm.rotation.x = a;
+      arm.add(b);
+      drum.add(arm);
+    }
+    g.add(drum);
+    drums.push(drum);
+  }
+  g.position.set(0, 0, startGz * C);
+  scene.add(g);
+  return { g, drums, z: startGz * C, a: 0, wake: GRIND.wake, live: false, done: false };
+}
+
+// Real time, always: a freeze does not stop the building.
+function updateGrinder(dtReal) {
+  if (game.mode !== 'hall' || !hall) return;
+  const L = hall.legs[hall.cur];
+  const G = L && L.grind;
+  if (!G || G.done) return;
+  if (!G.live) {
+    if (game.state !== 'play') return;
+    G.wake -= dtReal;
+    if (G.wake > 0) return;
+    G.live = true;
+    showBanner('GRINDER · KEEP MOVING', 1800);
+    sfx.airlock();
+    vibrate([30, 50, 30]);
+  }
+  G.z += GRIND.speed * dtReal;
+  G.g.position.z = G.z;
+  G.a += GRIND.spin * dtReal;
+  G.drums[0].rotation.x = G.a;
+  if (G.drums[1]) G.drums[1].rotation.x = -G.a;
+  // it stops at the door: past that it is out of the leg and has nothing left
+  // to sweep, and it must never be sitting in the next corridor's mouth
+  if (G.z > L.door.z - 1.5) { G.done = true; G.g.visible = false; return; }
+  // anything it reaches is gone. Bodies shatter for the look of it but pay
+  // nothing — no time, no drop — and go back in the queue ahead of you, so a
+  // leg stays finishable and the grinder is never a way to farm the bank.
+  const face = G.z + GRIND.killAhead;
+  const eaten = [];
+  for (let i = enemies.length - 1; i >= 0; i--) {
+    const e = enemies[i];
+    if (e.pos.z > face) continue;
+    spawnShatter(e.pos, _v1.set(0, 0.6, 1).normalize());
+    removeEnemyShards(e);
+    removeBeam(e);
+    scene.remove(e.g);
+    enemies.splice(i, 1);
+    eaten.push(e.type);
+  }
+  if (eaten.length) {
+    game.spawnQueue.unshift(...eaten);
+    L.released = Math.max(0, (L.released || 0) - eaten.length);
+    game.spawnTimer = Math.min(game.spawnTimer, 1.2);
+  }
+  if (player.alive && game.state === 'play' && player.pos.z < face) hitPlayer();
 }
 
 function rebuildHallObstacles() {
@@ -6459,8 +6872,15 @@ function initHall() {
   slowBank = SLOWMO.base;
   updateSlowMeter();
   updateModeUI();
-  showBanner('THE TUNNEL<small>CLEAR THE FLOOR<br>REACH THE DOOR</small>', 3000);
-  setTimeout(showTimeTip, 2600);
+  // A first run teaches itself. So does one the player has re-armed from
+  // Settings — which then disarms, because it is a one-shot, not a mode.
+  if ((!tutorSeen || tutorArmed) && timeMode === 'toggle') {
+    tutorPrevX = player.pos.x; tutorPrevZ = player.pos.z; tutorPrevYaw = player.yaw;
+    startTutorial();
+  } else {
+    showBanner('REACH THE RED DOOR', 2600);
+    setTimeout(showTimeTip, 2600);
+  }
   sfx.newWave();
 }
 
@@ -6489,7 +6909,15 @@ function retryHall() {
   updateSlowMeter();
   updateModeUI();
   applyLegVisibility(true);   // a retry starts inside the leg's own air
-  showBanner(`DOOR ${hall.doorsPassed + 1}<small>AGAIN.</small>`, 1600);
+  if (L.grind) {              // ...and with the grinder back where it started
+    L.grind.z = hall.checkpoint.z - GRIND.startBehind;
+    L.grind.g.position.z = L.grind.z;
+    L.grind.g.visible = true;
+    L.grind.wake = GRIND.wake;
+    L.grind.live = false;
+    L.grind.done = false;
+  }
+  showBanner(`DOOR ${hall.doorsPassed + 1} · AGAIN`, 1500);
 }
 
 // Test hook only: `__ts.forceMeasures([...])` pins a leg's measures so a
@@ -6505,8 +6933,16 @@ function forced(proto) {
   // (impl: false), so a normal run is completely unaffected by their
   // existence — this is the only door into them until they are approved.
   const pin = forcedCondition !== undefined ? forcedCondition : testCondition;
-  if (pin) proto.condition = ELEMENTS.find((e) => e.id === pin) || null;
-  else if (forcedCondition === null) proto.condition = null;
+  if (pin && TEST_MEASURES.has(pin)) {
+    const m = ELEMENTS.find((e) => e.id === pin);
+    // pinned ON TOP of whatever the composer chose, not instead of it: a
+    // measure is something the building adds, not something it is
+    if (m && !proto.measures.some((x) => x.id === pin)) proto.measures = [...proto.measures, m];
+  } else if (pin) {
+    proto.condition = ELEMENTS.find((e) => e.id === pin) || null;
+  } else if (forcedCondition === null) {
+    proto.condition = null;
+  }
   return proto;
 }
 
@@ -6692,7 +7128,7 @@ function openHallDoor() {
     hall.legs.push(buildHallLeg(L.endGx, L.endGz + 1, proto));
   }
   rebuildHallObstacles();
-  showBanner('THE DOOR IS OPEN<small>GO</small>', 2000);
+  showBanner('THE DOOR IS OPEN', 1800);
   sfx.airlock();   // the door speaks for itself; the VO waits for the crossing
   vibrate(20);
 }
@@ -6716,16 +7152,14 @@ function crossHallDoor() {
     for (const m of old.meshes) scene.remove(m);
     scene.remove(old.door.slab);
     if (old.seal) scene.remove(old.seal.slab);
+    if (old.grind) scene.remove(old.grind.g);
   }
   rebuildHallObstacles();
   game.spawnQueue = hallWave(game.wave);
   game.spawnTimer = 0.9;
   slowBank = Math.max(slowBank, SLOWMO.base);
   updateSlowMeter();
-  const nx = hall.legs[hall.cur] && hall.legs[hall.cur].proto;
-  const spec = nx ? [nx.form && nx.form.name, nx.condition && nx.condition.name,
-    ...nx.measures.map((m) => m.name)].filter(Boolean).join(' · ') : '';
-  showBanner(`CHECKPOINT<small>DOOR ${hall.doorsPassed}${spec ? '<br>' + spec : ''}</small>`, 2200);
+  showBanner(legHeadline(hall.legs[hall.cur] && hall.legs[hall.cur].proto), 2000);
   showTimeTip();
   sfx.wave();
   vibrate([15, 30, 15]);
@@ -6913,7 +7347,7 @@ function closeSeal(L) {
   }
   sfx.airlock();
   vibrate([20, 40, 20]);
-  showBanner('SECTION SEALED<small>THE WAY BACK IS CLOSED</small>', 1800);
+  showBanner('NO WAY BACK', 1700);
 }
 
 // ---------------------------------------------------------------------------
@@ -6933,6 +7367,8 @@ function frame(now) {
   }
   drainLook();   // per frame, so freezing the world never slows down looking
   updateFog(dt);
+  updateMuzzleFlashes(dt);
+  updateGrinder(dt);   // real time: the building does not care that you froze
 
   // --- time scale: frozen while a finger is down — but time moves (a little)
   // when YOU move, so dodging costs the world a few frames
@@ -7067,16 +7503,31 @@ function frame(now) {
       // also pulls back when you sweep away is "stickiness", and it made a
       // steady 4 px drag arrive in steps that varied better than two to one
       // — the drag was being fought. It may speed you onto a target; it may
-      // never slow you off one.
-      if (lookYaw * bestYawD > 0) player.yaw += bestYawD * k;
+      // never slow you off one. And never by more than half of what you did.
+      if (lookYaw * bestYawD > 0) {
+        const add = bestYawD * k;
+        const cap = Math.abs(lookYaw) * AIM_ASSIST_SHARE;
+        player.yaw += Math.sign(add) * Math.min(Math.abs(add), cap);
+      }
       const pitchChest = Math.atan2(1.15 - EYE_HEIGHT, bestDist);
       const pitchHeadTop = Math.atan2(1.62 * best.g.scale.y + 0.2 - EYE_HEIGHT, bestDist);
       const lo = Math.min(pitchChest, pitchHeadTop), hi = Math.max(pitchChest, pitchHeadTop);
-      if (player.pitch < lo) player.pitch += (lo - player.pitch) * k;
-      else if (player.pitch > hi) player.pitch += (hi - player.pitch) * k;
+      const pcap = Math.abs(lookPx / window.innerWidth * LOOK_SENS_Y) * AIM_ASSIST_SHARE;
+      const nudge = (want) => {
+        const d = (want - player.pitch) * k;
+        player.pitch += Math.sign(d) * Math.min(Math.abs(d), pcap);
+      };
+      if (player.pitch < lo) nudge(lo);
+      else if (player.pitch > hi) nudge(hi);
     }
   }
   updateEdgeArrows(playing);
+  if (tutorStep !== null) {
+    updateTutorial(dt,
+      Math.hypot(player.pos.x - tutorPrevX, player.pos.z - tutorPrevZ),
+      player.yaw - tutorPrevYaw);
+  }
+  tutorPrevX = player.pos.x; tutorPrevZ = player.pos.z; tutorPrevYaw = player.yaw;
 
   // subtle lean into strafes — sells the dodge
   const velRight = player.vel.x * Math.cos(player.yaw) + player.vel.z * -Math.sin(player.yaw);
@@ -7089,7 +7540,8 @@ function frame(now) {
     camera.position.set(Math.sin(a) * 12, 4.2 + Math.sin(demoT * 0.11), Math.cos(a) * 12);
     camera.lookAt(0, 1.2, 0);
   } else {
-    gun.visible = true;
+    if (tutorStep === 'move' || tutorStep === 'look') gun.visible = false;
+    else gun.visible = true;
     camera.position.set(player.pos.x, EYE_HEIGHT, player.pos.z);
     camera.rotation.order = 'YXZ';
     camera.rotation.y = player.yaw;
@@ -7148,6 +7600,15 @@ function frame(now) {
     gun.rotation.x = gunKick * 0.22 - fold * 1.15;
     gun.rotation.z = 0;
   }
+  // The tutorial draws the weapon up into frame the first time you see it.
+  // Applied here, as an offset on top of whatever the viewmodel just wrote,
+  // because the viewmodel sets an absolute position every single frame.
+  if (gunRiseT > 0) {
+    gunRiseT = Math.max(0, gunRiseT - dt);
+    const k = gunRiseT / TUTOR.gunRise;
+    gun.position.y -= k * k * 0.6;
+    gun.rotation.x -= k * 0.5;
+  }
 
   // --- world (scaled time)
   if (playing) {
@@ -7163,6 +7624,10 @@ function frame(now) {
     // The corridor releases by POSITION as well as by clock: a stretch's
     // share of the wave unlocks when you walk into it. Push forward and the
     // fights come sooner; hang back and the rest of the leg waits for you.
+    // The corridor stays empty until the tutorial has taught the freeze: a
+    // player who does not yet know what the button does cannot be asked to
+    // use it, and a body arriving mid-lesson is the loudest thing on screen.
+    if (tutorHoldsSpawns()) game.spawnQueue.length = 0;
     const room = hallAllowance();
     if (game.state === 'play' && game.spawnQueue.length > 0 &&
         enemies.length < maxAlive() && room > 0) {
@@ -7190,10 +7655,15 @@ function frame(now) {
             } else i++;
           }
         } else if (game.mode === 'hall') {
-          // corridors fight in clusters: 1-3 round the corner together
-          let extra = Math.min(
+          // corridors fight in clusters: 1-3 round the corner together — but
+          // NOT under a condition. A clump in the dark is a single problem
+          // you solve with one burst or one knife sweep; the same bodies met
+          // one at a time are separate searches, which is the harder and more
+          // interesting version of a corridor you cannot see down.
+          const clumps = !legCondition();
+          let extra = clumps ? Math.min(
             (Math.random() < 0.65 ? 1 : 0) + (Math.random() < 0.3 ? 1 : 0),
-            game.spawnQueue.length, maxAlive() - enemies.length, room - 1);
+            game.spawnQueue.length, maxAlive() - enemies.length, room - 1) : 0;
           while (extra-- > 0) spawnEnemy(game.spawnQueue.shift());
         }
         // the fuller the street (a fresh pack fills it fast), the longer
@@ -7224,7 +7694,7 @@ function frame(now) {
       vibrate(20);
       // one readable card for the whole break — the next wave starts quietly
       const next = game.wave + 1;
-      showBanner(`WAVE ${game.wave} CLEARED<small>NEXT: WAVE ${next}</small>`, 3300);
+      showBanner(`WAVE ${game.wave} CLEARED`, 2600);
       sfx.wave();   // the wave VO lands with this card
     }
   } else if (game.state === 'clear') {
@@ -7354,6 +7824,13 @@ window.__ts = {
     grade: gradeWant, gradeK: +gradeK.toFixed(3),
     contacts: contacts.filter((c) => c.visible).length }),
   setGrade: (v) => { gradeOff = !v; gradeAllowed = true; gradeSlowT = 0; },
+  vis: () => VIS,          // tests poke muzzleLife etc. to hold an effect open
+  tutor: () => ({ step: tutorStep, armed: tutorArmed, seen: tutorSeen,
+    moved: +tutorMoved.toFixed(2), looked: +tutorLooked.toFixed(2) }),
+  gunVisible: () => gun.visible,
+  setTutorStep: (v) => { tutorStep = v; tutorT = 0; tutorSub = 0; },
+  flash: (s = 1) => muzzleFlash(player.pos.x, 1.4, player.pos.z, s),
+  muzzle: () => muzzleLights.map((m) => +m.l.intensity.toFixed(2)),
   gradeState: () => ({ allowed: gradeAllowed, slowT: +gradeSlowT.toFixed(2),
     calm: +dtCalm.toFixed(4) }),
   restartHall: () => { setEnvironment('city'); clearField(); initHall(); },
