@@ -289,11 +289,20 @@ export const GRIND = {
   startBehind: 11,     // metres behind you when it wakes
   killAhead: 1.0,      // the drum face plus its reach
   h: 2.9,              // housing height (corridor clear height is 2.80)
-  drumY: [0.85, 2.0],  // two drums, counter-rotating
-  drumR: 0.52,
-  blades: 7,           // per drum
-  bladeT: 0.07,        // blade plate thickness (m)
-  spin: 8.5,           // rad/s
+  // THE VISIBLE UNIT IS 9 m WIDE AND FOLLOWS YOUR X. The lethal part is a
+  // plane across the whole leg -- it is a z test, not a box -- so the geometry
+  // only has to cover the corridor you can actually see down. Modelling it at
+  // the leg's true extent (up to five cells) meant every blade was a 20 m
+  // plate, which at any sane radius merges into a solid band: it read as a
+  // stack of bars, not as something that would take your arm off.
+  w: 9,
+  followRate: 3.2,     // how fast it slides to your x, per second
+  drumY: [0.82, 2.02], // two drums, counter-rotating
+  drumR: 0.62,
+  blades: 8,           // teeth around each drum
+  teeth: 7,            // ...and stacks of them ACROSS it, with gaps between
+  bladeT: 0.085,       // tooth thickness along the axis of rotation (m)
+  spin: 9.5,           // rad/s
   hazard: 0.16,        // height of the red hazard bars, top and bottom
 };
 

@@ -234,6 +234,21 @@ combinations of normal/slow × 0/3 enemies × even/uneven delivery: **28.4% →
 0.0%**. A genuine 15 px starved burst is still spread over three frames,
 3.76° being the largest single step.
 
+### Cause 5 — the assist scaled with the target, not with your thumb (fixed)
+
+Still jittering after cause 4, and now **in normal time too, on a body that
+had just entered view**. That last detail is the whole diagnosis. The
+correction is `bestYawD * k` — proportional to how far **off** the target is,
+not to how much you are turning — so a body appearing at the edge of the
+0.3 rad cone produced roughly a degree per frame on top of a gentle
+degree-per-frame track. It doubled your turn rate for a moment, and it landed
+exactly when someone walked in.
+
+It is now capped at **half of your own yaw this frame**, pitch included. That
+makes it a nudge at every speed: proportional by construction, and still
+exactly zero when your thumb is still. A steady 4 px drag past a target now
+varies 1.16 to one (2.12 before any of these fixes).
+
 ### FOG was a lie, and is now fixed
 
 `fog` shipped as `impl: true` and was never implemented — the leg condition
@@ -346,6 +361,57 @@ orange slab rather than a light. A blackout gets a 0.34 × 1.5 m batten. And
 the slow-mo bank now **pulses below 2.5 s and blinks below 1.2 s** — the bank
 running out is what kills you in the dark, and a bar quietly shrinking at the
 top of the screen is not a warning when you are looking down a corridor.
+
+## 4c. THE GRINDER — built
+
+The first element that attacks the slow-mo mechanic itself. A sanitation unit
+spanning the leg's full width, walking toward the door behind you on two
+counter-rotating drums of seven blades, killing instantly on contact. It runs
+on **real time**, so it does not stop while time is frozen — it is the
+building, not a person. Every second spent frozen lining up a shot is a
+second of ground given away, so the freeze stops being free and becomes a
+trade. Measured at 1.15 m/s with the clock stopped; walk pace is 4.6, so it
+is always outrunnable and never a race you cannot win.
+
+Three decisions worth keeping:
+
+* **It is not an obstacle.** A moving solid box resolves the player out of
+  itself and can eject them to the wrong side. A lethal plane cannot, and
+  "there is no way back" is better said by going back killing you than by a
+  collision you can fight.
+* **It spans the whole leg**, plus a cell either side, so no branch lane can
+  be used to slip round it.
+* **Bodies it catches pay nothing** — they shatter for the look of it, drop
+  no time and no loot, and go back in the queue ahead of you. It can never be
+  farmed, and the leg stays finishable.
+
+The blades and hazard bars are unlit, because a lethal object you cannot see
+in a blackout is not a hazard, it is a bug.
+
+## 4d. ONBOARDING — built
+
+A first run teaches itself, in the order the controls are needed, each step
+waiting on the player **doing** the thing rather than on a clock:
+
+1. `DRAG TO MOVE` — left half, dotted divider, animated thumb, until they walk
+2. `DRAG TO LOOK` — right half, divider stays, until they sweep
+3. the weapon is drawn up into frame — `TAP TO SHOOT`
+4. the time button arrives with a glowing entrance — `TAP TO SLOW TIME`
+5. the bank empties in front of them, once — `USE YOUR TIME WISELY`
+6. `SHATTER MORE / REFILL YOUR TIME METER`, with bodies that do not shoot,
+   until the bank is back to half
+7. now they shoot, 20% slower, until the player taps the button to get clear
+
+Nothing is a modal — the game runs underneath the whole time, which is the
+only way a control tutorial can teach the *feel* of a control. The corridor
+is held empty until step 6 and nobody fires until step 7: a player who has
+not been told what the freeze is for cannot be asked to dodge. Settings >
+TUTORIAL re-arms it for one run and then clears itself.
+
+**Harness note.** A fresh browser profile is a first run, so every test in the
+suite started getting the onboarding — and its spawn suppression — the moment
+this landed. They now mark themselves as taught in an init script. Anything
+new must do the same.
 
 ## 5. Higher-fidelity characters — **engine side done; needs your asset**
 

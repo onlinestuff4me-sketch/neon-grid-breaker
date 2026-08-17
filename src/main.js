@@ -6638,50 +6638,67 @@ const GRIND_BLADE = new THREE.MeshBasicMaterial({ color: 0xd6dde2 });
 const GRIND_HAZARD = new THREE.MeshBasicMaterial({ color: 0xff2d1a });
 
 function buildGrinder(cells, startGz) {
-  const C = HALL.cell, H = HALL.h;
-  let minGx = Infinity, maxGx = -Infinity;
-  for (const [gx] of cells) { minGx = Math.min(minGx, gx); maxGx = Math.max(maxGx, gx); }
-  // full width of the leg plus a cell of overlap either side: there is no
-  // gap to squeeze through, at any row, however the corridor jogs
-  const x0 = (minGx - 0.6) * C, x1 = (maxGx + 0.6) * C;
-  const w = x1 - x0, cx = (x0 + x1) / 2;
+  const C = HALL.cell;
+  const W = GRIND.w;
   const g = new THREE.Group();
-
   const box = (mat, sx, sy, sz, px, py, pz) => {
     const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), mat);
     m.position.set(px, py, pz);
     return m;
   };
-  // housing: a back plate with the drum bay cut out by simply framing it
-  g.add(box(GRIND_HOUSING, w, 0.34, 0.55, cx - (x0 + x1) / 2, GRIND.h - 0.17, -0.1));
-  g.add(box(GRIND_HOUSING, w, 0.3, 0.55, 0, 0.15, -0.1));
-  g.add(box(GRIND_HOUSING, w, GRIND.h, 0.16, 0, GRIND.h / 2, -0.42));   // back plate
-  // hazard bars, top and bottom, so it is unmistakable in the dark
-  g.add(box(GRIND_HAZARD, w, GRIND.hazard, 0.1, 0, GRIND.h - 0.36, 0.2));
-  g.add(box(GRIND_HAZARD, w, GRIND.hazard, 0.1, 0, 0.36, 0.2));
+  // housing: a sill, a header, side posts and a back plate
+  g.add(box(GRIND_HOUSING, W, 0.34, 0.6, 0, GRIND.h - 0.17, -0.08));
+  g.add(box(GRIND_HOUSING, W, 0.3, 0.6, 0, 0.15, -0.08));
+  g.add(box(GRIND_HOUSING, 0.45, GRIND.h, 0.6, -W / 2 + 0.22, GRIND.h / 2, -0.08));
+  g.add(box(GRIND_HOUSING, 0.45, GRIND.h, 0.6, W / 2 - 0.22, GRIND.h / 2, -0.08));
+  g.add(box(GRIND_HOUSING, W, GRIND.h, 0.14, 0, GRIND.h / 2, -0.5));
+  // hazard bars: unmistakable, and unlit so they read in a blackout
+  g.add(box(GRIND_HAZARD, W - 0.9, GRIND.hazard, 0.1, 0, GRIND.h - 0.36, 0.26));
+  g.add(box(GRIND_HAZARD, W - 0.9, GRIND.hazard, 0.1, 0, 0.36, 0.26));
 
-  // two drums of radial blades, counter-rotating about the corridor's x axis
+  // TEETH, as ONE InstancedMesh per drum.
+  //
+  // Full-width plates merged into a solid band at any radius that fits the
+  // corridor. Real shredders are STACKS of toothed discs, and that is what
+  // reads: teeth around the drum AND across it, with gaps between the stacks,
+  // so the silhouette is jagged from every angle. Instanced because the
+  // honest version is 36 little boxes per drum and this is one draw call --
+  // the drum's rotation lives on the parent group, so every tooth follows for
+  // free.
+  const segW = W / GRIND.teeth;
+  const toothGeo = new THREE.BoxGeometry(1, 1, 1);
   const drums = [];
+  const _m = new THREE.Matrix4(), _q = new THREE.Quaternion();
+  const _p = new THREE.Vector3(), _s = new THREE.Vector3();
+  const _ax = new THREE.Vector3(1, 0, 0);
   for (let d = 0; d < GRIND.drumY.length; d++) {
     const drum = new THREE.Group();
     drum.position.set(0, GRIND.drumY[d], 0);
-    drum.add(box(GRIND_HOUSING, w, 0.26, 0.26, 0, 0, 0));          // the shaft
-    for (let i = 0; i < GRIND.blades; i++) {
-      const a = (i / GRIND.blades) * Math.PI * 2;
-      // each blade is its own plate standing off the shaft, so the tips read
-      // as separate teeth rather than as one disc
-      const b = box(GRIND_BLADE, w - 0.1, GRIND.drumR, GRIND.bladeT, 0, GRIND.drumR / 2 + 0.1, 0);
-      const arm = new THREE.Group();
-      arm.rotation.x = a;
-      arm.add(b);
-      drum.add(arm);
+    drum.add(box(GRIND_HOUSING, W - 0.5, 0.22, 0.22, 0, 0, 0));   // the shaft
+    const im = new THREE.InstancedMesh(toothGeo, GRIND_BLADE, GRIND.teeth * GRIND.blades);
+    let i = 0;
+    for (let t = 0; t < GRIND.teeth; t++) {
+      const x = -W / 2 + (t + 0.5) * segW;
+      for (let bl = 0; bl < GRIND.blades; bl++) {
+        // half a tooth of stagger between neighbouring stacks, so the rim
+        // never lines up into a continuous edge
+        const a = (bl / GRIND.blades + (t % 2) * 0.5 / GRIND.blades) * Math.PI * 2;
+        const r = GRIND.drumR * 0.62;
+        _p.set(x, Math.cos(a) * r, Math.sin(a) * r);
+        _q.setFromAxisAngle(_ax, a);
+        _s.set(segW * 0.42, GRIND.drumR * 1.15, GRIND.bladeT);
+        im.setMatrixAt(i++, _m.compose(_p, _q, _s));
+      }
     }
+    im.instanceMatrix.needsUpdate = true;
+    im.frustumCulled = false;
+    drum.add(im);
     g.add(drum);
     drums.push(drum);
   }
   g.position.set(0, 0, startGz * C);
   scene.add(g);
-  return { g, drums, z: startGz * C, a: 0, wake: GRIND.wake, live: false, done: false };
+  return { g, drums, z: startGz * C, x: 0, a: 0, wake: GRIND.wake, live: false, done: false };
 }
 
 // Real time, always: a freeze does not stop the building.
@@ -6700,7 +6717,12 @@ function updateGrinder(dtReal) {
     vibrate([30, 50, 30]);
   }
   G.z += GRIND.speed * dtReal;
-  G.g.position.z = G.z;
+  // The visible unit slides to wherever you are, because the corridor jogs
+  // and the only part of it you can ever see is the part filling the run you
+  // are standing in. The lethal part is a plane across the whole leg either
+  // way, so nothing about the rule changes when it slides.
+  G.x += (player.pos.x - G.x) * (1 - Math.exp(-GRIND.followRate * dtReal));
+  G.g.position.set(G.x, 0, G.z);
   G.a += GRIND.spin * dtReal;
   G.drums[0].rotation.x = G.a;
   if (G.drums[1]) G.drums[1].rotation.x = -G.a;
