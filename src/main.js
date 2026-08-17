@@ -5455,13 +5455,19 @@ function updateSlowMeter() {
 // told what the freeze is for cannot be expected to dodge.
 // ---------------------------------------------------------------------------
 const TUTOR = {
-  hallCells: 9,         // the straight teaching hallway, in 4 m cells
+  hallCells: 5,         // the straight teaching hallway, in 4 m cells
   moveNeeded: 2.2,      // metres walked before the move lesson is satisfied
   lookNeeded: 0.9,      // radians of yaw swept before the look lesson is
-  barrierAt: 3,         // cells down the hallway the barrier rises
+  // In METRES from wherever the move lesson left the player, not in cells
+  // from the door: what matters is how far the round has to travel, and at
+  // 0.42x speed that is about 4 m/s. Thirteen metres is a bit over three
+  // seconds of flight — long enough to see it leave the barrel, decide, and
+  // step aside. Twenty-odd metres, which is what "just in front of the door"
+  // gave on a long leg, is nearly six seconds and reads as nothing happening.
+  barrierAt: 6,         // metres in front of the player the barrier rises
   barrierH: 1.05,       // low enough to see and shoot over
   barrierRise: 0.9,     // seconds it takes to come up out of the floor
-  enemyBack: 1.4,       // metres in front of the door the first one stands
+  enemyAt: 13,          // ...and where he stands, well beyond it
   // Rounds during the onboarding are SLOW in both clocks. The lesson is
   // "step out of the way", and a round you cannot see arrive teaches nothing.
   bulletMul: 0.42,
@@ -5471,6 +5477,7 @@ const TUTOR = {
   meterSecs: 16,        // the scripted meter drains from full over this long
   warnAt: 0.5,          // ...and warns here
   gunRise: 0.6,         // seconds for the weapon to swing up into frame
+  faceRate: 5.5,        // how fast the view is eased back down the hallway
   roomEnemies: 2,       // per room in the two rooms at the end
 };
 // The whole sequence, in order. Each step waits on the player DOING the thing.
@@ -5528,16 +5535,19 @@ const TUTOR_BAR_MAT = new THREE.MeshLambertMaterial({ color: 0x3b4148 });
 function tutorBuildBarrier() {
   if (tutorBar || game.mode !== 'hall' || !hall) return;
   const L = hall.legs[hall.cur], C = HALL.cell;
-  // Between you and him, wherever the move lesson happened to leave you: a
-  // fixed offset from the player can land past the enemy if they walked far.
-  const enemyZ = L.door.z - TUTOR.enemyBack;
-  const z = Math.min(player.pos.z + TUTOR.barrierAt * C, enemyZ - 6);
-  const x = player.pos.x;
-  const m = new THREE.Mesh(new THREE.BoxGeometry(C + 0.4, TUTOR.barrierH, 0.5), TUTOR_BAR_MAT);
+  const z = player.pos.z + TUTOR.barrierAt;
+  // WALL TO WALL. It is a barrier, not a crate: derive the span from the
+  // leg's own cells and overlap both walls, so there is no edge to walk round
+  // however wide the run happens to be.
+  let minGx = Infinity, maxGx = -Infinity;
+  for (const [gx] of L.cells) { minGx = Math.min(minGx, gx); maxGx = Math.max(maxGx, gx); }
+  const w = (maxGx - minGx + 1) * C + 1.6;
+  const x = (minGx + maxGx) / 2 * C;
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, TUTOR.barrierH, 0.5), TUTOR_BAR_MAT);
   m.position.set(x, -TUTOR.barrierH, z);
   scene.add(m);
-  const ob = { min: new THREE.Vector3(x - C / 2 - 0.2, 0, z - 0.25),
-    max: new THREE.Vector3(x + C / 2 + 0.2, TUTOR.barrierH, z + 0.25) };
+  const ob = { min: new THREE.Vector3(x - w / 2, 0, z - 0.25),
+    max: new THREE.Vector3(x + w / 2, TUTOR.barrierH, z + 0.25) };
   L.obs.push(ob);
   rebuildHallObstacles();
   tutorBar = { m, ob, L, y: -TUTOR.barrierH, rising: true };
@@ -5668,17 +5678,29 @@ function updateTutorial(dtReal, movedM, yawDelta) {
       }
       break;
 
-    case 'barrier':
-      if (tutorBarUp()) {
+    case 'barrier': {
+      // FACE THE HALLWAY AGAIN. The look lesson ends wherever the player's
+      // thumb left them — which can be at a blank wall — and the whole next
+      // beat is "a man is standing down there and he just shot at you". So
+      // the view eases back down the run while the barrier rises. Measured
+      // before this existed: he was placed correctly, held station and fired
+      // fourteen times, entirely off screen.
+      const k = 1 - Math.exp(-TUTOR.faceRate * dtReal);
+      let d = Math.PI - player.yaw;                     // +z is yaw = PI
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      player.yaw += d * k;
+      player.pitch += (0 - player.pitch) * k;
+      if (tutorBarUp() && Math.abs(d) < 0.05) {
         tutorNext('incoming');
-        const L = hall.legs[hall.cur];
-        tutorMark = tutorPlaceEnemy(L.door.z - TUTOR.enemyBack);
+        tutorMark = tutorPlaceEnemy(player.pos.z + TUTOR.enemyAt);
         tutorRevealButton();
         tutorShot(tutorMark, TUTOR.sideOffset);
         tutorSub = TUTOR.fireGap;
         tutorMsg('TAP TO SLOW TIME', 'btn', true);
       }
       break;
+    }
 
     case 'incoming':
       if (tutorSub <= 0) { tutorShot(tutorMark, TUTOR.sideOffset); tutorSub = TUTOR.fireGap; }
@@ -6565,7 +6587,12 @@ function genHallLeg(sgx, sgz, proto) {
   }
   // a leg is never a straight shot: if the rolls gave us none, put a turn
   // in right before the approach so the door is always found around a corner
-  if (jogs === 0) {
+  // — EXCEPT the onboarding hallway, which is the one leg in the game that is
+  // supposed to be a straight shot. This fallback is why "straight" still
+  // arrived with a corner in it: `fwd` and `run` were both honoured, the
+  // spine came out straight, and then this put three cells of lateral and two
+  // more of forward on the end of it because the rolls had produced no jog.
+  if (jogs === 0 && !straight) {
     const jd = Math.random() < 0.5 ? 1 : -1;
     for (let i = 0; i < 3; i++) { gx += jd; add(gx, gz); spine.push([gx, gz]); }
     for (let i = 0; i < 2; i++) { gz++; add(gx, gz); spine.push([gx, gz]); }
@@ -6574,7 +6601,11 @@ function genHallLeg(sgx, sgz, proto) {
   // derived from missing neighbours, so simply owning more cells opens the
   // space up — and the corridor gets a rhythm of tight / open / tight.
   const roomCells = [];
-  const wantsRoom = form === 'atrium' || form === 'corridor';   // a vault has its own
+  // ...but NOT on the onboarding's hallway. `straight` only controlled the
+  // spine, and a corridor leg then had a five-cell chamber with four pillars
+  // widened into it and two branch lanes hung off it — which is why the
+  // "straight hallway" playtested as a room. One stretch means one stretch.
+  const wantsRoom = !straight && (form === 'atrium' || form === 'corridor');
   const roomWide = form === 'atrium' ? 3 : 2;
   if (wantsRoom && spine.length > 10) {
     const i = 3 + Math.floor(Math.random() * Math.max(1, spine.length - 9));
@@ -6604,7 +6635,7 @@ function genHallLeg(sgx, sgz, proto) {
   // spine further along — a choice of lane, never a detour backwards.
   // A vault gets none: a branch lane cutting into the room would give it a
   // second way in, and the whole point is one door in and one door out.
-  const branches = form === 'gauntlet' || form === 'vault' ? 0
+  const branches = straight || form === 'gauntlet' || form === 'vault' ? 0
     : form === 'serviceRun' ? 3 : 2;
   for (let b = 0; b < branches; b++) {
     const i = 1 + Math.floor(Math.random() * Math.max(1, spine.length - 9));
@@ -7413,6 +7444,12 @@ function unstickHallEnemies(dt) {
   const L = hall.legs[hall.cur], C = HALL.cell;
   for (const e of enemies) {
     if (e.state === 'assemble') continue;
+    // A body the ONBOARDING placed is meant to stand there. This rescues
+    // enemies that stop closing the distance — which is every one of them
+    // during the tutorial — and it teleports them "to the approach ahead of
+    // the player", which is how the enemy you were supposed to dodge left
+    // the hallway and was never seen again.
+    if (e.hold) continue;
     const d = Math.hypot(e.pos.x - player.pos.x, e.pos.z - player.pos.z);
     const seen = hasLineOfSight(_v2.set(e.pos.x, 1.35, e.pos.z),
       _v3.set(player.pos.x, EYE_HEIGHT - 0.3, player.pos.z));
@@ -7541,6 +7578,18 @@ function updateHall(dt) {
   hall.flowT = (hall.flowT || 0) - dt;
   if (hall.flowT <= 0) { updateHallFlow(); hall.flowT = 0.3; }
   unstickHallEnemies(dt);
+  // Re-pin after the AI has had its turn. Pinning inside updateTutorial runs
+  // BEFORE the enemy update, so the walk cycle simply undid it every frame
+  // and the scripted body drifted off down the corridor.
+  if (tutorStep !== null) {
+    for (const e of enemies) {
+      if (!e.hold) continue;
+      e.pos.set(e.hold.x, 0, e.hold.z);
+      e.g.position.set(e.hold.x, 0, e.hold.z);
+      const dx = player.pos.x - e.hold.x, dz = player.pos.z - e.hold.z;
+      e.g.rotation.y = Math.atan2(dx, dz) + Math.PI;   // always facing you
+    }
+  }
   const L = hall.legs[hall.cur];
   if (game.state === 'play' && !L.door.open &&
       game.spawnQueue.length === 0 && enemies.length === 0 &&
@@ -8061,10 +8110,13 @@ window.__ts = {
     contacts: contacts.filter((c) => c.visible).length }),
   setGrade: (v) => { gradeOff = !v; gradeAllowed = true; gradeSlowT = 0; },
   vis: () => VIS,          // tests poke muzzleLife etc. to hold an effect open
+  mode: () => timeMode,
   tutor: () => ({ step: tutorStep, armed: tutorArmed, seen: tutorSeen,
+    shaping: tutorShaping, legs: tutorLegsBuilt,
     moved: +tutorMoved.toFixed(2), looked: +tutorLooked.toFixed(2) }),
   gunVisible: () => gun.visible,
   tutorBar: () => (tutorBar ? +tutorBar.m.position.z.toFixed(1) : null),
+  tutorBarW: () => (tutorBar ? +tutorBar.m.geometry.parameters.width.toFixed(1) : null),
   setTutorStep: (v) => { tutorStep = v; tutorT = 0; tutorSub = 0; },
   flash: (s = 1) => muzzleFlash(player.pos.x, 1.4, player.pos.z, s),
   muzzle: () => muzzleLights.map((m) => +m.l.intensity.toFixed(2)),
