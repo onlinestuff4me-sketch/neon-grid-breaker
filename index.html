@@ -240,7 +240,7 @@
                transition:opacity .45s ease; }
   #tutorline.on { opacity:1; }
   body.slowmo #tutorline { border-left-color:rgba(238,240,243,.42); }
-  #tutormsg { position:absolute; left:0; right:0; text-align:center;
+  #tutormsg { position:absolute; display:block; left:0; right:0; text-align:center;
               font-weight:900; letter-spacing:.06em; color:#16181d;
               font-size:min(9.5vw,44px); line-height:1.06; opacity:0;
               transition:opacity .35s ease, transform .35s ease;
@@ -253,16 +253,18 @@
   #tutormsg.mid   { top:26%; }
   #tutormsg.left  { top:38%; right:52%; left:0; font-size:min(7.4vw,32px); }
   #tutormsg.right { top:38%; left:52%; right:0; font-size:min(7.4vw,32px); }
-  #tutormsg.meter { top:calc(env(safe-area-inset-top, 0px) + 62px);
-                    font-size:min(5.4vw,24px); }
   /* The button prompt sat low enough that the viewmodel ran through it, and
      it could not go lower because that is where the left thumb lives. It goes
      UP instead, into clear frame, in the button's own red, pulsing with it —
      and an arrow travels from the words to the button so the two are read as
      one thing. */
-  #tutormsg.btn   { top:44%; font-size:min(7.2vw,33px); color:#ff2d1a;
+  #tutormsg.atbtn { top:44%; font-size:min(6.6vw,30px); color:#ff2d1a;
                     text-shadow:0 2px 18px rgba(238,240,243,.75); }
-  body.slowmo #tutormsg.btn { color:#ff5d4a; text-shadow:0 2px 18px rgba(12,13,16,.8); }
+  body.slowmo #tutormsg.atbtn { color:#ff5d4a; text-shadow:0 2px 18px rgba(12,13,16,.8); }
+  /* the headline is what to DO; the span under it is which control does it,
+     and it is the half that leaves the moment the control has been used */
+  #tutormsg.atbtn span { display:block; margin-top:16px; font-size:min(5.4vw,25px);
+                    letter-spacing:.1em; }
   /* Straight down at the button, from directly above it. The time button is
      146px wide sitting at right:-14px, so its centre line is 59px in from the
      right edge; the arrow is 38px wide, so right:40px puts the two on the
@@ -288,10 +290,23 @@
     25%  { opacity:1; }
     100% { opacity:0; transform:translateY(calc(100% + 100px)); }
   }
+  /* THE TOP SLOT. The meter is at the top of the screen, so the sentence
+     about the meter emptying belongs directly under it — not floating in the
+     middle of the frame where it competes with the thing you are being told
+     to dodge. Its own element, because it shares the screen with #tutormsg. */
+  #tutortop { position:absolute; left:0; right:0; text-align:center;
+              top:calc(env(safe-area-inset-top, 0px) + 80px);
+              font-weight:900; letter-spacing:.06em; color:#ff2d1a;
+              font-size:min(5.4vw,24px); line-height:1.1; padding:0 18px;
+              opacity:0; pointer-events:none; transition:opacity .35s ease;
+              text-shadow:0 2px 18px rgba(238,240,243,.75); }
+  #tutortop.show { opacity:1; }
+  body.slowmo #tutortop { text-shadow:0 2px 18px rgba(12,13,16,.85); }
+  #tutortop.pulse { animation:tutorpulse 1.05s ease-in-out infinite; }
   /* ...and its opposite, pointing UP at the meter that is emptying. */
   #tutorup { position:absolute; left:0; right:0; text-align:center;
-             top:calc(env(safe-area-inset-top, 0px) + 56px);
-             font-size:30px; line-height:1; font-weight:900; color:#ff2d1a;
+             top:calc(env(safe-area-inset-top, 0px) + 48px);
+             font-size:24px; line-height:1; font-weight:900; color:#ff2d1a;
              opacity:0; pointer-events:none;
              text-shadow:0 2px 12px rgba(238,240,243,.8); }
   #tutorup.on { opacity:1; animation:arrowrise 1.15s ease-in-out infinite; }
@@ -300,13 +315,6 @@
     30%  { opacity:1; }
     100% { opacity:0; transform:translateY(-14px); }
   }
-  /* the twin block: the warning, then what to do about it, one under the other */
-  #tutormsg.twin  { top:44%; color:#ff2d1a; font-size:min(6.4vw,29px);
-                    text-shadow:0 2px 18px rgba(238,240,243,.75); }
-  #tutormsg.twin span { display:block; margin-top:18px; }
-  body.slowmo #tutormsg.twin { text-shadow:0 2px 18px rgba(12,13,16,.85); }
-  /* the running-out warning sits under the meter and shares its alarm */
-  #tutormsg.meter { color:#ff2d1a; }
   @keyframes tutorpulse { 0%,100% { opacity:1; } 50% { opacity:.32; } }
   #tutormsg.pulse { animation:tutorpulse 1.05s ease-in-out infinite; }
 
@@ -509,7 +517,7 @@
   <div id="flash"></div>
   <div id="warn"></div>
   <div id="banner"></div>
-  <div id="tutor"><div id="tutorline"></div><div id="tutorhand"></div><div id="tutorarrow"></div><div id="tutorup">▲</div><div id="tutormsg"></div></div>
+  <div id="tutor"><div id="tutorline"></div><div id="tutorhand"></div><div id="tutorarrow"></div><div id="tutorup">▲</div><div id="tutortop"></div><div id="tutormsg"></div></div>
   <div id="ammo">PISTOL · ∞</div>
   <div id="reloadbar"><div id="reloadfill"></div></div>
   <div id="pausebtn">❚❚</div>

@@ -3274,10 +3274,11 @@ function enemyFire(e, toPlayer) {
       d.z += (Math.random() - 0.5) * 2 * spec.spread;
       d.normalize();
     }
-    spawnBullet(origin, d, false, (spec.mul || 1) * tutorBulletScale());
+    spawnBullet(origin, d, false, (spec.mul || 1));
   }
   muzzleFlash(origin.x, origin.y, origin.z, 0.85);
   sfx.enemyShot();
+  if (tutorStep !== null) tutorNoteShot();
 }
 
 // Telegraph flash: shotgunners light up both muzzle tips; other grouped guns
@@ -4074,6 +4075,7 @@ function onPointerDown(ev) {
     // brief lockout after dying so panic taps don't skip the death screen
     if (game.state === 'dead' && performance.now() - deathAt < 1000) return;
     if (game.state === 'dead' && ev.target && ev.target.id === 'menubtn') {
+      if (tutorDeadPending) endTutorial(false);   // quitting the lesson quits it
       showMenu();
       return;
     }
@@ -5620,7 +5622,7 @@ function updateModeUI() {
   // would otherwise hand them straight back.
   const on = timeMode === 'toggle' && inRun;
   el.timebtn.style.display = (on && !tutorBefore('incoming')) ? 'flex' : 'none';
-  el.slowmeter.style.display = (on && !tutorBefore('dodged')) ? 'block' : 'none';
+  el.slowmeter.style.display = (on && (!tutorActive() || tutorMeterOn)) ? 'block' : 'none';
   el.gtime.style.display = timeMode === 'toggle' ? '' : 'none';
 }
 function updateSlowMeter() {
@@ -5654,16 +5656,20 @@ const TUTOR = {
   barrierAt: 8,         // metres ahead the barrier already stands at the start
   barrierH: 1.05,       // low enough to see and shoot over
   enemyAt: 13,          // metres ahead of the player the first one stands
-  // Rounds are SLOW in both clocks. The lesson is "step out of the way", and
-  // a round you cannot see arrive teaches nothing. At 0.42x that is about
-  // 4 m/s, so thirteen metres is a bit over two seconds of flight.
-  bulletMul: 0.42,
-  // THE FIRST ROUND CRAWLS. Before you have been told what the button does, a
-  // round you cannot answer is not a lesson, it is a death. It leaves the
-  // barrel at a fifth of even the tutorial's speed and only picks up once you
-  // have actually stopped time — so the beat is see it, read the prompt,
-  // press, walk out of the way, with as long as you need for the first two.
-  crawlMul: 0.085,
+  enemyX: 1.15,         // ...and how far to either side the other two stand.
+                        // The teaching leg is one cell wide: 4 m of cell less
+                        // 0.3 m of wall each side is 3.4 m of floor, so ±1.7
+                        // is the wall itself and a body placed there is IN it.
+  // ROUNDS HERE ARE ORDINARY ROUNDS. Same speed in both clocks as every other
+  // round in the game, because a tutorial that teaches a slower bullet than
+  // the game fires has taught the wrong timing. What makes it fair is not a
+  // handicap on the round, it is the beat before it: the prompt is on screen
+  // and the arm is visibly rising for well over a second before he pulls.
+  aimBeat: 2.6,         // seconds the prompt is up before his arm starts to rise.
+                        // Two lines to read, a control they have never seen to
+                        // find, and a thumb to move: 1.5 s was a death every
+                        // time, which the retry makes survivable but not fair.
+  reshoot: 2.6,         // ...and the gap before he tries again after a miss
   shots: 5,
   afterBarrier: 2.0,
   // THE METER LESSON HAS A FLOOR. It empties at a readable rate to half, then
@@ -5687,7 +5693,11 @@ let tutorMoved = 0, tutorLooked = 0, tutorFroze = false;
 let tutorMark = null;      // the enemy the hallway beat is about
 let tutorRound = null;     // the one round currently in the air
 let tutorShotsFired = 0, tutorDodged = 0, tutorCrossed = false;
-let tutorMeterOn = false, tutorMeterAt = 0;
+// The dodge beat can be failed, so it has to be restartable. The anchor is
+// where you stood and what you were looking at the instant it began; the
+// pending flag is what turns the ordinary death screen into this one's.
+let tutorAwaitShot = false, tutorAnchor = null, tutorDeadPending = false;
+let tutorMeterOn = false, tutorMeterAt = 0, tutorMeterSaid = false;
 let tutorBar = null;
 let tutorArmed = false, tutorSeen = false;
 let tutorShaping = false, tutorLegsBuilt = 0;
@@ -5703,7 +5713,6 @@ const tutorBefore = (step) => tutorStep !== null &&
   TUTOR_ORDER.indexOf(tutorStep) < TUTOR_ORDER.indexOf(step);
 const tutorHoldsFire = () => tutorStep !== null;   // every round here is scripted
 const tutorHoldsSpawns = () => tutorStep !== null;
-const tutorBulletScale = () => (tutorStep !== null ? TUTOR.bulletMul : 1);
 // YOU CANNOT SHOOT WHAT YOU HAVE NOT BEEN GIVEN. Tapping fired a round with no
 // weapon on screen, which is the sort of thing a tutorial exists to prevent.
 const tutorHoldsPlayerFire = () => tutorBefore('shoot');
@@ -5715,18 +5724,30 @@ const tutorHoldsPlayerFire = () => tutorBefore('shoot');
 // middle of the sentence explaining that the bank runs out.
 const tutorFreeIsFree = () => tutorStep !== null;
 
-function tutorMsg(html, where, pulse) {
+// The centre slot. `arrow` is stated rather than inferred from the position:
+// the same words sit at the same place with the pointer on and off — it comes
+// on to say "that control, down there", and it goes off the instant that
+// control has been used.
+function tutorMsg(html, where, pulse, arrow = null) {
   if (!el.tutormsg) return;
   el.tutormsg.innerHTML = html;
   el.tutormsg.className = `${where}${pulse ? ' pulse' : ''} show`;
-  const wantsDown = where === 'btn' || where === 'twin';
-  if (el.tutorarrow) el.tutorarrow.classList.toggle('on', wantsDown);
-  if (el.tutorup) el.tutorup.classList.toggle('on', where === 'twin');
+  const down = arrow === null ? where === 'atbtn' : arrow === 'down';
+  if (el.tutorarrow) el.tutorarrow.classList.toggle('on', down);
+}
+// The top slot, under the meter. Independent of the centre one, so the thing
+// you are being told about the meter and the thing you are being told to do
+// with your feet can be on screen together without stacking.
+function tutorTop(html, pulse) {
+  if (!el.tutortop) return;
+  el.tutortop.innerHTML = html || '';
+  el.tutortop.className = html ? (pulse ? 'pulse show' : 'show') : '';
+  if (el.tutorup) el.tutorup.classList.toggle('on', !!html);
 }
 function tutorHideMsg() {
   if (el.tutormsg) el.tutormsg.className = '';
   if (el.tutorarrow) el.tutorarrow.classList.remove('on');
-  if (el.tutorup) el.tutorup.classList.remove('on');
+  tutorTop(null);
 }
 function tutorHand(kind) { if (el.tutorhand) el.tutorhand.className = kind ? `${kind} on` : ''; }
 function tutorLine(on) { if (el.tutorline) el.tutorline.classList.toggle('on', !!on); }
@@ -5773,27 +5794,51 @@ function tutorUpdateBarrier(dtReal) {
 }
 
 // --- the script's own trigger finger --------------------------------------
-function tutorShot(e, mul) {
-  if (!e || !e.alive) return null;
+// It does not spawn the round. It pushes him into the SAME aim state the AI
+// uses, which raises the gun arm, flashes the muzzle white at seven-tenths of
+// the telegraph, and then calls the ordinary enemyFire — so what the player
+// learns to read here is exactly the tell every enemy gives for the rest of
+// the game, firing exactly the round every enemy fires.
+function tutorAim(e) {
+  if (!e || !e.alive) return false;
   const dx = player.pos.x - e.pos.x, dz = player.pos.z - e.pos.z;
   e.g.rotation.y = Math.atan2(dx, dz) + Math.PI;
-  const origin = _v2.set(e.pos.x, 1.35, e.pos.z);
-  const target = _v3.set(player.pos.x, EYE_HEIGHT - 0.2, player.pos.z);
-  const d = target.sub(origin).normalize();
-  spawnBullet(origin, d, false, mul || TUTOR.bulletMul);
-  muzzleFlash(origin.x, origin.y, origin.z, 0.85);
-  sfx.enemyShot();
-  const b = bullets[bullets.length - 1];
-  return b ? { b, passedBar: false, counted: false,
-    crawling: !!mul && mul < TUTOR.bulletMul } : null;
+  e.state = 'aim'; e.stateT = 0; e.holdFireT = 0; e.fireCd = 0;
+  tutorAwaitShot = true;
+  return true;
 }
+// enemyFire calls this on the way out, so the script gets a handle on the
+// round it asked for without having to guess which of the bullets is his.
+function tutorNoteShot() {
+  if (!tutorAwaitShot) return;
+  tutorAwaitShot = false;
+  const b = bullets[bullets.length - 1];
+  tutorRound = b ? { b, passedBar: false, counted: false } : null;
+  tutorShotsFired++;
+}
+// A held body ignores collision — that is the point of holding it — so the
+// only thing keeping it out of the masonry is where the script puts it. The
+// offset is measured from the player, but the result is clamped to the leg's
+// own floor: a player hugging the left wall must not push the left-hand man
+// through it.
 function tutorPlaceEnemy(z, xOff = 0) {
   spawnEnemy('gunner');
   const e = enemies[enemies.length - 1];
   if (!e) return null;
-  e.hold = { x: player.pos.x + xOff, z };
-  e.pos.set(e.hold.x, 0, z);
-  e.g.position.set(e.hold.x, 0, z);
+  let x = player.pos.x + xOff;
+  const L = hall && hall.legs[hall.cur];
+  if (L && L.cells && L.cells.length) {
+    let minGx = Infinity, maxGx = -Infinity;
+    for (const [gx] of L.cells) { minGx = Math.min(minGx, gx); maxGx = Math.max(maxGx, gx); }
+    const C = HALL.cell;
+    // the cell run's floor, less half a wall and half a body at each end
+    const lo = (minGx - 0.5) * C + HALL.wall / 2 + 0.55;
+    const hi = (maxGx + 0.5) * C - HALL.wall / 2 - 0.55;
+    x = hi > lo ? Math.max(lo, Math.min(hi, x)) : (lo + hi) / 2;
+  }
+  e.hold = { x, z };
+  e.pos.set(x, 0, z);
+  e.g.position.set(x, 0, z);
   return e;
 }
 
@@ -5808,7 +5853,8 @@ function tutorResetWorld() {
   tutorRound = null; tutorMark = null;
   tutorMoved = 0; tutorLooked = 0; tutorFroze = false;
   tutorShotsFired = 0; tutorDodged = 0;
-  tutorMeterOn = false; tutorMeterAt = 0;
+  tutorMeterOn = false; tutorMeterAt = 0; tutorMeterSaid = false;
+  tutorAwaitShot = false; tutorAnchor = null; tutorDeadPending = false;
   document.body.classList.remove('tutoring');
   tutorHideMsg(); tutorHand(null); tutorLine(false);
   if (el.timebtn) el.timebtn.classList.remove('arrive', 'hint');
@@ -5825,6 +5871,8 @@ function startTutorial() {
   tutorMoved = 0; tutorLooked = 0; tutorFroze = false;
   tutorMark = null; tutorRound = null;
   tutorShotsFired = 0; tutorDodged = 0; tutorMeterOn = false; tutorCrossed = false;
+  tutorMeterSaid = false; tutorAwaitShot = false; tutorAnchor = null;
+  tutorDeadPending = false;
   document.body.classList.add('tutoring');
   gun.visible = false;
   el.timebtn.style.display = 'none';
@@ -5837,6 +5885,7 @@ function startTutorial() {
 }
 function endTutorial(taught = true) {
   tutorStep = null;
+  tutorDeadPending = false;
   tutorShaping = false;
   document.body.classList.remove('tutoring');
   tutorHideMsg(); tutorHand(null); tutorLine(false);
@@ -5854,14 +5903,61 @@ function endTutorial(taught = true) {
   if (taught) { const t = 'REACH THE RED DOOR'; setTimeout(() => showBanner(t, 2200), 60); }
 }
 function tutorNext(step) { tutorStep = step; tutorT = 0; tutorSub = 0; }
+
+// Back to the instant before the shot. Not to the top of the onboarding —
+// you already know how to walk and look, and being made to prove it again is
+// how a tutorial turns into a chore. The corridor is swept, the man is put
+// back where he stood, and the prompt comes up exactly as it did the first
+// time, so what you see after failing is what you were looking at before it.
+function tutorRetry() {
+  tutorDeadPending = false;
+  el.redflash.style.opacity = 0;
+  clearField();                       // his body, the round, the debris
+  player.alive = true;
+  player.vel.set(0, 0, 0);
+  player.roll = 0;
+  player.iframes = 0.5;
+  if (tutorAnchor) {
+    player.pos.set(tutorAnchor.x, 0, tutorAnchor.z);
+    player.yaw = tutorAnchor.yaw;
+    player.pitch = tutorAnchor.pitch;
+  }
+  game.state = 'play';
+  game.stateT = 0;
+  game.noFireBefore = 0;
+  setTimeLocked(false);
+  slowBank = SLOWMO.cap;
+  updateSlowMeter();
+  tutorFroze = false;
+  tutorMeterOn = false; tutorMeterAt = 0; tutorMeterSaid = false;
+  tutorRound = null; tutorAwaitShot = false;
+  tutorShotsFired = 0; tutorDodged = 0;
+  el.pausebtn.style.display = '';
+  el.guide.style.display = 'none';
+  gun.visible = false;                // the weapon is still two steps away
+  tutorNext('incoming');
+  tutorMark = tutorPlaceEnemy(player.pos.z + TUTOR.enemyAt);
+  updateModeUI();
+  tutorRevealButton();
+  tutorShowMeter(false);
+  tutorMsg(TUTOR_DODGE, 'atbtn', true, 'down');
+  tutorSub = TUTOR.aimBeat;
+  tutorPrevX = player.pos.x; tutorPrevZ = player.pos.z; tutorPrevYaw = player.yaw;
+}
 function tutorRevealButton() {
   updateModeUI();
   el.timebtn.classList.remove('arrive');
   void el.timebtn.offsetWidth;
   el.timebtn.classList.add('arrive', 'hint');
 }
-const TUTOR_TWIN =
-  'YOUR TIME METER IS RUNNING OUT<span>TAP TO RESUME TIME</span>';
+// One headline for the whole dodge beat — what you are being asked to do does
+// not change — and a sub-line naming whichever control is the answer right
+// now. Between the two states the sub-line is simply absent, which is what
+// "the prompt went away because I pressed it" looks like.
+const TUTOR_DODGE = 'DODGE THE BULLET<span>TAP TO SLOW TIME</span>';
+const TUTOR_DODGE_ONLY = 'DODGE THE BULLET';
+const TUTOR_DODGE_RESUME = 'DODGE THE BULLET<span>TAP TO RESUME TIME</span>';
+const TUTOR_METER = 'YOUR TIME METER IS RUNNING OUT';
 
 // Driven on REAL time from the frame loop, after input and movement have been
 // applied, so "did they do it yet" is answered against this frame's state.
@@ -5869,6 +5965,9 @@ function updateTutorial(dtReal, movedM, yawDelta) {
   if (tutorStep === null) return;
   tutorT += dtReal;
   tutorSub -= dtReal;
+  // A death mid-lesson pauses the script rather than ending it: the retry
+  // button rewinds to the start of this beat and hands control back.
+  if (tutorDeadPending) return;
   if (!player.alive) { endTutorial(false); return; }
   tutorUpdateBarrier(dtReal);
   tutorShowMeter(tutorMeterOn);
@@ -5886,13 +5985,6 @@ function updateTutorial(dtReal, movedM, yawDelta) {
       if (!tutorRound.counted && bz < player.pos.z - 0.3) {
         tutorRound.counted = true;
         tutorDodged++;
-        if (!tutorMeterOn) {   // the meter lesson starts on the FIRST dodge
-          tutorMeterOn = true;
-          tutorMeterAt = tutorT;
-          slowBank = SLOWMO.cap;
-          updateSlowMeter();
-          tutorMsg('YOUR TIME METER IS RUNNING OUT', 'meter', true);
-        }
       }
     } else if (!tutorRound.counted) {
       tutorRound = null;   // it hit something; the next shot still comes
@@ -5941,39 +6033,45 @@ function updateTutorial(dtReal, movedM, yawDelta) {
       if (Math.abs(d) < 0.05) {
         tutorNext('incoming');
         tutorMark = tutorPlaceEnemy(player.pos.z + TUTOR.enemyAt);
+        // where to put them back if the round connects
+        tutorAnchor = { x: player.pos.x, z: player.pos.z,
+          yaw: player.yaw, pitch: player.pitch };
         tutorRevealButton();
-        tutorMsg('TAP TO SLOW TIME', 'btn', true);
-        tutorRound = tutorShot(tutorMark, TUTOR.crawlMul);   // it crawls
-        tutorShotsFired = 1;
-        tutorSub = 6;   // a fallback, in case the round dies early
+        tutorMsg(TUTOR_DODGE, 'atbtn', true, 'down');
+        tutorSub = TUTOR.aimBeat;   // the prompt lands before his arm moves
       }
       break;
     }
 
     case 'incoming':
-      // ONE round, and it crawls until the button has been used. There is no
-      // stream: the lesson here is the freeze and then the meter, and rounds
-      // arriving while the meter is being explained is a player who runs out
-      // of time with a bullet in the air — which is the one thing this step
-      // must never do to someone who has not been taught anything yet.
-      if (!tutorRound && !tutorMeterOn && tutorSub <= 0 && tutorDodged < 1) {
-        tutorRound = tutorShot(tutorMark, TUTOR.crawlMul);
-        tutorShotsFired++;
-        tutorSub = 30;
+      // ONE round in the air at a time, and it is an ordinary round at
+      // ordinary speed. He does not begin the telegraph until the prompt has
+      // had its beat on screen, and if the round goes past he waits again
+      // before raising the arm — so the rhythm is always read, press, move.
+      if (!tutorRound && !tutorAwaitShot && tutorSub <= 0 &&
+          !tutorMeterSaid && tutorShotsFired < TUTOR.shots) {
+        tutorSub = tutorAim(tutorMark) ? TUTOR.reshoot : 1;
       }
-      if (tutorFroze) el.timebtn.classList.remove('hint');
-      // ...and once they DO stop time it picks up to the ordinary slowed pace,
-      // so it actually arrives and can actually be stepped out of
-      if (tutorFroze && tutorRound && tutorRound.crawling) {
-        tutorRound.crawling = false;
-        tutorRound.b.vel.multiplyScalar(TUTOR.bulletMul / TUTOR.crawlMul);
+      // THE POINTER BELONGS TO THE CONTROL, NOT THE STEP. The instant the
+      // button has been used, the line running down to it and the words
+      // naming it both go — what is left is the thing still being asked for.
+      if (tutorFroze && !tutorMeterOn) {
+        el.timebtn.classList.remove('hint');
+        tutorMeterOn = true;
+        tutorMeterAt = tutorT;
+        slowBank = SLOWMO.cap;
+        updateSlowMeter();
+        tutorMsg(TUTOR_DODGE_ONLY, 'atbtn', true, 'off');
       }
-      // the resume prompt joins the warning a beat later, not with it
-      if (tutorMeterOn && tutorT > tutorMeterAt + TUTOR.resumeDelay &&
-          el.tutormsg && !el.tutormsg.classList.contains('twin')) {
-        tutorMsg(TUTOR_TWIN, 'twin', true);
+      // ...and a beat later the meter explains itself, up at the top directly
+      // under the bar it is about, with the way back out of it named down on
+      // the button it belongs to.
+      if (tutorMeterOn && !tutorMeterSaid && tutorT > tutorMeterAt + TUTOR.resumeDelay) {
+        tutorMeterSaid = true;
+        tutorTop(TUTOR_METER, true);
+        tutorMsg(TUTOR_DODGE_RESUME, 'atbtn', true, 'down');
       }
-      if (tutorMeterOn && !timeLocked && tutorT > tutorMeterAt + 0.4) {
+      if (tutorMeterSaid && !timeLocked) {
         tutorNext('gunup');
         tutorHideMsg();
         gunRiseT = TUTOR.gunRise;
@@ -5985,9 +6083,12 @@ function updateTutorial(dtReal, movedM, yawDelta) {
       if (gunRiseT <= 0) {
         tutorNext('shoot');
         // two more join him: three to clear before the door opens
+        // Abreast, INSIDE the corridor: ±2.4 m put the outer two through the
+        // walls of a one-cell leg, which has only ±1.7 m of floor and less
+        // than that once a body has a width of its own.
         for (let i = 1; i < TUTOR.finalEnemies; i++) {
           tutorPlaceEnemy(player.pos.z + TUTOR.enemyAt + (i - 1) * 1.5,
-            i === 1 ? -2.4 : 2.4);
+            i === 1 ? -TUTOR.enemyX : TUTOR.enemyX);
         }
         tutorMsg('TAP ANYWHERE TO SHOOT', 'mid', true);
       }
@@ -6071,6 +6172,7 @@ const el = {
   tutorline: document.getElementById('tutorline'),
   tutorarrow: document.getElementById('tutorarrow'),
   tutorup: document.getElementById('tutorup'),
+  tutortop: document.getElementById('tutortop'),
   tutlink: document.getElementById('tutlink'),
   saves: document.getElementById('saves'),
   slotlist: document.getElementById('slotlist'),
@@ -6445,16 +6547,15 @@ let deathAt = 0;
 
 function hitPlayer(ended = false) {
   if (!player.alive || (player.iframes > 0 && !ended)) return;
-  // You cannot fail the onboarding. Being hit while learning to dodge stings
-  // — the screen flashes, the phone thumps — and then the lesson continues,
-  // because a first-time player who dies during the tutorial has learned
-  // only that the tutorial can be lost.
+  // THE ONBOARDING CAN BE FAILED, and it has to be. It used to hand out
+  // invulnerability, which taught the one thing this game must never teach:
+  // that a round which connects is survivable. It kills you here exactly as
+  // it will kill you in the run — same red screen, same one hit — and the
+  // only difference is where the button underneath it puts you back.
   if (tutorStep !== null && !ended) {
-    player.iframes = 0.9;
-    el.redflash.style.opacity = '1';
-    setTimeout(() => { el.redflash.style.opacity = '0'; }, 130);
-    vibrate([40, 60, 40]);
-    return;
+    tutorDeadPending = true;
+    tutorHideMsg(); tutorHand(null); tutorLine(false);   // no lesson under the red
+    el.timebtn.classList.remove('arrive', 'hint');
   }
   player.alive = false;
   sprintTo = null;
@@ -6462,7 +6563,7 @@ function hitPlayer(ended = false) {
   game.stateT = 0;
   deathAt = performance.now();
   sfx.fadeAll(0, ended ? 0.3 : 1.1);   // the run's audio dies with you
-  recordRun();
+  if (!tutorDeadPending) recordRun();   // a lesson is not a run: nothing filed
   el.guide.style.opacity = 0;
   el.guide.style.display = 'none';
   el.pausebtn.style.display = 'none';
@@ -6486,6 +6587,21 @@ function hitPlayer(ended = false) {
     el.overlay.querySelector('h1').innerHTML = ended ? 'RUN<br><em>ENDED</em>' : 'YOU<br><em>DIED</em>';
     el.overlay.querySelector('.sub').textContent = ended ? 'YOU CALLED IT' : 'ONE HIT IS ALL IT TAKES';
     const r = el.overlay.querySelector('.rules');
+    // Dying in the lesson costs you the lesson's last beat and nothing else:
+    // no stats to read, no run to compare it against, one button that puts
+    // you back in front of the same man raising the same arm.
+    if (tutorDeadPending) {
+      r.style.display = 'none';
+      el.scores.style.display = 'none';
+      el.menurow.style.display = 'none';
+      el.moderow.style.display = 'none';
+      const g = el.overlay.querySelector('.go');
+      g.textContent = 'TAP TO TRY AGAIN';
+      g.classList.add('long');
+      el.menubtn.style.display = 'inline-block';
+      el.overlay.classList.remove('hidden');
+      return;
+    }
     // A run that showed you something new says so. It is the only place the
     // archive advertises itself, and dying with a find is the moment you are
     // most likely to go and look at it.
@@ -6562,6 +6678,7 @@ function advanceFromOverlay() {
   sfx.fadeAll(1, 0.25);
   el.overlay.classList.add('hidden');
   el.redflash.style.opacity = 0;
+  if (tutorDeadPending) { tutorRetry(); return; }
   runFiled = 0;   // a retry is a new life, so it gets its own tally
   if (game.state === 'menu') {
     clearField();   // sweep away the attract-mode fight
@@ -8092,6 +8209,11 @@ function frame(now) {
   // --- HUD
   const left = game.spawnQueue.length + enemies.length;
   const SEP = '\u00A0\u00A0\u00B7\u00A0\u00A0';
+  // THE ONBOARDING HAS NO SCORE. A door count and an enemy tally over the top
+  // of "DRAG TO MOVE" is two systems talking at once to someone who has been
+  // taught neither, and DOOR 1 — OPEN — GO reads as an instruction that
+  // contradicts the one they are actually being given.
+  el.score.style.visibility = tutorStep !== null ? 'hidden' : '';
   el.score.textContent = game.mode === 'rush'
     ? `RUSH${SEP}${markPips} ${markPips === 1 ? 'MARK' : 'MARKS'}`
     : game.mode === 'hall' && hall
@@ -8180,7 +8302,13 @@ window.__ts = {
   tutor: () => ({ step: tutorStep, armed: tutorArmed, seen: tutorSeen,
     shaping: tutorShaping, legs: tutorLegsBuilt,
     dodged: tutorDodged, shots: tutorShotsFired, meterOn: tutorMeterOn,
+    meterSaid: tutorMeterSaid, deadPending: tutorDeadPending,
+    awaitShot: tutorAwaitShot, froze: tutorFroze,
+    anchor: tutorAnchor && { x: +tutorAnchor.x.toFixed(2), z: +tutorAnchor.z.toFixed(2) },
     moved: +tutorMoved.toFixed(2), looked: +tutorLooked.toFixed(2) }),
+  // what the bodies are doing and where they are, for the wall-clip check
+  bodies: () => enemies.map((e) => ({ x: +e.pos.x.toFixed(2), z: +e.pos.z.toFixed(2),
+    state: e.state, arm: +e.armR.rotation.x.toFixed(2), alive: e.alive })),
   gunVisible: () => gun.visible,
   tutorBar: () => (tutorBar ? +tutorBar.m.position.z.toFixed(1) : null),
   tutorBarW: () => (tutorBar ? +tutorBar.m.geometry.parameters.width.toFixed(1) : null),
