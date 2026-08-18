@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
   WEAPONS, TYPE_INTRO, TYPE_SHARE, TYPE_DROP, DROPS, RAMP, COMP, LEG, PACING, TIME,
-  SHATTER, SCARCITY, CONDITION_TAX, VIS, scarcity,
+  SHATTER, SCARCITY, CONDITION_TAX, EARLY, VIS, scarcity,
 } from '../src/balance.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -92,6 +92,16 @@ Raw keyframes:
 
 \`\`\`js
 ${Object.entries(SCARCITY).map(([k, v]) => `${k.padEnd(11)}: ${JSON.stringify(v)}`).join('\n')}
+\`\`\`
+
+### The opening doors
+
+The first few doors are a metronome, not a fight: the four-beat rhythm — see
+him, watch the round leave, step out of it, shatter him — has to be learnable
+once before it is asked for twice. See docs/PILLARS.md section 3.
+
+\`\`\`js
+${Object.entries(EARLY).map(([k, v]) => `${k.padEnd(17)}: ${v}`).join('\n')}
 \`\`\`
 
 ### The condition tax

@@ -60,6 +60,19 @@ legSize    : [[1,1],[4,1.05],[8,1.15],[12,1.25]]
 groupSize  : [[1,1],[4,1.1],[8,1.25],[12,1.4]]
 ```
 
+### The opening doors
+
+The first few doors are a metronome, not a fight: the four-beat rhythm — see
+him, watch the round leave, step out of it, shatter him — has to be learnable
+once before it is asked for twice. See docs/PILLARS.md section 3.
+
+```js
+oneBodyDoors     : 4
+soloDoors        : 4
+gunnerOnlyDoors  : 5
+oneRoundDoors    : 5
+```
+
 ### The condition tax
 
 A condition multiplies the same curves a **second** time, so a fog leg at

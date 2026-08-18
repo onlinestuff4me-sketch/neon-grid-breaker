@@ -30,15 +30,42 @@ import { haptic, persist, hydrateStorage, shellSetup, isNative } from './native.
 // ---------------------------------------------------------------------------
 let lifetimeDoors = 0;
 let archive = new Set();
+// Progress now lives in a SAVE SLOT. The key names are the only thing that
+// changed: everything downstream still reads `lifetimeDoors` and `archive`.
+// A player who already has progress is migrated into slot 1 on first boot, so
+// nobody loses a run to this.
+let _slotIx0 = 0;
+try { _slotIx0 = Math.min(2, Math.max(0, parseInt(localStorage.getItem('ts_slot') || '0', 10) || 0)); } catch { /* private */ }
+const _sk = (k) => `ts_s${_slotIx0}_${k}`;
 try {
-  lifetimeDoors = parseInt(localStorage.getItem('timeshard_doors') || '0', 10) || 0;
-  archive = new Set(JSON.parse(localStorage.getItem('timeshard_archive') || '[]'));
+  const legacy = localStorage.getItem('timeshard_doors');
+  if (legacy !== null && localStorage.getItem('ts_s0_doors') === null) {
+    for (const [from, to] of [['timeshard_doors', 'ts_s0_doors'],
+      ['timeshard_archive', 'ts_s0_archive'], ['timeshard_best', 'ts_s0_best'],
+      ['timeshard_runs', 'ts_s0_runs'], ['timeshard_timeuses', 'ts_s0_timeuses']]) {
+      const v = localStorage.getItem(from);
+      if (v !== null) localStorage.setItem(to, v);
+    }
+    localStorage.setItem('ts_s0_at', String(Date.now()));
+  }
+  lifetimeDoors = parseInt(localStorage.getItem(_sk('doors')) || '0', 10) || 0;
+  archive = new Set(JSON.parse(localStorage.getItem(_sk('archive')) || '[]'));
 } catch { /* private mode */ }
 function saveProgress() {
   try {
-    persist('timeshard_doors', String(lifetimeDoors));
-    persist('timeshard_archive', JSON.stringify([...archive]));
+    persist(slotKey(slotIx, 'doors'), String(lifetimeDoors));
+    persist(slotKey(slotIx, 'archive'), JSON.stringify([...archive]));
+    persist(slotKey(slotIx, 'at'), String(Date.now()));
   } catch { /* private mode */ }
+}
+// Re-point every in-memory value at whichever slot is now active.
+function hydrateFromSlot() {
+  try {
+    lifetimeDoors = parseInt(localStorage.getItem(slotKey(slotIx, 'doors')) || '0', 10) || 0;
+    archive = new Set(JSON.parse(localStorage.getItem(slotKey(slotIx, 'archive')) || '[]'));
+    bestWave = Math.max(1, parseInt(localStorage.getItem(slotKey(slotIx, 'best')) || '1', 10) || 1);
+  } catch { /* private mode */ }
+  archiveDirty = true;
 }
 function recordMet(ids) {
   let fresh = 0;
@@ -3967,7 +3994,9 @@ function onPointerDown(ev) {
   // and the archive's scroll pane. `touch-action:none` on <body> means an
   // un-prevented pointerdown is the only thing that lets either one work.
   const inArchScroll = ev.target && ev.target.closest && ev.target.closest('#archlist');
-  if (!inSettings && !inArchScroll) ev.preventDefault();
+  // ...and the new-game question's checkbox, for the same reason.
+  const inAsk = ev.target && ev.target.closest && ev.target.closest('#askNever');
+  if (!inSettings && !inArchScroll && !inAsk) ev.preventDefault();
   sfx.init();
   if (el.settings.style.display === 'flex') {   // settings modal open
     if (inSettings) {
@@ -4066,6 +4095,31 @@ function onPointerDown(ev) {
       }
       if (ev.target.closest('#setlink')) {
         openSettings();
+        return;
+      }
+      // The saves screen lives on the same row as SETTINGS, so its taps have
+      // to be handled HERE — the overlay block below returns on anything that
+      // is not the PLAY button, which swallowed them entirely.
+      if (ev.target.closest('#saveslink')) { openSaves(); return; }
+      if (ev.target.closest('#savesclose')) { closeSaves(); return; }
+      const cont = ev.target.closest('#slotlist .cont');
+      if (cont) {
+        slotUse(parseInt(cont.dataset.i, 10) || 0);
+        setTutorArmed(false);
+        closeSaves();
+        startRunFromMenu();
+        return;
+      }
+      const neu = ev.target.closest('#slotlist .neu');
+      if (neu) { askTutorial(parseInt(neu.dataset.i, 10) || 0); return; }
+      if (ev.target.closest('#askNever')) return;   // the checkbox takes it
+      if (ev.target.closest('#askYes') || ev.target.closest('#askNo')) {
+        const yes = !!ev.target.closest('#askYes');
+        if (el.askNeverBox && el.askNeverBox.checked) {
+          askNever = true;
+          try { persist('ts_asknever', '1'); } catch { /* private */ }
+        }
+        beginNewGame(pendingNewSlot, yes);
         return;
       }
       const pill = ev.target.closest('.scpill');
@@ -5261,8 +5315,68 @@ const game = {
   introLen: 1.2,
 };
 
+// ---------------------------------------------------------------------------
+// SAVE SLOTS
+//
+// Three of them, each holding everything a player accumulates — lifetime
+// doors, the archive, the best wave, the run board — plus a RESUME POINT: the
+// door they reached. Continuing drops you at that door with the loadout you
+// had, which is the honest version of "carry on where I was": a leg is
+// procedurally generated and a fight is live, so the door is the finest grain
+// that can be restored truthfully rather than approximately.
+//
+// The active slot is the one every existing progress key now reads and writes
+// through, so nothing else in the game had to learn about slots.
+// ---------------------------------------------------------------------------
+const SLOTS = 3;
+const slotKey = (i, k) => `ts_s${i}_${k}`;
+let slotIx = 0;
+try { slotIx = Math.min(SLOTS - 1, Math.max(0, parseInt(localStorage.getItem('ts_slot') || '0', 10) || 0)); } catch { /* private */ }
+
+function slotRead(i) {
+  const get = (k, d) => { try { const v = localStorage.getItem(slotKey(i, k)); return v === null ? d : v; } catch { return d; } };
+  const doors = parseInt(get('doors', '0'), 10) || 0;
+  const at = parseInt(get('at', '0'), 10) || 0;
+  return {
+    i, used: at > 0 || doors > 0,
+    doors, at,
+    best: parseInt(get('best', '1'), 10) || 1,
+    resumeDoor: parseInt(get('rdoor', '0'), 10) || 0,
+    filed: (JSON.parse(get('archive', '[]')) || []).length,
+  };
+}
+function slotWriteNow() {
+  try { persist(slotKey(slotIx, 'at'), String(Date.now())); } catch { /* private */ }
+}
+// The resume point moves forward only. A run that ends early never costs you
+// ground you had already taken — the slot is a record of how deep you have
+// been, not of how the last attempt went.
+function slotNoteDoor(n) {
+  try {
+    const cur = parseInt(localStorage.getItem(slotKey(slotIx, 'rdoor')) || '0', 10) || 0;
+    if (n > cur) persist(slotKey(slotIx, 'rdoor'), String(n));
+    slotWriteNow();
+  } catch { /* private */ }
+}
+function slotClear(i) {
+  for (const k of ['doors', 'archive', 'best', 'runs', 'rdoor', 'at', 'timeuses']) {
+    try { localStorage.removeItem(slotKey(i, k)); } catch { /* private */ }
+  }
+}
+function slotUse(i) {
+  slotIx = i;
+  try { persist('ts_slot', String(i)); } catch { /* private */ }
+  hydrateFromSlot();
+}
+function fmtSlotWhen(t) {
+  if (!t) return 'empty';
+  const d = new Date(t);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 let bestWave = 1;
-try { bestWave = Math.max(1, +localStorage.getItem('timeshard_best') || 1); } catch { /* private mode */ }
+try { bestWave = Math.max(1, +localStorage.getItem(slotKey(slotIx, 'best')) || 1); } catch { /* private mode */ }
 
 // --- recent-runs table (last 5 runs; a run = menu start until death)
 let runStartAt = 0;
@@ -5271,7 +5385,7 @@ let scoreMetric = 'w';   // 'w' = wave, 'k' = shards (kills)
 let scoreView = 'top';   // 'top' = ranked by metric, 'recent' = newest first
 
 function loadRuns() {
-  try { return JSON.parse(localStorage.getItem('timeshard_runs') || '[]'); } catch { return []; }
+  try { return JSON.parse(localStorage.getItem(slotKey(slotIx, 'runs')) || '[]'); } catch { return []; }
 }
 
 function recordRun() {
@@ -5287,7 +5401,7 @@ function recordRun() {
     runs.unshift({ id: runStartAt, w: game.wave, k: game.kills, d: Math.round(runPlayT), at: Date.now() });
   }
   runs.sort((a, b) => b.at - a.at);
-  try { persist('timeshard_runs', JSON.stringify(runs.slice(0, 5))); } catch { /* private mode */ }
+  try { persist(slotKey(slotIx, 'runs'), JSON.stringify(runs.slice(0, 5))); } catch { /* private mode */ }
 }
 
 function fmtWhen(t) {
@@ -5421,6 +5535,65 @@ function closePause() {
   el.pausemenu.style.display = 'none';
   sfx.fadeAll(1, 0.22);   // and back up as the world resumes
 }
+// --- the saves screen -----------------------------------------------------
+// Continue drops you at the deepest door the slot has reached; New Game wipes
+// it and asks, once, whether the tutorial should play.
+let askNever = false;
+try { askNever = localStorage.getItem('ts_asknever') === '1'; } catch { /* private */ }
+let pendingNewSlot = -1;
+
+function openSaves() {
+  renderSlots();
+  el.saves.style.display = 'flex';
+}
+function closeSaves() { el.saves.style.display = 'none'; }
+function renderSlots() {
+  if (!el.slotlist) return;
+  el.slotlist.innerHTML = '';
+  for (let i = 0; i < SLOTS; i++) {
+    const st = slotRead(i);
+    const d = document.createElement('div');
+    d.className = 'slot' + (i === slotIx ? ' on' : '');
+    const depth = st.resumeDoor > 1 ? `DOOR ${st.resumeDoor}` : 'not started';
+    d.innerHTML = `<div class="sname">SLOT ${i + 1}${i === slotIx ? ' · ACTIVE' : ''}</div>`
+      + `<div class="smeta">${fmtSlotWhen(st.at)} · ${depth} · ${st.doors} doors · ${st.filed} filed</div>`
+      + '<div class="srow">'
+      + `<div class="sbtn cont" data-i="${i}">${st.used ? 'CONTINUE' : 'PLAY'}</div>`
+      + `<div class="sbtn red neu" data-i="${i}">NEW GAME</div>`
+      + '</div>';
+    el.slotlist.appendChild(d);
+  }
+}
+function askTutorial(i) {
+  pendingNewSlot = i;
+  if (askNever) { beginNewGame(i, false); return; }
+  el.askNeverBox.checked = false;
+  el.askTut.style.display = 'flex';
+}
+// The menu's own PLAY path, so a slot button starts a run the same way the
+// big button does rather than by simulating a tap on it.
+function startRunFromMenu() {
+  game.mode = 'hall';
+  advanceFromOverlay();
+}
+function beginNewGame(i, withTutorial) {
+  el.askTut.style.display = 'none';
+  slotClear(i);
+  slotUse(i);
+  setTutorArmed(!!withTutorial);
+  if (!withTutorial) {
+    // a fresh slot has never been taught; saying no here means never, for this
+    // save, rather than "not yet"
+    tutorSeen = true;
+    try { persist('timeshard_taught', '1'); } catch { /* private */ }
+  } else {
+    tutorSeen = false;
+    try { persist('timeshard_taught', ''); } catch { /* private */ }
+  }
+  closeSaves();
+  startRunFromMenu();
+}
+
 function openSettings() {
   updateCondPill();
   updateTutPill();
@@ -5485,9 +5658,23 @@ const TUTOR = {
   // a round you cannot see arrive teaches nothing. At 0.42x that is about
   // 4 m/s, so thirteen metres is a bit over two seconds of flight.
   bulletMul: 0.42,
-  shots: 5,             // how many he fires, one at a time
-  afterBarrier: 2.0,    // seconds after a round clears the barrier before the next
-  meterSecs: 18,        // the scripted meter drains from full over this long
+  // THE FIRST ROUND CRAWLS. Before you have been told what the button does, a
+  // round you cannot answer is not a lesson, it is a death. It leaves the
+  // barrel at a fifth of even the tutorial's speed and only picks up once you
+  // have actually stopped time — so the beat is see it, read the prompt,
+  // press, walk out of the way, with as long as you need for the first two.
+  crawlMul: 0.085,
+  shots: 5,
+  afterBarrier: 2.0,
+  // THE METER LESSON HAS A FLOOR. It empties at a readable rate to half, then
+  // slows to a crawl, and never goes below a quarter: the player is being
+  // taught that time is finite, not put in a hole they cannot climb out of
+  // before anyone has told them how.
+  meterSecs: 7,         // full to half, in seconds
+  meterCrawlSecs: 70,   // ...and the rate below that
+  meterKnee: 0.5,
+  meterFloor: 0.25,
+  resumeDelay: 1.6,     // beat between the warning and what to do about it
   faceRate: 5.5,        // how fast the view is eased back down the hallway
   gunRise: 0.6,         // seconds for the weapon to swing up into frame
   finalEnemies: 3,      // ...then two more join him and you shoot all three
@@ -5500,7 +5687,7 @@ let tutorMoved = 0, tutorLooked = 0, tutorFroze = false;
 let tutorMark = null;      // the enemy the hallway beat is about
 let tutorRound = null;     // the one round currently in the air
 let tutorShotsFired = 0, tutorDodged = 0, tutorCrossed = false;
-let tutorMeterOn = false;
+let tutorMeterOn = false, tutorMeterAt = 0;
 let tutorBar = null;
 let tutorArmed = false, tutorSeen = false;
 let tutorShaping = false, tutorLegsBuilt = 0;
@@ -5520,9 +5707,13 @@ const tutorBulletScale = () => (tutorStep !== null ? TUTOR.bulletMul : 1);
 // YOU CANNOT SHOOT WHAT YOU HAVE NOT BEEN GIVEN. Tapping fired a round with no
 // weapon on screen, which is the sort of thing a tutorial exists to prevent.
 const tutorHoldsPlayerFire = () => tutorBefore('shoot');
-// The first freeze is free: until the meter appears, stopping time costs
-// nothing, because you are being taught what the button does.
-const tutorFreeIsFree = () => tutorStep !== null && !tutorMeterOn;
+// THE BANK IS SCRIPTED FOR THE WHOLE ONBOARDING. Before the meter lesson,
+// stopping time costs nothing at all — you are being taught what the button
+// does. During the meter lesson the script drains it on its own clock, to its
+// own floor. Either way the ordinary drain must stay out of it: leaving it
+// running underneath took the bank to zero and auto-resumed time in the
+// middle of the sentence explaining that the bank runs out.
+const tutorFreeIsFree = () => tutorStep !== null;
 
 function tutorMsg(html, where, pulse) {
   if (!el.tutormsg) return;
@@ -5582,18 +5773,19 @@ function tutorUpdateBarrier(dtReal) {
 }
 
 // --- the script's own trigger finger --------------------------------------
-function tutorShot(e) {
+function tutorShot(e, mul) {
   if (!e || !e.alive) return null;
   const dx = player.pos.x - e.pos.x, dz = player.pos.z - e.pos.z;
   e.g.rotation.y = Math.atan2(dx, dz) + Math.PI;
   const origin = _v2.set(e.pos.x, 1.35, e.pos.z);
   const target = _v3.set(player.pos.x, EYE_HEIGHT - 0.2, player.pos.z);
   const d = target.sub(origin).normalize();
-  spawnBullet(origin, d, false, TUTOR.bulletMul);
+  spawnBullet(origin, d, false, mul || TUTOR.bulletMul);
   muzzleFlash(origin.x, origin.y, origin.z, 0.85);
   sfx.enemyShot();
   const b = bullets[bullets.length - 1];
-  return b ? { b, passedBar: false, counted: false } : null;
+  return b ? { b, passedBar: false, counted: false,
+    crawling: !!mul && mul < TUTOR.bulletMul } : null;
 }
 function tutorPlaceEnemy(z, xOff = 0) {
   spawnEnemy('gunner');
@@ -5605,7 +5797,29 @@ function tutorPlaceEnemy(z, xOff = 0) {
   return e;
 }
 
+// Everything the onboarding owns, put back. Called on EVERY initHall, not
+// just the ones that teach: a barrier left behind in a previous run was still
+// blocking the corridor in a normal game, and a body left holding station was
+// still drawing an edge arrow at a wall you could search forever.
+function tutorResetWorld() {
+  if (tutorBar) { scene.remove(tutorBar.m); tutorBar = null; }
+  for (const e of enemies) e.hold = null;
+  tutorStep = null;
+  tutorRound = null; tutorMark = null;
+  tutorMoved = 0; tutorLooked = 0; tutorFroze = false;
+  tutorShotsFired = 0; tutorDodged = 0;
+  tutorMeterOn = false; tutorMeterAt = 0;
+  document.body.classList.remove('tutoring');
+  tutorHideMsg(); tutorHand(null); tutorLine(false);
+  if (el.timebtn) el.timebtn.classList.remove('arrive', 'hint');
+}
+
 function startTutorial() {
+  // It has been offered; it never offers itself again. Settings is the only
+  // way back, which is what "off by default for everyone but a new player"
+  // has to mean if quitting halfway is not to re-arm it.
+  tutorSeen = true;
+  try { persist('timeshard_taught', '1'); } catch { /* private */ }
   tutorStep = 'move';
   tutorT = 0; tutorSub = 0;
   tutorMoved = 0; tutorLooked = 0; tutorFroze = false;
@@ -5674,9 +5888,10 @@ function updateTutorial(dtReal, movedM, yawDelta) {
         tutorDodged++;
         if (!tutorMeterOn) {   // the meter lesson starts on the FIRST dodge
           tutorMeterOn = true;
+          tutorMeterAt = tutorT;
           slowBank = SLOWMO.cap;
           updateSlowMeter();
-          tutorMsg(TUTOR_TWIN, 'twin', true);
+          tutorMsg('YOUR TIME METER IS RUNNING OUT', 'meter', true);
         }
       }
     } else if (!tutorRound.counted) {
@@ -5687,8 +5902,12 @@ function updateTutorial(dtReal, movedM, yawDelta) {
   // once the meter lesson is on, the bank drains on the SCRIPT's clock so the
   // beat is readable rather than tied to whatever the drain rate happens to be
   if (tutorMeterOn && timeLocked) {
-    slowBank = Math.max(0, slowBank - dtReal * SLOWMO.cap / TUTOR.meterSecs);
-    updateSlowMeter();
+    const frac = slowBank / SLOWMO.cap;
+    if (frac > TUTOR.meterFloor) {
+      const rate = SLOWMO.cap / (frac > TUTOR.meterKnee ? TUTOR.meterSecs : TUTOR.meterCrawlSecs);
+      slowBank = Math.max(SLOWMO.cap * TUTOR.meterFloor, slowBank - dtReal * rate);
+      updateSlowMeter();
+    }
   }
 
   switch (tutorStep) {
@@ -5724,7 +5943,7 @@ function updateTutorial(dtReal, movedM, yawDelta) {
         tutorMark = tutorPlaceEnemy(player.pos.z + TUTOR.enemyAt);
         tutorRevealButton();
         tutorMsg('TAP TO SLOW TIME', 'btn', true);
-        tutorRound = tutorShot(tutorMark);
+        tutorRound = tutorShot(tutorMark, TUTOR.crawlMul);   // it crawls
         tutorShotsFired = 1;
         tutorSub = 6;   // a fallback, in case the round dies early
       }
@@ -5732,18 +5951,29 @@ function updateTutorial(dtReal, movedM, yawDelta) {
     }
 
     case 'incoming':
-      // one at a time, the next two seconds after the last cleared the barrier
-      // He keeps firing until five have been DODGED, not until five have been
-      // fired. Capping the shots instead means a player who takes a hit runs
-      // out of rounds to practise on and the step can never complete — a
-      // soft-lock in the one place in the game that must not have one.
-      if (!tutorRound && tutorSub <= 0 && tutorDodged < TUTOR.shots) {
-        tutorRound = tutorShot(tutorMark);
+      // ONE round, and it crawls until the button has been used. There is no
+      // stream: the lesson here is the freeze and then the meter, and rounds
+      // arriving while the meter is being explained is a player who runs out
+      // of time with a bullet in the air — which is the one thing this step
+      // must never do to someone who has not been taught anything yet.
+      if (!tutorRound && !tutorMeterOn && tutorSub <= 0 && tutorDodged < 1) {
+        tutorRound = tutorShot(tutorMark, TUTOR.crawlMul);
         tutorShotsFired++;
-        tutorSub = 6;
+        tutorSub = 30;
       }
       if (tutorFroze) el.timebtn.classList.remove('hint');
-      if (tutorDodged >= TUTOR.shots && !timeLocked) {
+      // ...and once they DO stop time it picks up to the ordinary slowed pace,
+      // so it actually arrives and can actually be stepped out of
+      if (tutorFroze && tutorRound && tutorRound.crawling) {
+        tutorRound.crawling = false;
+        tutorRound.b.vel.multiplyScalar(TUTOR.bulletMul / TUTOR.crawlMul);
+      }
+      // the resume prompt joins the warning a beat later, not with it
+      if (tutorMeterOn && tutorT > tutorMeterAt + TUTOR.resumeDelay &&
+          el.tutormsg && !el.tutormsg.classList.contains('twin')) {
+        tutorMsg(TUTOR_TWIN, 'twin', true);
+      }
+      if (tutorMeterOn && !timeLocked && tutorT > tutorMeterAt + 0.4) {
         tutorNext('gunup');
         tutorHideMsg();
         gunRiseT = TUTOR.gunRise;
@@ -5842,6 +6072,10 @@ const el = {
   tutorarrow: document.getElementById('tutorarrow'),
   tutorup: document.getElementById('tutorup'),
   tutlink: document.getElementById('tutlink'),
+  saves: document.getElementById('saves'),
+  slotlist: document.getElementById('slotlist'),
+  askTut: document.getElementById('askTut'),
+  askNeverBox: document.getElementById('askNeverBox'),
   slowfill: document.getElementById('slowfill'),
   flash: document.getElementById('flash'),
   banner: document.getElementById('banner'),
@@ -6174,7 +6408,7 @@ function startWave(n, quiet = false) {   // quiet: the clear card already announ
   game.waveBearing = Math.hypot(dx, dz) > 3 ? Math.atan2(dx, dz) : Math.random() * Math.PI * 2;
   if (n > bestWave) {
     bestWave = n;
-    try { persist('timeshard_best', String(n)); } catch { /* private mode */ }
+    try { persist(slotKey(slotIx, 'best'), String(n)); } catch { /* private mode */ }
   }
   if (!quiet) {
     showBanner(`WAVE ${n}`, 1300);
@@ -6927,6 +7161,7 @@ function initHall() {
   // during construction.
   tutorShaping = (!tutorSeen || tutorArmed) && timeMode === 'toggle';
   tutorLegsBuilt = 0;
+  tutorResetWorld();   // whatever the last run left, gone — teaching or not
   game.wave = 1;
   game.state = 'intro';
   game.stateT = 0;
@@ -7243,6 +7478,7 @@ function crossHallDoor() {
   hall.doorsPassed++;
   game.wave++;
   lifetimeDoors++;
+  slotNoteDoor(hall.doorsPassed + 1);
   saveProgress();
   recordMetProto(hall.legs[hall.cur] && hall.legs[hall.cur].proto);
   applyLegVisibility(false);   // eased, so you walk INTO the next leg's air
@@ -7949,6 +8185,8 @@ window.__ts = {
   tutorBar: () => (tutorBar ? +tutorBar.m.position.z.toFixed(1) : null),
   tutorBarW: () => (tutorBar ? +tutorBar.m.geometry.parameters.width.toFixed(1) : null),
   setTutorStep: (v) => { tutorStep = v; tutorT = 0; tutorSub = 0; },
+  startMeterLesson: () => { tutorMeterOn = true; tutorMeterAt = tutorT;
+    slowBank = SLOWMO.cap; updateSlowMeter(); },
   flash: (s = 1) => muzzleFlash(player.pos.x, 1.4, player.pos.z, s),
   muzzle: () => muzzleLights.map((m) => +m.l.intensity.toFixed(2)),
   gradeState: () => ({ allowed: gradeAllowed, slowT: +gradeSlowT.toFixed(2),

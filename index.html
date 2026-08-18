@@ -330,6 +330,23 @@
                         100% { transform:scale(1); opacity:1; } }
   #timebtn.arrive { animation:tbarrive .62s cubic-bezier(.2,1.4,.4,1) both; }
 
+  /* ---- save slots ---- */
+  #saves, #askTut { position:fixed; inset:0; z-index:14; display:none;
+            align-items:center; justify-content:center; background:rgba(22,24,29,.45); }
+  #slotlist { display:flex; flex-direction:column; gap:8px; width:246px; margin:4px 0 10px; }
+  .slot { border:2px solid rgba(22,24,29,.28); border-radius:12px; padding:10px 12px; text-align:left; }
+  .slot.on { border-color:#ff2d1a; }
+  .slot .sname { font-size:11px; font-weight:900; letter-spacing:.2em; }
+  .slot .smeta { font-size:10px; letter-spacing:.1em; color:#5b616c; margin-top:3px; }
+  .slot .srow { display:flex; gap:6px; margin-top:8px; }
+  .slot .sbtn { flex:1; text-align:center; padding:7px 0; border:2px solid rgba(22,24,29,.32);
+            border-radius:999px; font-size:10px; font-weight:900; letter-spacing:.14em; }
+  .slot .sbtn.red { border-color:#ff2d1a; color:#ff2d1a; }
+  .askq { font-size:12px; letter-spacing:.08em; margin:2px 0 10px; color:#3d434c; }
+  #askNever { display:flex; align-items:center; gap:8px; margin-top:10px;
+            font-size:10px; letter-spacing:.14em; color:#5b616c; }
+  #askNever input { accent-color:#ff2d1a; width:16px; height:16px; }
+
   /* ---- slow-mo tint & damage flash ---- */
   #tint { position:fixed; inset:0; pointer-events:none; opacity:0;
           background:radial-gradient(ellipse at center, rgba(255,70,45,0) 32%, rgba(185,42,26,.24) 70%, rgba(70,10,8,.55) 100%); }
@@ -537,6 +554,7 @@
   <div id="menurow">
     <div class="btn btn-3" id="howtolink">HOW TO PLAY</div>
     <div class="btn btn-3" id="archlink">ARCHIVE</div>
+    <div class="btn btn-3" id="saveslink">SAVES</div>
     <div class="btn btn-3" id="setlink">SETTINGS</div>
     <div id="sndbtn"></div>
   </div>
@@ -592,6 +610,18 @@
   </div>
 </div>
 
+<div id="saves"><div class="htpcard">
+  <h3>SAVE SLOTS</h3>
+  <div id="slotlist"></div>
+  <div class="pbtn" id="savesclose">CLOSE</div>
+</div></div>
+<div id="askTut"><div class="htpcard">
+  <h3>NEW GAME</h3>
+  <p class="askq">Play the tutorial first?</p>
+  <div class="pbtn" id="askYes">YES, TEACH ME</div>
+  <div class="pbtn" id="askNo">NO, JUST PLAY</div>
+  <label id="askNever"><input type="checkbox" id="askNeverBox"> Don't ask me again</label>
+</div></div>
 <div id="settings">
   <div class="htpcard">
     <h2>SETTINGS</h2>
