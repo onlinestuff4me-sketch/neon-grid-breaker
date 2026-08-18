@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TIME SHATTER · Level Tool</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%230c0d10'/><rect x='4' y='4' width='8' height='8' fill='%23ff2d1a'/></svg>">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  :root{
+    --bg:#0c0d10; --panel:#15171c; --line:#262a31; --ink:#e8eaee; --dim:#8b929c;
+    --red:#ff2d1a; --amber:#ff8a2e; 
+  }
+  html,body{height:100%}
+  body{background:var(--bg);color:var(--ink);font:13px/1.45 ui-sans-serif,-apple-system,"Helvetica Neue",Arial;
+       display:grid;grid-template-columns:224px 1fr 300px;grid-template-rows:44px 1fr;
+       grid-template-areas:"top top top" "left main right";overflow:hidden}
+  header{grid-area:top;display:flex;align-items:center;gap:14px;padding:0 14px;
+         border-bottom:1px solid var(--line);background:var(--panel)}
+  header h1{font-size:13px;font-weight:900;letter-spacing:.22em}
+  header h1 b{color:var(--red)}
+  header .sp{flex:1}
+  aside{background:var(--panel);overflow-y:auto}
+  #left{grid-area:left;border-right:1px solid var(--line)}
+  #right{grid-area:right;border-left:1px solid var(--line)}
+  main{grid-area:main;position:relative;overflow:hidden;background:#0e1014}
+  canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:crosshair}
+  .sec{padding:11px 12px;border-bottom:1px solid var(--line)}
+  .sec h2{font-size:10px;letter-spacing:.2em;color:var(--dim);font-weight:800;margin-bottom:8px}
+  button,select,input[type=text]{font:inherit;color:var(--ink);background:#1d2027;
+       border:1px solid var(--line);border-radius:6px;padding:6px 9px;cursor:pointer}
+  button:hover{border-color:#3a404a}
+  button.on{background:var(--red);border-color:var(--red);color:#fff}
+  .row{display:flex;gap:6px;flex-wrap:wrap}
+  .tool{flex:1 1 auto;min-width:64px;text-align:left;font-size:11.5px;letter-spacing:.04em}
+  .tool i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+  #doors{display:flex;flex-wrap:wrap;gap:4px}
+  #doors button{padding:4px 0;width:34px;text-align:center;font-size:11px}
+  .fld{display:grid;grid-template-columns:1fr 58px;gap:6px;align-items:center;margin-bottom:5px}
+  .fld label{font-size:11px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fld input[type=range]{width:100%;accent-color:var(--red);height:18px}
+  .fld output{font-size:11px;text-align:right;font-variant-numeric:tabular-nums}
+  .grp{margin-bottom:12px}
+  .grp h3{font-size:10px;letter-spacing:.16em;color:var(--amber);font-weight:800;margin:10px 0 6px}
+  .hint{color:var(--dim);font-size:11px;line-height:1.5}
+  .hint kbd{background:#1d2027;border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:10px}
+  #hud{position:absolute;left:10px;bottom:10px;background:rgba(12,13,16,.86);border:1px solid var(--line);
+       border-radius:8px;padding:8px 11px;font-size:11px;color:var(--dim);pointer-events:none}
+  #hud b{color:var(--ink)}
+  #err{position:absolute;inset:0;display:none;align-items:center;justify-content:center;
+       padding:40px;text-align:center;color:var(--red);font-size:14px;line-height:1.7}
+</style>
+</head>
+<body>
+<header>
+  <h1>TIME <b>SHATTER</b> · LEVEL TOOL</h1>
+  <span class="sp"></span>
+  <button id="reroll">Reroll layout</button>
+  <button id="reset">Revert door</button>
+  <button id="export">Export JSON</button>
+</header>
+
+<aside id="left">
+  <div class="sec">
+    <h2>DOOR</h2>
+    <div id="doors"></div>
+  </div>
+  <div class="sec">
+    <h2>PROTOCOL</h2>
+    <div id="proto" class="hint"></div>
+  </div>
+  <div class="sec">
+    <h2>TOOL</h2>
+    <div class="row" id="tools"></div>
+  </div>
+  <div class="sec">
+    <h2>ENEMY TYPE</h2>
+    <select id="etype"></select>
+  </div>
+  <div class="sec">
+    <h2>SELECTION</h2>
+    <div id="sel" class="hint">Nothing selected.</div>
+    <div class="row" style="margin-top:8px">
+      <button id="rotL">⟲ Rotate leg</button>
+      <button id="rotR">Rotate leg ⟳</button>
+    </div>
+    <div class="hint" style="margin-top:6px">
+      Pick a corridor cell, then rotate: everything past it swings about that
+      cell, which is how you bend a straight run into a corner.
+    </div>
+  </div>
+  <div class="sec">
+    <div class="hint">
+      <kbd>drag</kbd> paint / move &nbsp; <kbd>alt-drag</kbd> erase<br>
+      <kbd>space-drag</kbd> or middle-drag pans &nbsp; <kbd>wheel</kbd> zooms<br>
+      <kbd>Delete</kbd> removes the selection
+    </div>
+  </div>
+</aside>
+
+<main>
+  <canvas id="map"></canvas>
+  <div id="hud"></div>
+  <div id="err"></div>
+</main>
+
+<aside id="right">
+  <div class="sec"><h2>BALANCE</h2>
+    <div class="hint">Live values from <code>src/balance.js</code>. Anything you
+      move is recorded as an override and comes out in the export.</div>
+  </div>
+  <div class="sec" id="balance"></div>
+</aside>
+
+<script type="module" src="./tool.js"></script>
+</body>
+</html>

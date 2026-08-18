@@ -101,8 +101,11 @@
      Tap toggles bullet time; press-and-hold slows only while held. */
   /* tucked further into the corner: the viewmodel is much larger now and
      its grip was passing behind the ring */
+  /* Higher than it was: at 3.4vh the onboarding's prompt had nowhere to live
+     that the viewmodel did not run through, and the thumb that presses it
+     wants to be clear of the very bottom edge anyway. */
   #timebtn { display:none; position:fixed; right:-14px;
-             bottom:calc(env(safe-area-inset-bottom, 0px) + 3.4vh); z-index:8;
+             bottom:calc(env(safe-area-inset-bottom, 0px) + 9vh); z-index:8;
              width:146px; height:146px; border-radius:50%;
              align-items:center; justify-content:center;
              pointer-events:auto; }
@@ -264,17 +267,44 @@
      146px wide sitting at right:-14px, so its centre line is 59px in from the
      right edge; the arrow is 38px wide, so right:40px puts the two on the
      same axis whatever the screen width. */
+  /* A LINE, not a floating glyph. It runs from just under the words straight
+     down to the top of the time button, on the button's own centre axis: the
+     button is 146 px wide at right:-14px, so that axis is 59 px in from the
+     right edge and a 38 px column at right:40px sits on it. The head travels
+     down the line so the eye is led along it rather than asked to guess. */
   #tutorarrow { position:absolute; right:40px; width:38px; text-align:center;
-                bottom:calc(env(safe-area-inset-bottom, 0px) + 3.4vh + 152px);
-                font-size:38px; line-height:1; font-weight:900;
-                color:#ff2d1a; opacity:0; pointer-events:none;
-                text-shadow:0 2px 14px rgba(238,240,243,.8); }
-  #tutorarrow.on { animation:arrowdrop 1.05s ease-in-out infinite; }
-  @keyframes arrowdrop {
-    0%   { opacity:0; transform:translateY(-14px); }
-    30%  { opacity:1; }
-    100% { opacity:0; transform:translateY(16px); }
+                top:52%; bottom:calc(env(safe-area-inset-bottom, 0px) + 9vh + 146px);
+                opacity:0; pointer-events:none; transition:opacity .25s ease; }
+  #tutorarrow.on { opacity:1; }
+  #tutorarrow::before { content:''; position:absolute; left:50%; top:0; bottom:0;
+                width:3px; margin-left:-1.5px; border-radius:2px;
+                background:linear-gradient(180deg, rgba(255,45,26,0) 0%, #ff2d1a 22%, #ff2d1a 100%); }
+  #tutorarrow::after { content:'▼'; position:absolute; left:0; right:0; top:0;
+                font-size:30px; line-height:1; font-weight:900; color:#ff2d1a;
+                text-shadow:0 2px 12px rgba(238,240,243,.8);
+                animation:arrowrun 1.15s ease-in-out infinite; }
+  @keyframes arrowrun {
+    0%   { opacity:0; transform:translateY(0); }
+    25%  { opacity:1; }
+    100% { opacity:0; transform:translateY(calc(100% + 100px)); }
   }
+  /* ...and its opposite, pointing UP at the meter that is emptying. */
+  #tutorup { position:absolute; left:0; right:0; text-align:center;
+             top:calc(env(safe-area-inset-top, 0px) + 56px);
+             font-size:30px; line-height:1; font-weight:900; color:#ff2d1a;
+             opacity:0; pointer-events:none;
+             text-shadow:0 2px 12px rgba(238,240,243,.8); }
+  #tutorup.on { opacity:1; animation:arrowrise 1.15s ease-in-out infinite; }
+  @keyframes arrowrise {
+    0%   { opacity:0; transform:translateY(16px); }
+    30%  { opacity:1; }
+    100% { opacity:0; transform:translateY(-14px); }
+  }
+  /* the twin block: the warning, then what to do about it, one under the other */
+  #tutormsg.twin  { top:44%; color:#ff2d1a; font-size:min(6.4vw,29px);
+                    text-shadow:0 2px 18px rgba(238,240,243,.75); }
+  #tutormsg.twin span { display:block; margin-top:18px; }
+  body.slowmo #tutormsg.twin { text-shadow:0 2px 18px rgba(12,13,16,.85); }
   /* the running-out warning sits under the meter and shares its alarm */
   #tutormsg.meter { color:#ff2d1a; }
   @keyframes tutorpulse { 0%,100% { opacity:1; } 50% { opacity:.32; } }
@@ -462,7 +492,7 @@
   <div id="flash"></div>
   <div id="warn"></div>
   <div id="banner"></div>
-  <div id="tutor"><div id="tutorline"></div><div id="tutorhand"></div><div id="tutorarrow">▼</div><div id="tutormsg"></div></div>
+  <div id="tutor"><div id="tutorline"></div><div id="tutorhand"></div><div id="tutorarrow"></div><div id="tutorup">▲</div><div id="tutormsg"></div></div>
   <div id="ammo">PISTOL · ∞</div>
   <div id="reloadbar"><div id="reloadfill"></div></div>
   <div id="pausebtn">❚❚</div>

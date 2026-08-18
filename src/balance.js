@@ -67,6 +67,25 @@ export const RAMP = {
   sightGrace: 0.45,    // seconds seen before a telegraph may begin
 };
 
+// THE FIRST FEW DOORS ARE A METRONOME, NOT A FIGHT.
+//
+// Playtest: "only have 1 enemy appear per room and per hallway leg; only use
+// gunners for the first 5 doors; and each enemy must wait to shoot until
+// after the previous bullet has passed the player before another is fired. We
+// need the player to get a feel for the game rhythm before we add more
+// enemies or more enemy types."
+//
+// That rhythm -- see him, watch the round leave, step out of it, shatter him
+// -- is the whole game in four beats, and it cannot be learned while three
+// people are shooting at you. So the opening doors deal it out one beat at a
+// time and then get out of the way.
+export const EARLY = {
+  oneBodyDoors: 4,     // doors 1-4 hold exactly ONE enemy, whole leg
+  soloDoors: 4,        // ...and never more than one alive at a time
+  gunnerOnlyDoors: 5,  // no other type may debut before this door
+  oneRoundDoors: 5,    // and only one enemy round may be in the air at once
+};
+
 // Wave size and mix.
 export const COMP = {
   baseTotal: 6, perWave: 2, totalCap: 30,
