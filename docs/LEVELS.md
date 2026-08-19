@@ -71,9 +71,13 @@ curves a second time — fewer clips, fewer floor guns, less time per kill, and
 fewer bodies at once. A condition that only changes what you can see is a
 lighting effect; changing what you can afford is what makes it a condition.
 
-## The level tool
+## The tool
 
-`/tool` — desktop web. It imports `genleg.js`, `protocols.js` and
+`/tool` — desktop web, two modes: **LEVELS** and **TUTORIAL**.
+
+### LEVELS
+
+It imports `genleg.js`, `protocols.js` and
 `balance.js`, so what it draws is what the game builds.
 
 * every door as an overhead map, with the protocol that composed it
@@ -85,5 +89,50 @@ lighting effect; changing what you can afford is what makes it a condition.
   *Reroll layout* shows what a new number actually builds
 * **Export JSON** emits layouts and balance overrides together
 
+### TUTORIAL
+
+The onboarding, editable, with the real game running it in the pane on the
+right. It imports `src/tutorial.js` — the same module `main.js` consumes — so
+the preview is not a mock-up of the lesson, it *is* the lesson.
+
+* **legs** — add, remove, rename; form, straight-cell count, `straight`, and
+  whether the leg starts with a barrier standing in it
+* **numbers** — every value in `TUTOR` on a slider, each with the reason it
+  has the value it has in its tooltip
+* **steps** — reorder, add, delete. Each carries:
+  * the **advance condition**, chosen from a list rather than typed, because
+    "moved 2.2 m" is not something a text box can express — plus its threshold
+  * **what the player may do**: nine capabilities, each a checkbox. Weapon in
+    hand, can fire, time button, time meter, whether freezing costs, ammo
+    readout, whether enemies may fire at all, whether the spawn queue runs,
+    and the door/enemy HUD line
+  * **what the step brings with it**: place one gunner, place the squad, drop
+    the barrier, open the door, show the dotted divider
+  * **the text**: any number of cues, each with its words, which of the five
+    slots it sits in, whether a pointer runs to the button or up to the meter,
+    which hand animation plays, whether it pulses, and — this is the part that
+    matters — the beat it **appears on** and the beat it **leaves on**
+* **preview** — the real game in an iframe at `?tutorpreview=1`. *Restart*
+  reloads it with the current edit; *jump to step* drops the running game
+  straight onto a beat with that beat's furniture built; the strip underneath
+  reports the live step, the beats that have fired, and what the player may
+  currently do
+
+The **beats** a cue can key off are `enter`, `freeze` (the player stopped
+time), `meter` (the meter warning landed), `resume`, and `advance`. That pair
+— appears-on and leaves-on — is the whole of a cue's life, which is why
+`TAP TO SLOW TIME` can be made to vanish the instant the button is used
+without anyone touching `main.js`.
+
 Nothing is written back to the repo from the browser. The export is a patch to
-hand back.
+hand back, and now carries the tutorial spec alongside the layouts and balance
+overrides.
+
+### The preview cannot leak
+
+The tool writes its edited spec to `localStorage['ts_tutor_override']`, and
+`loadTutorial()` reads that key **only** when the URL carries
+`?tutorpreview=1`. Without the flag it does not look. So an afternoon of
+editing cannot reach a real run on the same browser — verified by a test that
+plants a deliberately absurd override and confirms an ordinary boot ignores
+it.

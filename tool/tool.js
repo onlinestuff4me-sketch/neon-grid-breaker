@@ -16,6 +16,7 @@
 import { HALL, genHallLeg } from '../src/genleg.js';
 import { composeProtocol, newRunMemory, ELEMENTS } from '../src/protocols.js';
 import * as B from '../src/balance.js';
+import { initTutorialPane, tutorialSpec, reload as reloadPreview } from './tutorial-pane.js';
 
 const $ = (id) => document.getElementById(id);
 const C = HALL.cell;
@@ -387,6 +388,7 @@ $('export').onclick = () => {
   const payload = {
     generatedAt: new Date().toISOString(),
     balanceOverrides: overrides,
+    tutorial: tutorialSpec(),
     layouts: doors.map((d) => ({
       door: d.n,
       form: d.proto.form && d.proto.form.id,
@@ -406,6 +408,29 @@ $('rotL').onclick = () => { if (sel && sel.kind === 'cell') rotateFrom(sel.gx, s
 $('rotR').onclick = () => { if (sel && sel.kind === 'cell') rotateFrom(sel.gx, sel.gz, 1); };
 $('etype').innerHTML = TYPES.map((t) => `<option>${t}</option>`).join('');
 $('etype').onchange = (e) => { etype = e.target.value; };
+
+// --- modes ----------------------------------------------------------------
+// LEVELS is the overhead corridor editor. TUTORIAL is the onboarding: its
+// legs, what the player is allowed to do on each step, what it says and when,
+// and the real game running all of it in the pane on the right.
+let mode = 'levels';
+let tutorBooted = false;
+function setMode(m) {
+  mode = m;
+  document.body.classList.toggle('tutmode', m === 'tutor');
+  $('mLevels').classList.toggle('on', m === 'levels');
+  $('mTutor').classList.toggle('on', m === 'tutor');
+  for (const n of document.querySelectorAll('.tutonly')) n.hidden = m !== 'tutor';
+  for (const n of document.querySelectorAll('.lvlonly')) n.hidden = m !== 'levels';
+  if (m === 'tutor' && !tutorBooted) {
+    tutorBooted = true;
+    initTutorialPane();
+    reloadPreview();          // the preview only starts when it is looked at
+  }
+  if (m === 'levels') { resize(); fit(); render(); }
+}
+$('mLevels').onclick = () => setMode('levels');
+$('mTutor').onclick = () => setMode('tutor');
 
 // --- boot -----------------------------------------------------------------
 try {

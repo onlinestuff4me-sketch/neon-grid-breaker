@@ -80,10 +80,16 @@ blackout's enemies keep a fog-exempt contact mote.
 ## 7. One implementation of anything shared
 
 `src/balance.js` is the only source of tunable numbers, `docs/BALANCE.md` is
-generated from it, `src/protocols.js` is the only content registry, and
-`src/genleg.js` is the only corridor generator — the game and the level tool
-both call it. A second copy of any of these is a bug waiting to be found by a
+generated from it, `src/protocols.js` is the only content registry,
+`src/genleg.js` is the only corridor generator, and `src/tutorial.js` is the
+only description of the onboarding — the game and the tool both import every
+one of them. A second copy of any of these is a bug waiting to be found by a
 playtester rather than by a test.
+
+This is also what makes the tool's preview worth looking at. It runs the real
+game against the real spec in an iframe, so it cannot show you something the
+game would not do. A preview that reimplements what it is previewing is a
+second implementation wearing a disguise.
 
 ## 8. No stall the player can feel
 

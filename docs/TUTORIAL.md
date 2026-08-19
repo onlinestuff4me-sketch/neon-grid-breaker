@@ -8,6 +8,31 @@ Everything here lives behind `tutorStep !== null`. When it is null the game
 does not know the onboarding exists, which is the property `docs/PILLARS.md`
 §7 is protecting: nothing in this file may leak into a normal run.
 
+## Where it lives
+
+Split in two, deliberately.
+
+| file | holds |
+|---|---|
+| **`src/tutorial.js`** | the SHAPE: the numbers, the legs, the steps, what each step grants, and every word it puts on screen |
+| **`src/main.js`** | the MACHINERY: what "moved far enough" means, how a barrier sinks, how a body is held on its mark |
+
+`tool/` imports `src/tutorial.js` directly, which is the point — the level
+tool's TUTORIAL mode edits the object the game consumes, so its preview is the
+real game running the real spec rather than a drawing of one. Same property
+`src/genleg.js` has for corridors.
+
+Two rules keep the split honest:
+
+* **the switch in `updateTutorial` is keyed on the step's advance condition,
+  not on its name.** The condition is the one part of a step that genuinely
+  has to be code, so it is what selects the machinery — and a step is free to
+  be renamed to anything without breaking.
+* **capabilities are grants, not step comparisons.** "Can they shoot yet" used
+  to be `tutorBefore('shoot')`, which meant the answer moved whenever the
+  sequence was rewritten; twice it moved somewhere nobody intended. Each step
+  now states what it allows, and `tutorMay(cap)` is the only question asked.
+
 ## The sequence
 
 `move → look → aim → incoming → gunup → shoot → advance → done`
@@ -22,17 +47,55 @@ does not know the onboarding exists, which is the property `docs/PILLARS.md`
 | `shoot` | two more bodies join the first, abreast at ±`enemyX` and clamped to the leg's own floor; `TAP ANYWHERE TO SHOOT`; magazine topped up | all three shattered |
 | `advance` | barrier sinks, door opens, `ENTER THE NEXT ROOM` | crossing the door |
 
+## What each step grants
+
+Nine capabilities, all off unless a step says otherwise — a tutorial that has
+to remember to *take things away* has already given something to somebody by
+mistake.
+
+| grant | off means |
+|---|---|
+| `gun` | no viewmodel on screen |
+| `fire` | a tap does nothing |
+| `timebtn` | the slow-motion control does not exist yet |
+| `meter` | the bank bar is not on screen |
+| `bank` | freezing is free — the script owns the bank entirely |
+| `ammo` | no magazine line |
+| `aiFire` | no enemy STARTS a telegraph of its own; the script decides when an arm goes up, and the ordinary `aim` → `enemyFire` path runs from there |
+| `spawns` | the queue is held: nobody arrives unless the script places them |
+| `score` | the `DOOR 1 · OPEN — GO` line is hidden |
+
+As shipped, only `gun`, `fire`, `timebtn`, `meter` and `ammo` are ever granted,
+and `bank` never is — the bank is scripted for the whole lesson.
+
+## Cues
+
+Each step carries a list. A cue is its words, one of five slots (`mid`,
+`left`, `right`, `atbtn`, `top`), an optional pointer (down to the button, up
+to the meter), a hand animation, whether it pulses, and the two beats that
+bound its life: the one it **appears on** and the one it **leaves on**.
+
+The beats a step can emit are `enter`, `freeze`, `meter`, `resume` and
+`advance`. `tutorRenderCues()` is a pure function of the set of beats fired so
+far, which is what lets the retry re-enter a step and land on exactly the
+right frame.
+
+One centre cue and one top cue can be up at once; a later live cue wins its
+slot, which is how `TAP TO SLOW TIME` is swapped for nothing on the tap and
+then for `TAP TO RESUME TIME` a beat later.
+
 ## The rules it holds while it runs
 
 | rule | why |
 |---|---|
 | `tutorHoldsSpawns()` — the spawn queue is emptied every frame | a body arriving mid-lesson is the loudest thing on screen |
-| `tutorHoldsFire()` — no enemy *starts a telegraph* on its own initiative | the script decides when he raises the arm; once he has, the ordinary `aim` → `enemyFire` path runs untouched, so the tell and the round are the game's, not the tutorial's |
+| `tutorHoldsFire()` — off the `aiFire` grant | the script decides when he raises the arm; once he has, the ordinary `aim` → `enemyFire` path runs untouched, so the tell and the round are the game's, not the tutorial's |
 | `el.score` is hidden for the whole onboarding | `DOOR 1 · OPEN — GO` over `DRAG TO MOVE` is two systems talking at once, one of them contradicting the other |
-| `tutorHoldsPlayerFire()` — the player cannot fire before `shoot` | tapping fired a round with no weapon on screen |
+| `tutorHoldsPlayerFire()` — off the `fire` grant | tapping fired a round with no weapon on screen |
 | `tutorFreeIsFree()` — the ordinary bank drain is off, entirely | before the meter lesson the freeze is free; during it the script owns the bank. Leaving the ordinary drain running took the bank to zero and auto-resumed time in the middle of the sentence explaining that the bank runs out |
 | `showBanner` returns early | `THE DOOR IS OPEN` was landing on `DRAG TO MOVE` |
-| `tutorBefore(step)` gates the gun, meter and button | derived from `TUTOR_ORDER`, never from a hand-written list — the first version listed step names in three places, the sequence was rewritten, and two of those lists went stale |
+| the gun, meter and button come off their own grants | they used to be derived from position in `TUTOR_ORDER`, which was already better than the hand-written lists before it — but it still meant reordering the lesson silently moved who could shoot |
+| the level tool's override is read only under `?tutorpreview=1` | an afternoon of editing in `/tool` must not be able to reach a real save on the same browser |
 
 ## Failing it
 
