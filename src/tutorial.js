@@ -24,10 +24,17 @@ import { planToCells } from './genleg.js';
 
 export const TUTOR = {
   hallCells: 7,         // default straight cells, when a leg does not say
-  barrierCells: 6,      // cells from the fork's rejoin to the barrier
+  // CLOSE ENOUGH TO SEE FROM THE CORNER. At six cells past the rejoin the
+  // barrier stood 56 m from the last turn, which on a phone is a corridor
+  // fading to white — so it and its sign appeared out of nothing half way
+  // down the straight instead of being the thing you turn the corner and see.
+  barrierCells: 3,      // cells from the fork's rejoin to the barrier
   barrierH: 1.05,       // low enough to see and shoot over
   standWithin: 2.6,     // metres from the barrier that counts as standing at it
-  enemyCells: 5,        // cells beyond the barrier the first gunner stands
+  // FOUR, NOT FIVE. At five the gunner stood twenty metres past the barrier,
+  // which on a portrait phone is a figure a centimetre tall firing a round the
+  // player has to be told is there. Close enough to read the arm going up.
+  enemyCells: 4,        // cells beyond the barrier the first gunner stands
   enemyX: 1.15,         // ...and how far to either side the other two stand.
                         // A one-cell leg is 4 m of cell less 0.3 m of wall each
                         // side: 3.4 m of floor, so ±1.7 IS the wall and a body
@@ -38,7 +45,24 @@ export const TUTOR = {
   // not a handicap, it is that the world STOPS on the telegraph until the
   // player has read the prompt and pressed the button.
   aimBeat: 1.2,         // seconds from the enemy appearing to his arm rising
-  freezeAt: 0.55,       // fraction of the telegraph at which the world stops
+  // THE FREEZE LANDS ON THE ROUND, NOT ON THE ARM. It used to stop the world
+  // part-way through the telegraph, so the words said DODGE THE BULLET with no
+  // bullet anywhere on the screen: the player was asked to dodge a thing they
+  // had never seen. He fires first, the round clears the muzzle, and THEN the
+  // world stops — with the thing they have to get out of the way of hanging in
+  // the air in front of them.
+  // Not a third — nearly half. At a third the round is still inside the
+  // gunner's silhouette, so the ring that names it reads as "this man" rather
+  // than "this bullet". Clear of him, it is unmistakably a separate thing
+  // hanging in the air, with eight metres still to come.
+  freezeAfter: 0.45,    // of the way from the muzzle to the player
+  // ...and once they let it go, it travels at a pace a person can read. The
+  // ordinary rule is that time moves when YOU move (0.05 standing still), and
+  // at that rate a round twelve metres out takes half a minute to arrive: on
+  // the beat that teaches dodging, the bullet did not appear to move at all.
+  // The floor lifts for the dodging lessons and the ordinary rule comes back
+  // with the meter, which is the lesson that is about the cost of slow time.
+  dodgeScale: 0.18,
   volleyGap: 2.6,       // seconds between rounds in the three-round lesson
   reshoot: 3.2,         // ...and the gap before a missed shot is retried
   // THE METER LESSON HAS A FLOOR. It empties at a readable rate to half, then
@@ -87,9 +111,14 @@ const TEACH_MOVES = [
   ['l', 3],    // 3. another corner...
   ['f', 4],
   ['r', 3],    // ...and another
-  ['f', 3],    // the fork opens
-  ['f', 5],    // ...and rejoins
-  ['f', 14],   // 4-9. the barrier, the dodging, the shooting, the door
+  // THE FORK IS SHORTER, AND SO IS THE RUN AFTER IT. What matters at the last
+  // corner is that the player can SEE the barrier they are being sent to: at
+  // eight cells of fork plus six of approach it stood 56 m away, which on a
+  // phone is a corridor fading to white. Five and three puts it 32 m off —
+  // near enough to read as a thing in the world, far enough to walk to.
+  ['f', 2],    // the fork opens
+  ['f', 3],    // ...and rejoins
+  ['f', 11],   // 4-9. the barrier, the dodging, the shooting, the door
 ];
 // --- marks: named cells on the walked path ---------------------------------
 // DERIVED, NEVER TYPED. A mark is a place in the lesson — "the first corner",
@@ -145,9 +174,9 @@ export function marksFromPlan(plan) {
 // and back in at the rejoin. Both routes reach the same place, which is the
 // only thing this leg is trying to say.
 const FORK_LANE = [
-  [4, 18], [5, 18],
-  [5, 19], [5, 20], [5, 21], [5, 22], [5, 23],
-  [4, 23],
+  [4, 17], [5, 17],
+  [5, 18], [5, 19], [5, 20],
+  [4, 20],
 ];
 
 // A room is the spine plus width. Three cells across and four deep reads as a
@@ -264,7 +293,12 @@ export const CUE_SLOTS = [
   ['world', 'Hovering over the barrier'],
 ];
 export const CUE_ARROWS = [['none', 'None'], ['down', 'Down to the button'], ['up', 'Up to the meter']];
-export const CUE_HANDS = [['none', 'None'], ['up', 'Swipe up'], ['side', 'Swipe across'], ['tap', 'Tap']];
+// `sway` is `side`'s twin on the LEFT half of the screen: the same
+// side-to-side swipe, over the move stick rather than the look area, because
+// "get out of the way" is a sideways instruction and a hand travelling upwards
+// says "walk forward" — straight into the round.
+export const CUE_HANDS = [['none', 'None'], ['up', 'Swipe up'],
+  ['side', 'Swipe across (right)'], ['sway', 'Swipe across (left)'], ['tap', 'Tap']];
 
 // --- the sequence ----------------------------------------------------------
 // `advance` names the built-in condition in main.js that ends the step. These
@@ -290,7 +324,10 @@ export const STEPS = [
   {
     id: 'move', label: '1 · Move',
     advance: { kind: 'reached', need: 'firstCorner' },
-    grants: {}, divider: true,
+    // THE BARRIER IS A FIXTURE, not something lesson 4 conjures. It stands
+    // from the first frame of the run, so turning the last corner shows you a
+    // corridor with a thing in it rather than a corridor that grows one.
+    grants: {}, divider: true, buildBarrier: true,
     cues: [{ text: 'DRAG TO MOVE', slot: 'left', arrow: 'none', hand: 'up',
       pulse: false, on: 'enter', off: 'advance' }],
   },
@@ -311,7 +348,12 @@ export const STEPS = [
   // --- 3. CORNERS AND A FORK ----------------------------------------------
   {
     id: 'corners', label: '3 · Corners + fork',
-    advance: { kind: 'reached', need: 'forkEnd' },
+    // ...and ends AT THE LAST CORNER, not eight cells past it. The walking
+    // lesson is over the moment there is something ahead to walk to, and that
+    // moment is the turn: STAND HERE is on screen from the frame the barrier
+    // comes into view, which is what makes it a place rather than an
+    // announcement.
+    advance: { kind: 'reached', need: 'finalRun' },
     grants: {}, divider: false,
     cues: [
       { text: 'DRAG TO MOVE', slot: 'left', arrow: 'none', hand: 'up',
@@ -325,55 +367,68 @@ export const STEPS = [
   {
     id: 'stand', label: '4 · Stand here',
     advance: { kind: 'atBarrier' },
-    grants: {}, buildBarrier: true,
+    grants: {},
     cues: [{ text: 'STAND HERE', slot: 'world', arrow: 'none', hand: 'none',
       pulse: true, on: 'enter', off: 'advance' }],
   },
-  // --- 5. THE FIRST ROUND --------------------------------------------------
-  // He appears, raises his arm, and THE WORLD STOPS mid-telegraph. Nothing
-  // moves until the button is pressed — which is the only way to be certain a
-  // first-time player has read the prompt before the round is in the air.
+  // --- 5-6. THE ROUND, THREE TIMES ----------------------------------------
+  // ONE BEAT, REPEATED. He appears, raises his arm, FIRES, and the world stops
+  // with the round in the air. The prompt names the button; the tap lets the
+  // round go at a pace you can read; DRAG TO MOVE — sideways — gets you out of
+  // its way. Then the world runs again and the next man does exactly the same
+  // thing, so the second and third rounds are the first one practised rather
+  // than a new problem.
+  //
+  // It used to freeze part-way through the telegraph, which meant the words
+  // DODGE THE BULLET arrived with no bullet on the screen.
   {
     id: 'dodge1', label: '5 · Slow time',
     advance: { kind: 'froze' },
     // `bodies` is how many should be STANDING THERE, not how many to add.
-    // Declaring it per beat is what lets a retry rebuild the world: the
-    // steps after this one used to declare nothing, so clearField() on a
-    // death emptied the corridor and re-entering the step put nobody back.
+    // Declaring it per beat is what lets a retry rebuild the world: the steps
+    // after this one used to declare nothing, so clearField() on a death
+    // emptied the corridor and re-entering the step put nobody back.
     grants: { timebtn: true }, bodies: 1, hardFreeze: true,
-    // ON `held`, NOT ON `enter`. The prompt used to appear the instant the
-    // gunner did — 2.6 s before the world stopped — and the button was live
-    // for that whole window. Tapping in it satisfied the step, so the freeze,
-    // the telegraph and the entire "nothing moves until you press this"
-    // lesson were skipped by a player doing exactly what the screen said.
-    // The words arrive WITH the stopped world, which is the beat.
+    // ON `held` — the frame the world stops, which is now the frame after the
+    // shot. The prompt used to appear the instant the gunner did, 2.6 s before
+    // anything happened, and the button was live for that whole window: tapping
+    // in it satisfied the step, so the freeze, the telegraph and the entire
+    // "nothing moves until you press this" lesson were skipped by a player
+    // doing exactly what the screen said.
     cues: [{ text: 'DODGE THE BULLET<span>TAP HERE TO SLOW TIME</span>',
       slot: 'atbtn', arrow: 'down', hand: 'none', pulse: true,
-      on: 'held', off: 'advance' }],
+      on: 'held', off: 'freeze' }],
   },
-  // --- 5b. ...NOW MOVE OUT OF THE WAY --------------------------------------
+  // --- 5b. ...NOW GET OUT OF THE WAY --------------------------------------
   // Time is slow and the round is coming. The prompt is the one they already
   // know, because the answer to "what do I do now" is the thing lesson 1
-  // taught them.
+  // taught them — but the hand swipes SIDEWAYS. An upward swipe over the move
+  // stick reads as "forward", which is into the round.
   {
     id: 'dodgeMove', label: '5b · Move out of the way',
     advance: { kind: 'dodged', need: 1 },
     grants: { timebtn: true }, bodies: 1,
-    cues: [{ text: 'DRAG TO MOVE', slot: 'left', arrow: 'none', hand: 'up',
+    cues: [{ text: 'DRAG TO MOVE', slot: 'left', arrow: 'none', hand: 'sway',
       pulse: false, on: 'enter', off: 'advance' }],
   },
-  // --- 6. THREE ROUNDS -----------------------------------------------------
-  // Two more appear and fire one at a time. Repetition, not escalation: there
-  // is still no meter, so slow motion costs nothing and they can stay in it.
+  // --- 6. TWO MORE, THE SAME WAY -------------------------------------------
+  // The other two appear beside him and take the same turn: arm, shot, freeze,
+  // tap, move. Repetition, not escalation — there is still no meter, so slow
+  // motion costs nothing and the only thing being practised is the beat.
   {
     id: 'dodge3', label: '6 · Dodge three',
     advance: { kind: 'dodged', need: 3 },
-    grants: { timebtn: true }, bodies: 3,
-    // off:'advance', not off:'dodge'. It used to leave on the first of the
-    // three, so rounds two and three arrived with a blank screen — the exact
-    // failure goal 2 exists to prevent, in the lesson whose name is "three".
-    cues: [{ text: 'DODGE THE BULLETS', slot: 'mid', arrow: 'none', hand: 'none',
-      pulse: false, on: 'enter', off: 'advance' }],
+    grants: { timebtn: true }, bodies: 3, hardFreeze: true,
+    // The pair below is a LOOP, not a sequence: `held` clears `freeze` and
+    // `dodge` on the way in (see BEAT_CYCLE in main.js), so the same two cues
+    // play again for the second round and the third.
+    cues: [
+      { text: 'DODGE THE BULLET<span>TAP HERE TO SLOW TIME</span>',
+        slot: 'atbtn', arrow: 'down', hand: 'none', pulse: true,
+        on: 'held', off: 'freeze' },
+      { text: 'DRAG TO MOVE', slot: 'left', arrow: 'none', hand: 'sway',
+        pulse: false, on: 'freeze', off: 'dodge' },
+    ],
   },
   // --- 7. THE METER --------------------------------------------------------
   // Only now. A resource you watch drain while you are learning to dodge is

@@ -5767,6 +5767,16 @@ const tutorFreeIsFree = () => tutorStep !== null && !tutorMay('bank');
 // reach: measured at 58 s stuck, bar at 97.5%, player alive, nothing on the
 // screen changing. Until the bar has reached the knee the button holds, which
 // is also what goal 2 asks for — the lesson ends when it is learnt.
+// A BEAT WHOSE SUBJECT IS A ROUND IN THE AIR. Two things key off this: the
+// world runs again between rounds (so the next freeze and the next tap are a
+// real beat rather than a button that is already down), and time has a floor
+// while one is in flight (see the frame loop).
+function tutorDodgeBeat() {
+  if (tutorStep === null) return false;
+  const sp = tutorSpecOf(tutorStep);
+  const k = sp && sp.advance && sp.advance.kind;
+  return k === 'froze' || k === 'dodged';
+}
 function tutorRefusesResume() {
   if (tutorStep === null) return false;
   const sp = tutorSpecOf(tutorStep);
@@ -5800,6 +5810,10 @@ function tutorArrows(down, up) {
 function tutorHideMsg() {
   if (el.tslot) for (const k of Object.keys(el.tslot)) tutorSlot(k, null);
   tutorArrows(false, false);
+  // ...and the ring on the round. updateTutorial returns at `deadPending`
+  // before it reaches the placement, so a death mid-freeze would otherwise
+  // leave it hanging on the death screen over nothing.
+  if (el.tutorpin) el.tutorpin.classList.remove('on');
 }
 
 // --- cue playback ----------------------------------------------------------
@@ -5811,8 +5825,17 @@ function tutorHideMsg() {
 // GOAL 2: a cue with off:'advance' stays until the LESSON is over. Nothing
 // here is on a timer, and nothing here can be.
 let tutorFired = new Set();
+// THE DODGE BEAT IS A LOOP, and a Set of things that have happened cannot
+// describe a loop on its own. These three are one round's worth of beat — the
+// world stops, the player lets it go, the round goes past — and emitting any
+// of them un-happens the ones after it. So a step can hang two cues on the
+// pair and have them play again for the second round and the third, with no
+// machinery in the step and nothing on a timer.
+const BEAT_CYCLE = ['held', 'freeze', 'dodge'];
 function tutorEmit(ev) {
   if (tutorStep === null) return;
+  const i = BEAT_CYCLE.indexOf(ev);
+  for (let j = i + 1; i >= 0 && j < BEAT_CYCLE.length; j++) tutorFired.delete(BEAT_CYCLE[j]);
   tutorFired.add(ev);
   tutorRenderCues();
 }
@@ -5859,6 +5882,28 @@ const _vEye = new THREE.Vector3();
 // it. See tutorPlaceWorldCue.
 const _vSignA = new THREE.Vector3();
 const _vSignB = new THREE.Vector3();
+// THE RING ON THE ROUND. Drawn at the bullet, in screen space, while the world
+// is held for teaching. A round is 8.5 cm across: fourteen metres down the
+// corridor that is about four pixels, so the beat that stops the world to say
+// DODGE THE BULLET was pointing at something a first-time player could not
+// find on the screen. The ring names the object without pretending the bullet
+// is bigger than it is, and it goes the instant time runs again.
+function tutorPlaceRoundPin() {
+  const n = el.tutorpin;
+  if (!n) return;
+  const b = tutorWorldHeld && tutorRound && bullets.indexOf(tutorRound.b) >= 0
+    ? tutorRound.b : null;
+  if (!b) { n.classList.remove('on'); return; }
+  _vWorld.copy(b.pos).project(camera);
+  if (_vWorld.z > 1 || Math.abs(_vWorld.x) > 1 || Math.abs(_vWorld.y) > 1) {
+    n.classList.remove('on');
+    return;
+  }
+  const w = renderer.domElement.clientWidth, h = renderer.domElement.clientHeight;
+  n.style.left = `${(_vWorld.x * 0.5 + 0.5) * w}px`;
+  n.style.top = `${(-_vWorld.y * 0.5 + 0.5) * h}px`;
+  n.classList.add('on');
+}
 function tutorPlaceWorldCue() {
   const n = el.tslot && el.tslot.world;
   if (!n) return;
@@ -5925,14 +5970,16 @@ function tutorPlaceWorldCue() {
     n._szText = n.textContent;
     n._szW = n.offsetWidth || 120;
   }
-  // A floor of 8 px, because below that it is not words, it is a red smudge —
-  // and the point of it being visible from the top of the straight is that the
-  // player sees SOMETHING is marked down there.
+  // A floor of 12 px, because below that it is not words, it is a red smudge —
+  // and the whole point of the sign being up before the walk is that the
+  // player turns the last corner and can READ what is waiting for them. It
+  // bites only over the first few metres past the corner; from there in, the
+  // projection is doing the work.
   // ...and never wider than the screen it is drawn on: walking right up to it
   // the span is several times the viewport, and a nowrap box that wide is a
   // word and a half with the rest off both edges.
   const fit = 20 * (w * 0.92) / Math.max(n._szW, 1);
-  const px = Math.max(8, Math.min(fit, 20 * spanPx / Math.max(n._szW, 1)));
+  const px = Math.max(12, Math.min(fit, 20 * spanPx / Math.max(n._szW, 1)));
   n.style.fontSize = `${px}px`;
 
   // NUDGED, not clamped. A box centred on the projection walked bodily off the
@@ -5974,7 +6021,13 @@ function tutorEnsureBodies(want) {
   // and the ring only had three offsets, so bodies 4 and 5 were placed exactly
   // on top of bodies 1 and 2 — one silhouette, two men, and a round arriving
   // from inside another man's chest.
-  const OFF = [[0, 0], [-1, 0], [1, 0], [-2, 0.9], [2, 0.9], [0, 1.8]];
+  // THE FIRST MAN IS NOT ON THE CENTRE LINE. A round travels from his chest to
+  // where the player is standing, so if he is dead ahead the round is dead
+  // ahead too — it sits inside his silhouette the whole way in, and the ring
+  // that names it reads as "this man" rather than "this bullet". Off to one
+  // side it comes in at an angle, and by the time the world stops it is
+  // unmistakably a separate thing hanging in the air.
+  const OFF = [[-1, 0], [1, 0], [0, 0], [-2, 0.9], [2, 0.9], [0, 1.8]];
   let added = 0;
   for (let i = have; i < want; i++) {
     const [ox, oz] = OFF[i % OFF.length];
@@ -6140,7 +6193,12 @@ function tutorNoteShot() {
   if (!tutorAwaitShot) return;
   tutorAwaitShot = false;
   const b = bullets[bullets.length - 1];
-  tutorRound = b ? { b, passedBar: false, counted: false } : null;
+  // WHERE IT STARTED AND HOW FAR IT HAS TO COME. The freeze happens a fixed
+  // FRACTION of the way down that flight rather than after a fixed number of
+  // metres or seconds, so it reads the same whether the man who fired it is
+  // five cells beyond the barrier or standing on it.
+  tutorRound = b ? { b, passedBar: false, counted: false, let: false,
+    from: b.pos.z, span: Math.max(1, b.pos.z - player.pos.z) } : null;
   tutorShotsFired++;
 }
 // A held body ignores collision — that is the point of holding it — so the
@@ -6361,13 +6419,46 @@ function tutorJumpTo(id) {
     if (sp && sp.buildBarrier) { tutorStep = sp.id; tutorBuildBarrier(); }
     if (sp && sp.dropBarrier) tutorDropBarrier();
   }
-  // stand them where the beat happens: at the barrier if there is one, else
-  // wherever the leg's own spine has got to
-  if (tutorBar) {
-    player.pos.set(tutorBar.m.position.x, 0, tutorBar.z - 1.6);
+  // STAND THEM WHERE THE BEAT HAPPENS — which for a WALKING lesson is at the
+  // start of the walk, not at the barrier. The barrier is a fixture now, up
+  // from the first frame, and "if there is a barrier, stand at it" therefore
+  // teleported a jump-to-lesson-1 straight to the end of the corridor, where
+  // `reached` fired on the frame it arrived and the whole thing cascaded to
+  // the dodge beat. Every jump in the tool landed on the same step.
+  const sp = TUTOR_STEPS[target];
+  const L = hall && hall.legs[hall.cur];
+  const marks = (TUTOR_LEGS[tutorLegIx] || {}).marks || {};
+  const markAt = (a) => {
+    const nd = a && a.need;
+    return typeof nd === 'string' ? (marks[nd] || 0) : ((nd | 0) || 0);
+  };
+  let cell = null;
+  if (sp && sp.advance && sp.advance.kind === 'reached' && L && L.spine) {
+    const prev = TUTOR_STEPS[target - 1];
+    const at = prev && prev.advance && prev.advance.kind === 'reached'
+      ? markAt(prev.advance) : 0;
+    cell = L.spine[Math.min(at, L.spine.length - 1)];
   }
+  if (cell) player.pos.set(cell[0] * HALL.cell, 0, cell[1] * HALL.cell);
+  else if (sp && sp.advance && sp.advance.kind === 'atBarrier' && tutorBar) {
+    // ...and SHORT of it for the step whose whole job is walking to it. Landing
+    // on the barrier satisfied `atBarrier` on the arriving frame, so jumping to
+    // "stand here" showed you the next beat instead.
+    player.pos.set(tutorBar.m.position.x, 0, tutorBar.z - TUTOR.standWithin - 10);
+  } else if (tutorBar) player.pos.set(tutorBar.m.position.x, 0, tutorBar.z - 1.6);
   player.yaw = Math.PI; player.pitch = 0;
   player.vel.set(0, 0, 0);
+  // ...and the beat's counters go back with it. `tutorSpineIx` is monotonic —
+  // walking backwards must not un-complete a lesson — so a jump has to be the
+  // one thing that resets it, and `tutorDodged` is cumulative, so jumping to a
+  // dodge beat with three already banked satisfied it on the frame it began.
+  tutorSpineIx = 0;
+  tutorDodged = 0;
+  tutorShotsFired = 0;
+  tutorRound = null;
+  tutorAwaitShot = false;
+  tutorFroze = false;
+  tutorEverHeld = false;
   tutorUpdateSpineIx();
   tutorStep = id;
   tutorNext(id);
@@ -6506,23 +6597,55 @@ function updateTutorial(dtReal, movedM, yawDelta) {
   tutorShowMeter(tutorMeterOn);
   if (el.ammo) el.ammo.style.display = tutorMay('ammo') ? '' : 'none';
 
-  // THE TELEGRAPH FREEZE. Held from the moment his arm is most of the way up
-  // until the button is pressed — see the `froze` case below, which is the
-  // only thing that clears it.
-  if (tutorHardFreeze && tutorMark && tutorMark.alive) {
-    const spec = ENEMY_TYPES[tutorMark.type];
-    const aimT = spec.aimTime * aimSpeedFactor();
-    if (tutorMark.state === 'aim' && tutorMark.stateT >= aimT * TUTOR.freezeAt) {
-      if (!tutorWorldHeld) {
-        tutorWorldHeld = true;
-        tutorEverHeld = true;
-        tutorRevealButton();     // the control arrives with the beat it answers
-        tutorEmit('held');
-      }
+  // THE FREEZE LANDS ON THE ROUND, NOT ON THE ARM.
+  //
+  // It used to stop the world part-way up the telegraph, before the trigger —
+  // so the words DODGE THE BULLET arrived with no bullet anywhere on the
+  // screen, and the player was being asked to get out of the way of something
+  // they had never seen. He fires first. The round clears the muzzle, covers
+  // the first third of its flight, and THEN everything stops with it hanging
+  // in the air between the two of them. That is the frame the prompt is for.
+  //
+  // Released by the button and by nothing else, every round, so the second and
+  // the third are the first one practised rather than a new problem.
+  if (tutorHardFreeze && tutorRound && !tutorRound.counted && !tutorRound.let
+      && bullets.indexOf(tutorRound.b) >= 0) {
+    const flown = tutorRound.from - tutorRound.b.pos.z;
+    if (!tutorWorldHeld && flown >= tutorRound.span * TUTOR.freezeAfter) {
+      tutorWorldHeld = true;
+      tutorEverHeld = true;
+      // A FRESH HOLD NEEDS A FRESH PRESS. `tutorFroze` is a latch that nothing
+      // used to clear, so the second round's freeze was released on the frame
+      // it began — by the tap that answered the first one, two rounds ago.
+      tutorFroze = false;
+      tutorRevealButton();     // the control arrives with the beat it answers
+      tutorEmit('held');
     }
-  } else {
+  } else if (!tutorHardFreeze || !tutorRound) {
     tutorWorldHeld = false;
   }
+  // ...and the tap lets it go. Shared by every beat that freezes rather than
+  // living inside one advance condition, because the three-round lesson stops
+  // the world three times and each of them is released the same way.
+  //
+  // `tutorFroze` is set by the time BUTTON. In CLASSIC mode there is no button
+  // and any held finger slows time, so that counts instead — but ONLY in
+  // classic: `input.holding` is true whenever a finger is down at all, so
+  // accepting it in button mode meant the thumb still resting on the move
+  // stick from walking to the barrier released the freeze on the frame it
+  // began, and the prompt naming the button flashed for one frame.
+  if (tutorWorldHeld && (tutorFroze || (timeMode !== 'toggle' && input.holding))) {
+    tutorWorldHeld = false;
+    if (tutorRound) tutorRound.let = true;   // this round has been let go
+    // A DOUBLE TAP USED TO HAND BACK A FULL-SPEED WORLD: `tutorFroze` is
+    // latched by any press, so two of them — "did that register?" — left time
+    // running and the round arrived at full speed. You come out in slow motion.
+    if (!timeLocked) setTimeLocked(true);
+    tutorEmit('freeze');
+  }
+  // AFTER the hold, not before it: placed first, the ring appeared a frame
+  // late — which on the frame the world stops is the frame that matters.
+  tutorPlaceRoundPin();
 
   // A turn-ordered room hands the trigger on when the round goes past, so the
   // second man is a second problem rather than a simultaneous one.
@@ -6547,6 +6670,11 @@ function updateTutorial(dtReal, movedM, yawDelta) {
         tutorDodged++;
         tutorEmit('dodge');
         tutorSub = TUTOR.volleyGap;   // a beat, then the next one
+        // AND THE WORLD RUNS AGAIN. The next round is a fresh beat — arm up,
+        // shot away, freeze, tap — and it cannot be if time never went back to
+        // normal in between: the button would already be down and the prompt
+        // telling them to press it would be a lie.
+        if (tutorDodgeBeat()) { setTimeLocked(false); tutorFroze = false; }
       }
     } else if (!tutorRound.counted) {
       tutorRound = null;   // it hit something; the next shot still comes
@@ -6615,27 +6743,18 @@ function updateTutorial(dtReal, movedM, yawDelta) {
     // until the button is pressed. Nothing here is on a clock: the freeze is
     // released by the tap and by nothing else, which is the only way to be
     // sure a first-time player has read the prompt before a round is in flight.
+    // He appears, raises his arm and SHOOTS — and the round is what the world
+    // stops around. The hold and its release are above, shared with the
+    // three-round lesson; this only has to notice that it happened.
     case 'froze':
       if (!tutorAwaitShot && !tutorRound && tutorSub <= 0 && !tutorWorldHeld) {
         tutorSub = tutorAim(tutorMark) ? TUTOR.reshoot : 1;
       }
-      // `tutorFroze` is set by the time BUTTON. In CLASSIC mode there is no
-      // button and any held finger slows time, so that counts instead — but
-      // ONLY in classic. `input.holding` is true whenever a finger is down at
-      // all, so accepting it in button mode meant the thumb still resting on
-      // the move stick from walking to the barrier satisfied this step on the
-      // frame it began: the prompt naming the control flashed for one frame
-      // and the player never saw what the button was for.
-      const slowedSomehow = tutorFroze || (timeMode !== 'toggle' && input.holding);
-      if (tutorEverHeld && slowedSomehow) {
+      if (tutorEverHeld && tutorFired.has('freeze')) {
+        // The round it fired is still in the air and still has to be dodged —
+        // that is the next step's whole job — so the freeze machinery stays
+        // armed and only the beat's OWN hold is finished with.
         tutorHardFreeze = false;
-        tutorWorldHeld = false;
-        // A DOUBLE TAP USED TO HAND BACK A FULL-SPEED WORLD. `tutorFroze` is
-        // latched by any press, so two of them — "did that register?" — left
-        // time running and the round arrived at full speed with nothing on
-        // screen but DRAG TO MOVE. You come out of this beat in slow motion.
-        if (!timeLocked) setTimeLocked(true);
-        tutorEmit('freeze');
         done();
       }
       break;
@@ -6757,6 +6876,7 @@ const el = {
     world: document.getElementById('ts-world'),
   },
   tutlink: document.getElementById('tutlink'),
+  tutorpin: document.getElementById('tutorpin'),
   saves: document.getElementById('saves'),
   slotlist: document.getElementById('slotlist'),
   askTut: document.getElementById('askTut'),
@@ -8514,6 +8634,14 @@ function frame(now) {
   if (playing && slowActive) {
     const speedNorm = Math.min(player.vel.length() / MOVE_SPEED, 1);
     target = TIME_SLOW + (TIME_MOVE_MAX - TIME_SLOW) * speedNorm;
+    // A FLOOR WHILE A ROUND IS IN THE AIR AND BEING TAUGHT. The ordinary rule
+    // is that time moves when YOU move — 0.05 standing still — and at that
+    // rate a round twelve metres out takes half a minute to arrive. On the one
+    // beat whose instruction is "dodge the bullet", the bullet did not appear
+    // to move. It still speeds up when they move; it just no longer stops.
+    // The ordinary rule comes back with the meter, which is the lesson about
+    // what slow time costs.
+    if (tutorDodgeBeat()) target = Math.max(target, TUTOR.dodgeScale);
   }
   if (game.state === 'dead') target = 0.12;
   if (game.state === 'menu') target = 0.5;   // dreamy half-speed attract mode

@@ -42,11 +42,11 @@ Eighteen steps carrying fifteen lessons. The spec is
 |---|---|---|---|
 | `move` | 1 | `DRAG TO MOVE`, left half, thumb coach, dotted divider. Nothing else on screen at all. | they reach the corner (spine index, not a distance) |
 | `look` | 2 | `DRAG TO LOOK` joins it on the right with its own coach — **and `DRAG TO MOVE` stays**, because the point is that looking is a separate action you do at the same time | they reach the end of the next straight |
-| `corners` | 3 | both prompts stay up through two more turns and a fork that rejoins | they reach the fork's rejoin |
-| `stand` | 4 | prompts go; `STAND HERE` hangs over a barrier six cells on | they reach the barrier |
-| `dodge1` | 5 | a gunner appears five cells beyond it, raises his arm, and **the world stops** mid-telegraph. `DODGE THE BULLET` over `TAP HERE TO SLOW TIME`, pointer on the button | they press the button |
-| `dodgeMove` | 5b | everything resumes at ordinary slow motion; the prompt becomes `DRAG TO MOVE` again | the round goes past |
-| `dodge3` | 6 | two more appear; rounds arrive one at a time, `volleyGap` apart. No meter yet, so slow motion is free | three rounds dodged |
+| `corners` | 3 | both prompts stay up through two more turns and a fork that rejoins | **they turn the last corner** |
+| `stand` | 4 | prompts go; the barrier is already standing 32 m down the straight and `STAND HERE` is on it from this frame | they reach the barrier |
+| `dodge1` | 5 | a gunner appears four cells beyond it, raises his arm and **fires** — and the world stops with the round in the air, ringed, half way to them. `DODGE THE BULLET` over `TAP HERE TO SLOW TIME`, pointer on the button | they press the button |
+| `dodgeMove` | 5b | the round travels again, at a pace a person can read; the prompt becomes `DRAG TO MOVE` with the coach swiping **sideways** | the round goes past |
+| `dodge3` | 6 | two more appear beside him and take the same turn each: arm, shot, freeze, tap, move. No meter yet, so slow motion is free | three rounds dodged |
 | `meter` | 7 | the bar appears for the first time, drains, and explains itself | they let time run |
 | `gunup` | 8a | the weapon rises on the reload rig | the rise finishes |
 | `shoot` | 8b | `TAP ANYWHERE TO SHOOT`; magazine topped up | all three down |
@@ -218,6 +218,67 @@ Visibility is gated on the `finalRun` mark and on actually being on the walked
 path (the fork's second lane shares a z with the spine, so a spine *index*
 cannot tell them apart — `tutorNearestSpineDist()` can).
 
+## The beat, and why it is shaped like that
+
+The dodge lesson is **one beat played three times**:
+
+1. he appears
+2. he raises his arm
+3. **he fires**
+4. the world stops, with the round in the air and a ring drawn on it
+5. the player taps the time button
+6. the round travels — at a readable pace, not the standing-still crawl
+7. `DRAG TO MOVE`, the coach swiping **sideways**
+8. they get out of the way
+9. the other two appear, and each does 2–8 again
+
+Three things about that are deliberate and were wrong before:
+
+**The freeze lands on the round, not on the arm.** It used to stop the world
+part-way up the telegraph, before the trigger — so `DODGE THE BULLET` arrived
+with no bullet anywhere on the screen, and a first-time player was being asked
+to get out of the way of something they had never seen. `TUTOR.freezeAfter`
+is a *fraction of the flight*, not a time or a distance, so it reads the same
+whoever fires it from wherever they are standing.
+
+**A ring is drawn on the frozen round.** A round is 8.5 cm across; nine metres
+down a corridor on a phone that is a few pixels, and the beat that stops the
+world to point at it was pointing at something the player could not find. The
+ring is screen-space and fixed-size, so it names the object without pretending
+the bullet is bigger than it is, and it goes the moment time runs.
+
+**Time has a floor while the round is in the air.** The ordinary rule is that
+time moves when *you* move — `slowScale` is 0.05 — and at that rate a round
+nine metres out takes three minutes to arrive. On the one beat whose
+instruction is "dodge the bullet", the bullet did not appear to move at all.
+`TUTOR.dodgeScale` floors it at 0.18 for the dodging lessons only; it still
+speeds up when the player moves, and the ordinary rule comes back with the
+meter, which is the lesson about what slow time costs.
+
+And between rounds **the world runs again**. The next round has to be a fresh
+beat — arm, shot, freeze, tap — and it cannot be if the button is already down
+and the prompt telling them to press it is a lie. `held` un-fires `freeze` and
+`dodge` (see `BEAT_CYCLE`), which is what lets two declarative cues in
+`src/tutorial.js` play three times with no machinery in the step.
+
+## The barrier is a fixture
+
+It stands from the first frame of the run, not from lesson 4 — you turn the
+last corner and there is something in the corridor, rather than a corridor that
+grows one. Which meant three other things had to move:
+
+* the teaching leg's fork is five cells rather than eight and the run after it
+  eleven rather than fourteen, so the barrier is **32 m from the last corner**
+  instead of 56. Fifty-six metres of this corridor is a fade to white.
+* `corners` ends at `finalRun` — the turn — not at the fork's rejoin, so the
+  walking prompts leave and `STAND HERE` arrives on the same frame.
+* `tutorJumpTo` had to stop standing every jump at the barrier. With a barrier
+  present from step 1, "if there is a barrier, stand at it" teleported a jump
+  to *lesson 1* to the end of the corridor, where `reached` fired on the
+  arriving frame and cascaded — every jump in the tool landed on the same step.
+  A `reached` step now lands at the start of its walk and an `atBarrier` step
+  short of the barrier, and the beat counters reset with the jump.
+
 ## Five things you could not see
 
 The critics' visual pass found five, and four of them were the same mistake:
@@ -326,11 +387,17 @@ ones with a reason:
   rise. Much shorter than it needed to be before the freeze existed: the prompt
   no longer has to be read against a clock, so this only has to be long enough
   to see him arrive.
-* **`enemyCells: 5` / `barrierCells: 6`** — measured from the fork's rejoin and
+* **`enemyCells: 4` / `barrierCells: 3`** — measured from the fork's rejoin and
   from the barrier respectively, so the whole combat section moves with the
-  geometry instead of with numbers somebody has to remember to change. Five
-  cells is 20 m: about 2.3 s of flight, long enough to read as a thing coming
-  towards you.
+  geometry instead of with numbers somebody has to remember to change. Both
+  came down: at six cells the barrier stood 56 m from the last corner, which on
+  a phone is a corridor fading to white rather than a thing you can see; at
+  five the gunner was a figure a centimetre tall firing a round the player had
+  to be *told* was there.
+* **`freezeAfter: 0.45` / `dodgeScale: 0.18`** — where the world stops (as a
+  fraction of the round's flight, so it reads the same whoever fired it) and
+  the floor under world speed while a taught round is in the air. See "the
+  beat" above for why both exist.
 * **`enemyX: 1.15`** — a one-cell leg is 4 m of cell less 0.3 m of wall each
   side: 3.4 m of floor, so ±1.7 IS the wall. The flanking bodies stood at ±2.4
   and were inside the masonry. `tutorPlaceEnemy` clamps to the leg's cell

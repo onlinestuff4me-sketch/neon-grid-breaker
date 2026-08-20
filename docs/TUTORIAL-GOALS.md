@@ -90,18 +90,29 @@ asked to *aim* at rather than just do.
 
 ### 5. Slow time to dodge
 
-At the barrier, one enemy appears 5 cells beyond it, raises his arm and fires.
+At the barrier, one enemy appears 4 cells beyond it, raises his arm and fires.
 
-**The game freezes on the telegraph.** Bullet, enemy, everything — stopped —
-while the prompt comes up:
+**The game freezes on the ROUND, not on the telegraph.** He shoots first; the
+round clears the muzzle and covers nearly half the distance; and *then*
+everything stops — bullet, enemy, corridor — with the thing they have to get
+out of the way of hanging in the air in front of them, a ring drawn on it. Only
+then does the prompt come up:
 
 > **DODGE THE BULLET**
 > *TAP HERE TO SLOW TIME* → *(pointer to the button)*
 
-Nothing moves until they tap. On the tap, everything resumes at ordinary
-slow-motion speed, the prompt and pointer go, and `DRAG TO MOVE` comes back
-with its coach animation — because the second half of the lesson is *what to do
-now that time is slow*, and that is the thing they already learned in area 1.
+Freezing before the trigger meant those words arrived with no bullet anywhere
+on the screen: the player was being asked to dodge a thing they had never seen.
+
+Nothing moves until they tap. On the tap the round travels again — at a pace a
+person can read, not the standing-still crawl the ordinary rule gives — the
+prompt and pointer go, and `DRAG TO MOVE` comes back with its coach swiping
+**sideways**, because the second half of the lesson is *what to do now that
+time is slow* and an upward swipe over the move stick reads as "forward", which
+is straight into the round.
+
+Then the world runs again and **the whole beat repeats** for the second man and
+the third: appear, arm, shot, freeze, tap, move. Repetition, not escalation.
 
 Dying here rewinds to exactly this beat: enemy raising his arm, freeze, prompt.
 

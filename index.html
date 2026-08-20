@@ -327,9 +327,33 @@
   #ts-world { left:0; top:0; width:max-content; max-width:94vw; white-space:nowrap;
            padding:0 .34em;
            font-size:min(6.2vw,28px); line-height:1.02;
-           color:#ff2d1a; text-shadow:0 2px 16px rgba(238,240,243,.8);
+           color:#ff2d1a;
+           /* A DARK halo, unlike every other slot. The others are dark ink on
+              a pale corridor and want light behind them; this one is red, and
+              at the far end of the straight it sits on the blown-out white the
+              corridor fades to — where a light halo does nothing at all and
+              the sign the player is supposed to turn the corner and read was a
+              pink smudge on white. */
+           text-shadow:0 0 3px rgba(22,24,29,.92), 0 2px 14px rgba(22,24,29,.6);
            transition:opacity .35s ease; transform:translate(-50%, -108%); }
-  body.slowmo #ts-world { text-shadow:0 2px 16px rgba(12,13,16,.9); }
+  body.slowmo #ts-world { text-shadow:0 0 3px rgba(12,13,16,.95), 0 2px 16px rgba(12,13,16,.9); }
+
+  /* THIS THING HERE. A round is 8.5 cm across; fourteen metres down a corridor
+     on a phone that is four pixels, and the beat that stops the world to say
+     DODGE THE BULLET was pointing at something the player could not find. The
+     ring is drawn AT the round, in screen space, at a size that reads from any
+     distance — so it says which object the words are about without pretending
+     the bullet is bigger than it is. Only while the world is held for
+     teaching: the moment time runs, it goes. */
+  #tutorpin { position:absolute; left:0; top:0; width:46px; height:46px;
+           margin:-23px 0 0 -23px; border-radius:50%;
+           border:3px solid #ff2d1a; box-shadow:0 0 18px rgba(255,45,26,.55),
+           inset 0 0 12px rgba(255,45,26,.35);
+           opacity:0; visibility:hidden; pointer-events:none;
+           transition:opacity .18s ease; }
+  #tutorpin.on { opacity:1; visibility:visible; animation:pinpulse 1.05s ease-in-out infinite; }
+  @keyframes pinpulse { 0%,100% { transform:scale(1); opacity:1; }
+                        50% { transform:scale(1.16); opacity:.7; } }
 
   /* It used to dip to 32%, which meant every critical instruction — STAND
      HERE, TAP HERE TO SLOW TIME — was half-absent on a 1.05 s loop. A prompt
@@ -410,6 +434,17 @@
      hands were 100 px apart vertically, so the pairing did not read. */
   #tutorhand.up, #tutorhand2.up     { left:26%; top:58%; animation:handup 1.9s ease-in-out infinite; }
   #tutorhand.side, #tutorhand2.side { left:74%; top:58%; animation:handside 1.9s ease-in-out infinite; }
+  /* THE DODGE. `side`'s twin over the MOVE stick: the same swipe, on the left
+     half, because "get out of the way" is a sideways instruction and the
+     upward swipe the move lesson uses reads as "forward" — which on this beat
+     is straight into the round. It travels both ways, because which way you go
+     is the player's to pick. */
+  #tutorhand.sway, #tutorhand2.sway { left:26%; top:58%; animation:handsway 1.9s ease-in-out infinite; }
+  @keyframes handsway { 0%   { transform:translateX(0); opacity:0; }
+                        14%  { opacity:.95; }
+                        34%  { transform:translateX(-54px); }
+                        66%  { transform:translateX(54px); opacity:.95; }
+                        100% { transform:translateX(0); opacity:0; } }
   #tutorhand.tap, #tutorhand2.tap   { animation:handtap 1.15s ease-in-out infinite; }
   /* the time button's grand entrance */
   @keyframes tbarrive { 0% { transform:scale(.2); opacity:0; }
@@ -596,7 +631,7 @@
   <div id="flash"></div>
   <div id="warn"></div>
   <div id="banner"></div>
-  <div id="tutor"><div id="tutorline"></div><div id="tutorhand"></div><div id="tutorhand2"></div><div id="tutorarrow"></div><div id="tutorup"></div><div id="ts-top" class="tslot top"></div><div id="ts-mid" class="tslot mid"></div><div id="ts-left" class="tslot left"></div><div id="ts-right" class="tslot right"></div><div id="ts-atbtn" class="tslot atbtn"></div><div id="ts-world" class="tslot world"></div></div>
+  <div id="tutor"><div id="tutorline"></div><div id="tutorhand"></div><div id="tutorhand2"></div><div id="tutorarrow"></div><div id="tutorup"></div><div id="ts-top" class="tslot top"></div><div id="ts-mid" class="tslot mid"></div><div id="ts-left" class="tslot left"></div><div id="ts-right" class="tslot right"></div><div id="ts-atbtn" class="tslot atbtn"></div><div id="ts-world" class="tslot world"></div><div id="tutorpin"></div></div>
   <div id="ammo">PISTOL · ∞</div>
   <div id="reloadbar"><div id="reloadfill"></div></div>
   <div id="pausebtn">❚❚</div>

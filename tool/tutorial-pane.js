@@ -78,8 +78,12 @@ function validate() {
   }
 
   // 2. a cue hung on an event its step cannot fire — the lesson runs blank
+  // A `dodged` step freezes on EVERY round, so it fires the whole beat cycle,
+  // not just the dodge at the end of it.
   const KIND_EVENTS = {
-    froze: ['held', 'freeze'], dodged: ['dodge'], resumed: ['meter', 'resume'],
+    froze: ['held', 'freeze'],
+    dodged: ['held', 'freeze', 'dodge'],
+    resumed: ['meter', 'resume'],
     cleared: ['kill'],
   };
   for (const st of S) {
@@ -273,7 +277,8 @@ const NUM_HELP = {
   enemyCells: 'cells beyond the barrier the first gunner stands',
   enemyX: 'how far to either side the others stand (±1.7 is the wall)',
   aimBeat: 'seconds from the gunner appearing to his arm rising',
-  freezeAt: 'fraction of the telegraph at which the world stops',
+  freezeAfter: 'how far the round gets, muzzle to player, before the world stops',
+  dodgeScale: 'world speed while a round being taught is in the air',
   volleyGap: 'seconds between rounds in the three-round lesson',
   reshoot: 'the gap before a missed shot is retried',
   meterSecs: 'meter: full to the knee, in seconds',
