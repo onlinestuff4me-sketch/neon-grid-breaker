@@ -5803,23 +5803,51 @@ function tutorRenderCues() {
 // screen — the difference between a label on a thing and a caption about it.
 // Projected every frame, so it grows as you walk up to it.
 const _vWorld = new THREE.Vector3();
+const _vEye = new THREE.Vector3();
 function tutorPlaceWorldCue() {
   const n = el.tslot && el.tslot.world;
-  if (!n || !n.classList.contains('show')) return;
-  const anchor = tutorBar ? { x: tutorBar.m.position.x, y: TUTOR.barrierH + 1.15, z: tutorBar.z }
-    : null;
-  if (!anchor) { n.style.opacity = '0'; return; }
-  _vWorld.set(anchor.x, anchor.y, anchor.z).project(camera);
+  if (!n) return;
+  // `visibility`, not `opacity`: STAND HERE pulses, and a running CSS
+  // animation on opacity beats an inline style — so setting opacity to 0 to
+  // hide it did nothing at all, and the label stayed on screen through the
+  // whole of lessons 1-3, hanging over blank walls three corners away from
+  // the barrier it names.
+  if (!n.classList.contains('show') || !tutorBar) { n.style.visibility = 'hidden'; return; }
+  const ax = tutorBar.m.position.x, ay = TUTOR.barrierH + 1.05, az = tutorBar.z;
+  // BEHIND THE PLAYER, ROUND A CORNER, OR THROUGH A WALL — all of them mean
+  // it is not on screen. It used to be clamped into the frame instead, which
+  // made a label on a barrier follow the player around the corridor and hang
+  // over blank walls three turns away from the thing it names.
+  _vEye.set(ax, ay, az);
+  const dist = Math.hypot(ax - player.pos.x, az - player.pos.z);
+  // ONLY FROM THE FINAL STRAIGHT. hasLineOfSight tests obstacles — pillars,
+  // covers, doors — not the corridor's own walls, so it says "yes" from three
+  // corners away and the label hung over blank masonry for the whole of
+  // lessons 1-3. The leg knows where its last straight begins: the fork's
+  // rejoin, which is the first place the barrier is genuinely in view.
+  const marks = (TUTOR_LEGS[tutorLegIx] || {}).marks;
+  const gate = marks && (marks.finalRun != null ? marks.finalRun : marks.forkEnd);
+  const inFinalRun = gate == null || tutorSpineIx >= gate;
+  _vWorld.copy(_vEye).project(camera);
+  const off = _vWorld.z > 1 || Math.abs(_vWorld.x) > 1.15 || Math.abs(_vWorld.y) > 1.15;
+  if (off || !inFinalRun) { n.style.visibility = 'hidden'; return; }
+  n.style.visibility = '';
   const w = renderer.domElement.clientWidth, h = renderer.domElement.clientHeight;
-  const behind = _vWorld.z > 1;
-  n.style.opacity = behind ? '0' : '';
-  if (behind) return;
-  // CLAMPED. Even anchored correctly, a label on a thing you are standing at
-  // wants to be behind your shoulder; it stays on screen instead, because a
-  // prompt that leaves when the player arrives is the failure goal 2 names.
-  const halfW = n.offsetWidth / 2 || 110;
-  n.style.left = `${Math.max(halfW + 6, Math.min(w - halfW - 6, (_vWorld.x * 0.5 + 0.5) * w))}px`;
-  n.style.top = `${Math.max(90, Math.min(h - 160, (-_vWorld.y * 0.5 + 0.5) * h))}px`;
+  n.style.left = `${(_vWorld.x * 0.5 + 0.5) * w}px`;
+  n.style.top = `${(-_vWorld.y * 0.5 + 0.5) * h}px`;
+  // ...and it is painted ON the barrier, so it grows as you walk to it. A
+  // label that stays the same size while the thing it labels gets bigger is a
+  // caption about the world, not a sign in it.
+  // Inverse of distance, the way a thing painted on the barrier behaves. The
+  // ceiling used to be 46 px, which it hit at 22 m — so for the entire second
+  // half of the walk it stopped growing and went back to reading as a caption.
+  const px = Math.max(10, Math.min(104, 1150 / Math.max(dist, 2.5)));
+  n.style.fontSize = `${px}px`;
+  // A fixed box that WRAPS, rather than one sized to the text: at a hundred
+  // pixels "STAND HERE" is eight hundred wide and ran off both edges. It
+  // breaks to two lines instead, which is what a sign that big does anyway.
+  n.style.width = '92vw';
+  n.style.marginLeft = '-46vw';
 }
 
 function tutorHand(kind, kind2) {
@@ -5835,6 +5863,23 @@ function tutorShowMeter(on) { if (el.slowmeter) el.slowmeter.style.display = on 
 // only when it is built mid-lesson, which it no longer is — hence no stray
 // airlock thump on the opening frame.
 const TUTOR_BAR_MAT = new THREE.MeshLambertMaterial({ color: 0x3b4148 });
+// The teaching hallway's formation: one at the corridor's centre, then one to
+// each side, all level and all the same distance beyond the barrier.
+function tutorEnsureBodies(want) {
+  const z = tutorBarrierZ() + TUTOR.enemyCells * HALL.cell;
+  const have = enemies.filter((e) => e.alive && e.hold).length;
+  const OFF = [0, -TUTOR.enemyX, TUTOR.enemyX];
+  let added = 0;
+  for (let i = have; i < want; i++) {
+    const e = tutorPlaceEnemy(z, OFF[i % OFF.length]);
+    if (e) added++;
+  }
+  if (!tutorMark || !tutorMark.alive || enemies.indexOf(tutorMark) < 0) {
+    tutorMark = enemies.find((e) => e.alive && e.hold) || null;
+  }
+  return added;
+}
+
 // A ramp area's enemies belong to the AREA, not to a step: it is the room
 // that is "the room with two in it", and the retry has to be able to rebuild
 // it without replaying the step that placed them.
@@ -6010,27 +6055,25 @@ function tutorClampX(x, z) {
   const b = (hi + 0.5) * C - HALL.wall / 2 - 0.55;
   return b > a ? Math.max(a, Math.min(b, x)) : (a + b) / 2;
 }
-function tutorPlaceEnemy(z, xOff = 0) {
-  spawnEnemy('gunner');
-  const e = enemies[enemies.length - 1];
-  if (!e) return null;
-  let x = player.pos.x + xOff;
-  const L = hall && hall.legs[hall.cur];
-  if (L && L.cells && L.cells.length) {
-    let minGx = Infinity, maxGx = -Infinity;
-    for (const [gx] of L.cells) { minGx = Math.min(minGx, gx); maxGx = Math.max(maxGx, gx); }
-    const C = HALL.cell;
-    // the cell run's floor, less half a wall and half a body at each end
-    const lo = (minGx - 0.5) * C + HALL.wall / 2 + 0.55;
-    const hi = (maxGx + 0.5) * C - HALL.wall / 2 - 0.55;
-    x = hi > lo ? Math.max(lo, Math.min(hi, x)) : (lo + hi) / 2;
-  }
-  e.hold = { x, z };
-  e.pos.set(x, 0, z);
-  e.g.position.set(x, 0, z);
-  return e;
-}
 
+// FROM THE CORRIDOR'S CENTRE, NOT THE PLAYER'S. Offsetting the formation from
+// wherever the player happened to be standing meant it moved with them: dodge
+// left and the left-hand man went into the wall with you, where he is both
+// invisible and unshootable, and `shoot` waits on `cleared`.
+function tutorCentreX(z) {
+  const L = hall && hall.legs[hall.cur];
+  if (!L || !L.cells) return player.pos.x;
+  const C = HALL.cell, gz = Math.round(z / C);
+  let lo = Infinity, hi = -Infinity;
+  for (const [gx, cgz] of L.cells) {
+    if (cgz !== gz) continue;
+    lo = Math.min(lo, gx); hi = Math.max(hi, gx);
+  }
+  return isFinite(lo) ? (lo + hi) / 2 * C : player.pos.x;
+}
+function tutorPlaceEnemy(z, xOff = 0) {
+  return tutorPlaceEnemyAt(tutorCentreX(z) + xOff, z, 'gunner');
+}
 // Everything the onboarding owns, put back. Called on EVERY initHall, not
 // just the ones that teach: a barrier left behind in a previous run was still
 // blocking the corridor in a normal game, and a body left holding station was
@@ -6110,12 +6153,8 @@ const tutorAfter = (id) => {
 };
 // A step's furniture is declared, not written into the transition that reaches
 // it — so the retry can re-enter a step and get exactly the same world, and so
-// the level tool can move `placeEnemy` to a different step without anybody
-// having to find the line that used to place him.
-// A step's furniture is declared, not written into the transition that reaches
-// it — so the retry can re-enter a step and get exactly the same world, and so
-// the level tool can move `placeEnemy` to a different step without anybody
-// having to find the line that used to place him.
+// the level tool can move a body to a different step without anybody having to
+// find the line that used to place him.
 function tutorNext(step) {
   tutorStep = step; tutorT = 0; tutorSub = 0;
   tutorFired = new Set();
@@ -6130,23 +6169,16 @@ function tutorNext(step) {
     tutorAnchorStep = step;
     tutorAnchor = { x: player.pos.x, z: player.pos.z, yaw: player.yaw, pitch: player.pitch };
     if (sp.buildBarrier) tutorBuildBarrier();
-    if (sp.placeEnemy) {
-      tutorMark = tutorPlaceEnemy(tutorBarrierZ() + TUTOR.enemyCells * HALL.cell);
-      tutorSub = TUTOR.aimBeat;
+    // HOW MANY SHOULD BE STANDING THERE — a state, topped up, not an
+    // instruction to add some. Walking forward from one body to three adds
+    // two; arriving after a death, when clearField has swept the corridor,
+    // builds all three. The steps used to say "place a squad", so every beat
+    // after the first declared nothing and a retry on it left an empty
+    // hallway — which `shoot`, waiting on `cleared`, considers finished.
+    if (sp.bodies) {
+      const added = tutorEnsureBodies(sp.bodies);
+      if (added) tutorSub = sp.hardFreeze ? TUTOR.aimBeat : TUTOR.volleyGap;
       tutorHardFreeze = !!sp.hardFreeze;
-    }
-    if (sp.placeSquad) {
-      // Abreast, INSIDE the corridor: ±2.4 m put the outer two through the
-      // walls of a one-cell leg, which has only ±1.7 m of floor and less
-      // than that once a body has a width of its own.
-      // Abreast and LEVEL. They used to be staggered 1.5 m in depth as well as
-      // offset, which at 22 m put the third man almost exactly behind the
-      // first: the lesson said three and the screen showed one.
-      const z = tutorBarrierZ() + TUTOR.enemyCells * HALL.cell;
-      for (let i = 1; i < TUTOR.finalEnemies; i++) {
-        tutorPlaceEnemy(z, i === 1 ? -TUTOR.enemyX : TUTOR.enemyX);
-      }
-      tutorSub = TUTOR.volleyGap;
     }
     if (sp.startMeter) {
       tutorMeterOn = true; tutorMeterEverShown = true; tutorMeterAt = 0;
@@ -6386,10 +6418,15 @@ function updateTutorial(dtReal, movedM, yawDelta) {
       if (!tutorAwaitShot && !tutorRound && tutorSub <= 0 && !tutorWorldHeld) {
         tutorSub = tutorAim(tutorMark) ? TUTOR.reshoot : 1;
       }
-      // `tutorFroze` is set by the time BUTTON. `input.holding` is how classic
-      // mode slows time. Accept either, so a build that somehow arrives here
-      // without a button cannot deadlock the world at timeScale 0.
-      if (tutorFroze || input.holding) { tutorHardFreeze = false; tutorEmit('freeze'); done(); }
+      // `tutorFroze` is set by the time BUTTON. In CLASSIC mode there is no
+      // button and any held finger slows time, so that counts instead — but
+      // ONLY in classic. `input.holding` is true whenever a finger is down at
+      // all, so accepting it in button mode meant the thumb still resting on
+      // the move stick from walking to the barrier satisfied this step on the
+      // frame it began: the prompt naming the control flashed for one frame
+      // and the player never saw what the button was for.
+      const slowedSomehow = tutorFroze || (timeMode !== 'toggle' && input.holding);
+      if (slowedSomehow) { tutorHardFreeze = false; tutorEmit('freeze'); done(); }
       break;
 
     case 'dodged':

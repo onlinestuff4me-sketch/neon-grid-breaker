@@ -92,6 +92,10 @@ const AFTER = TEACH_MOVES.reduce((a, [, n]) => (a.push(a[a.length - 1] + n), a),
 export const TEACH_MARKS = {
   firstCorner: AFTER[1],   // end of the opening straight
   secondRun: AFTER[3],     // ...and of the straight after the first turn
+  // THE LAST CORNER. Everything past it is one straight run to the door, so
+  // this is where the barrier first comes into view — and therefore where
+  // STAND HERE should appear, small, in the distance.
+  finalRun: AFTER[6],
   forkEnd: AFTER[8],       // where both routes rejoin: the barrier is measured here
 };
 
@@ -283,7 +287,11 @@ export const STEPS = [
   {
     id: 'dodge1', label: '5 · Slow time',
     advance: { kind: 'froze' },
-    grants: { timebtn: true }, placeEnemy: true, hardFreeze: true,
+    // `bodies` is how many should be STANDING THERE, not how many to add.
+    // Declaring it per beat is what lets a retry rebuild the world: the
+    // steps after this one used to declare nothing, so clearField() on a
+    // death emptied the corridor and re-entering the step put nobody back.
+    grants: { timebtn: true }, bodies: 1, hardFreeze: true,
     cues: [{ text: 'DODGE THE BULLET<span>TAP HERE TO SLOW TIME</span>',
       slot: 'atbtn', arrow: 'down', hand: 'none', pulse: true,
       on: 'enter', off: 'advance' }],
@@ -295,7 +303,7 @@ export const STEPS = [
   {
     id: 'dodgeMove', label: '5b · Move out of the way',
     advance: { kind: 'dodged', need: 1 },
-    grants: { timebtn: true },
+    grants: { timebtn: true }, bodies: 1,
     cues: [{ text: 'DRAG TO MOVE', slot: 'left', arrow: 'none', hand: 'up',
       pulse: false, on: 'enter', off: 'advance' }],
   },
@@ -305,7 +313,7 @@ export const STEPS = [
   {
     id: 'dodge3', label: '6 · Dodge three',
     advance: { kind: 'dodged', need: 3 },
-    grants: { timebtn: true }, placeSquad: true,
+    grants: { timebtn: true }, bodies: 3,
     // off:'advance', not off:'dodge'. It used to leave on the first of the
     // three, so rounds two and three arrived with a blank screen — the exact
     // failure goal 2 exists to prevent, in the lesson whose name is "three".
@@ -318,7 +326,7 @@ export const STEPS = [
   {
     id: 'meter', label: '7 · The meter',
     advance: { kind: 'resumed' },
-    grants: { timebtn: true, meter: true }, startMeter: true,
+    grants: { timebtn: true, meter: true }, bodies: 3, startMeter: true,
     cues: [
       { text: 'SLOW TIME METER<span>IT DRAINS WHILE TIME IS SLOW</span>',
         slot: 'top', arrow: 'up', hand: 'none',
@@ -336,13 +344,14 @@ export const STEPS = [
     advance: { kind: 'gunUp' },
     // gun: true so the rise is SEEN. Without it this step was 0.6 s of an
     // empty corridor and the weapon then popped into frame on the next one.
-    grants: { gun: true, timebtn: true, meter: true, bank: true }, raiseGun: true,
+    grants: { gun: true, timebtn: true, meter: true, bank: true }, bodies: 3, raiseGun: true,
     cues: [],
   },
   {
     id: 'shoot', label: '8b · Shoot',
     advance: { kind: 'cleared' },
     grants: { gun: true, fire: true, timebtn: true, meter: true, bank: true, ammo: true },
+    bodies: 3,
     cues: [{ text: 'TAP ANYWHERE TO SHOOT', slot: 'mid', arrow: 'none',
       hand: 'none', pulse: true, on: 'enter', off: 'advance' }],
   },
@@ -419,8 +428,7 @@ function normalise(steps) {
     advance: { kind: (s.advance && s.advance.kind) || 'none',
       need: s.advance && s.advance.need },
     grants: { ...NO_GRANTS, ...(s.grants || {}) },
-    placeEnemy: !!s.placeEnemy,
-    placeSquad: !!s.placeSquad,
+    bodies: s.bodies | 0,
     buildBarrier: !!s.buildBarrier,
     dropBarrier: !!s.dropBarrier,
     openDoor: !!s.openDoor,

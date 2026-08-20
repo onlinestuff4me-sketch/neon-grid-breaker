@@ -260,6 +260,16 @@ function stepCard(st, i) {
   idRow.append(field('id', idIn), field('name', lbIn));
   bd.appendChild(idRow);
 
+  const bodyRow = document.createElement('div'); bodyRow.className = 'grid2';
+  bodyRow.style.marginTop = '6px';
+  const bodIn = document.createElement('input');
+  bodIn.type = 'number'; bodIn.min = 0; bodIn.max = 6;
+  bodIn.value = st.bodies || 0;
+  bodIn.title = 'How many gunners should be STANDING in the teaching hallway '
+    + 'on this beat. Topped up, not appended — which is what lets a retry '
+    + 'rebuild the fight instead of leaving an empty corridor.';
+  bodIn.oninput = () => { st.bodies = parseInt(bodIn.value, 10) || 0; markDirty(); };
+
   const advRow = document.createElement('div'); advRow.className = 'grid2';
   advRow.style.marginTop = '6px';
   const kindSel = sel(st.advance.kind, ADVANCE_KINDS.map(([k, d]) => [k, `${k} — ${d}`]),
@@ -275,6 +285,8 @@ function stepCard(st, i) {
   };
   advRow.append(field('ends when', kindSel), field('threshold', needIn));
   bd.appendChild(advRow);
+  bodyRow.append(field('gunners standing here', bodIn), document.createElement('div'));
+  bd.appendChild(bodyRow);
 
   // --- 2. mechanics
   const mh = document.createElement('div'); mh.className = 'sub';
@@ -310,8 +322,7 @@ function stepCard(st, i) {
   // author some of what the game reads is a second source of truth.
   const FURNITURE = [
     ['buildBarrier', 'Raise the barrier', 'The wall-to-wall block the STAND HERE label hangs over.'],
-    ['placeEnemy', 'Place one gunner', 'One body enemyCells beyond the barrier.'],
-    ['placeSquad', 'Place the squad', 'finalEnemies − 1 more, abreast at ±enemyX.'],
+
     ['hardFreeze', 'Stop the world', 'Hold everything mid-telegraph until the time button is pressed.'],
     ['startMeter', 'Reveal the meter', 'The bar appears full and begins to drain.'],
     ['raiseGun', 'Raise the weapon', 'The viewmodel swings up on the reload rig.'],
