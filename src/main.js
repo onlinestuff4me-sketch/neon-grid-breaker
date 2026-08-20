@@ -1318,6 +1318,16 @@ const bulletMatCore = new THREE.MeshBasicMaterial({ color: 0xffffff });
 const bulletMatHalo = new THREE.MeshBasicMaterial({
   color: 0xff2d1a, transparent: true, opacity: 0.22, depthWrite: false,
 });
+// A DARK RIM ROUND THE ROUND. In bullet time the whole canvas runs through
+// `saturate(.5) sepia(.35) hue-rotate(-28deg)`: the corridor washes pale pink
+// and a red round with a red halo washes with it. Measured at 14 m during the
+// dodge lesson the incoming round was a smudge the same colour as the wall
+// behind it — on the one beat whose instruction is "dodge the bullet".
+// An inverted hull in near-black reads against a pale wash and against a dark
+// corridor equally, in both clocks, and costs one draw per enemy round.
+const bulletMatRim = new THREE.MeshBasicMaterial({
+  color: 0x14161a, side: THREE.BackSide,
+});
 
 // fromPlayer: opt = absolute speed (m/s), pierce = enemies it can pass through
 // enemy fire: opt = multiplier on the wave-scaled base speed
@@ -1335,7 +1345,9 @@ function spawnBullet(pos, dir, fromPlayer, opt = 0, pierce = 0) {
     core.position.z = 0.18;                  // the nose, not the whole round
     const halo = new THREE.Mesh(bulletShapeGeo, bulletMatHalo);
     halo.scale.set(1.9, 1.9, 1.25);
-    mesh.add(core, halo);
+    const rim = new THREE.Mesh(bulletShapeGeo, bulletMatRim);
+    rim.scale.set(1.5, 1.5, 1.1);
+    mesh.add(rim, core, halo);
   }
   scene.add(mesh);
   // TRACER RIBBON. This was a THREE.Line, and linewidth is a documented

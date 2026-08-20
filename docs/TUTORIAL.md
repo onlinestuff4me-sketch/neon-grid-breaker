@@ -218,6 +218,35 @@ Visibility is gated on the `finalRun` mark and on actually being on the walked
 path (the fork's second lane shares a z with the spine, so a spine *index*
 cannot tell them apart — `tutorNearestSpineDist()` can).
 
+## Five things you could not see
+
+The critics' visual pass found five, and four of them were the same mistake:
+something drawn in the game's red on a screen that bullet time washes pink.
+
+* **the round itself.** `body.slowmo` runs the canvas through
+  `saturate(.5) contrast(1.12) sepia(.35) hue-rotate(-28deg)`: the corridor
+  goes pale pink and a red round with a red halo goes with it. Measured at
+  14 m during the dodge lesson it was a smudge the colour of the wall behind
+  it — on the one beat whose instruction is *dodge the bullet*. Enemy rounds
+  now carry an inverted-hull rim in near-black, which reads against a pale wash
+  and a dark corridor equally, in both clocks, for one draw call each.
+* **the ammo readout.** Near-black ink at `bottom: 11vh`, which is inside the
+  bottom vignette bar — dark on dark, so the round count arrived on the
+  shooting lesson as three invisible characters. It gets the light halo every
+  other instruction on this screen already had.
+* **the arrow up at the meter.** A bare 24 px `▲` glyph — about eight pixels
+  of ink — sitting opposite a 42 px-wide drawn line with a travelling head.
+  The two halves of one idea did not read as one idea, and the arrow pointing
+  at the thing the whole lesson is about was the fainter of the two. It is
+  built the same way as its opposite now.
+* **the two hand coaches.** The move coach travelled up and vanished; the look
+  coach slid back and forth and never faded, on a different clock. In lesson 2
+  they are on screen together, level with each other, demonstrating two halves
+  of one idea. Both now fade in, travel once and fade out, together.
+* **orphan wraps.** `text-wrap: balance` on every cue slot: a half-width slot
+  breaking `DODGE THE BULLETS` wherever it happened to fit is a prompt that
+  looks like a mistake.
+
 ## Marks are derived, never typed
 
 A mark is a named cell on the walked path: `firstCorner`, `secondRun`,

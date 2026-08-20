@@ -74,8 +74,13 @@
   /* Clear of the bottom letterbox bar (7vh, 1.4x in bullet time): it used to
      sit at 18 px, dark-on-dark and half inside the black band, on the very
      beat the onboarding introduces it. */
+  /* ...WITH A HALO. 11vh puts it inside the bottom vignette bar, which is dark
+     in both clocks — so near-black ink on it was dark on dark, and the round
+     count arrived on the shooting lesson as three invisible characters. The
+     same treatment every other instruction on this screen gets. */
   #ammo { position:absolute; left:0; right:0; bottom:calc(env(safe-area-inset-bottom, 0px) + 11vh);
-          text-align:center; font-size:13px; font-weight:900; letter-spacing:.26em; color:#16181d; }
+          text-align:center; font-size:13px; font-weight:900; letter-spacing:.26em; color:#16181d;
+          text-shadow:0 1px 10px rgba(238,240,243,.9), 0 0 2px rgba(238,240,243,.75); }
   #ammo.shotgun { color:#ff2d1a; }
   #reloadbar { position:absolute; left:50%; transform:translateX(-50%);
                bottom:calc(env(safe-area-inset-bottom, 0px) + 8px);
@@ -261,7 +266,12 @@
      a single element that took its position from a class, which made DRAG TO
      MOVE and DRAG TO LOOK mutually exclusive — and the whole point of lesson 2
      is that looking is a SEPARATE action you do at the same time as moving. */
+  /* BALANCED, not orphaned. A half-width slot wraps DODGE THE BULLETS as
+     "DODGE THE / BULLETS" if it is lucky and "DODGE THE BULLET / S" shapes if
+     it is not; `balance` splits the lines evenly, which for two- and
+     three-word instructions is always the reading you want. */
   .tslot { position:absolute; text-align:center; font-weight:900;
+           text-wrap:balance;
            letter-spacing:.06em; color:#16181d; line-height:1.06;
            font-size:min(7.4vw,32px); opacity:0; padding:0 14px;
            transition:opacity .35s ease, transform .35s ease;
@@ -349,17 +359,28 @@
     25%  { opacity:1; }
     100% { opacity:0; transform:translateY(calc(100% + 100px)); }
   }
-  /* ...and its opposite, pointing UP at the meter that is emptying. */
-  #tutorup { position:absolute; left:0; right:0; text-align:center;
-             top:calc(env(safe-area-inset-top, 0px) + 74px);
-             font-size:24px; line-height:1; font-weight:900; color:#ff2d1a;
-             opacity:0; pointer-events:none;
-             text-shadow:0 2px 12px rgba(238,240,243,.8); }
-  #tutorup.on { opacity:1; animation:arrowrise 1.15s ease-in-out infinite; }
+  /* ...and its opposite, pointing UP at the meter that is emptying. BUILT THE
+     SAME WAY as the down arrow: a line with a travelling head. It used to be a
+     bare 24 px glyph — about eight pixels of actual ink — next to a 42 px-wide
+     drawn line, so the two halves of the same idea did not read as the same
+     idea, and the one pointing at the thing the whole lesson is about was the
+     fainter of the two. */
+  #tutorup { position:absolute; left:50%; width:42px; margin-left:-21px;
+             text-align:center;
+             top:calc(env(safe-area-inset-top, 0px) + 40px); height:72px;
+             opacity:0; pointer-events:none; transition:opacity .25s ease; }
+  #tutorup.on { opacity:1; }
+  #tutorup::before { content:''; position:absolute; left:50%; top:0; bottom:0;
+             width:5px; margin-left:-2.5px; border-radius:3px;
+             background:linear-gradient(0deg, rgba(255,45,26,0) 0%, #ff2d1a 22%, #ff2d1a 100%); }
+  #tutorup::after { content:'▲'; position:absolute; left:0; right:0; bottom:0;
+             font-size:38px; line-height:1; font-weight:900; color:#ff2d1a;
+             text-shadow:0 2px 12px rgba(238,240,243,.8);
+             animation:arrowrise 1.15s ease-in-out infinite; }
   @keyframes arrowrise {
-    0%   { opacity:0; transform:translateY(16px); }
-    30%  { opacity:1; }
-    100% { opacity:0; transform:translateY(-14px); }
+    0%   { opacity:0; transform:translateY(0); }
+    25%  { opacity:1; }
+    100% { opacity:0; transform:translateY(calc(-100% - 44px)); }
   }
 
   /* the simulated thumb: a soft disc with a ring, moved by keyframes */
@@ -370,13 +391,25 @@
   body.slowmo #tutorhand, body.slowmo #tutorhand2 { background:radial-gradient(circle, rgba(238,240,243,.42) 0%, rgba(238,240,243,.2) 55%, rgba(238,240,243,0) 70%);
                box-shadow:inset 0 0 0 2px rgba(238,240,243,.5); }
   #tutorhand.on, #tutorhand2.on { opacity:1; }
-  @keyframes handup   { 0% { transform:translateY(46px); }  60% { transform:translateY(-46px); } 100% { transform:translateY(-46px); opacity:0; } }
-  @keyframes handside { 0% { transform:translateX(52px); }  50% { transform:translateX(-52px); } 100% { transform:translateX(52px); } }
+  /* THE SAME GESTURE, TWICE, IN TWO DIRECTIONS. These behaved differently:
+     the move coach travelled up and vanished, the look coach slid back and
+     forth and never faded. In lesson 2 they are on screen together, level with
+     each other, demonstrating two halves of one idea — and they did not even
+     beat together. Both now fade in, travel once, and fade out, on the same
+     clock, so the pairing reads as a pairing. */
+  @keyframes handup   { 0% { transform:translateY(46px); opacity:0; }
+                        16% { opacity:.95; }
+                        70% { transform:translateY(-46px); opacity:.95; }
+                        100% { transform:translateY(-46px); opacity:0; } }
+  @keyframes handside { 0% { transform:translateX(52px); opacity:0; }
+                        16% { opacity:.95; }
+                        70% { transform:translateX(-52px); opacity:.95; }
+                        100% { transform:translateX(-52px); opacity:0; } }
   @keyframes handtap  { 0%,72% { transform:scale(1); opacity:.95; } 84% { transform:scale(.62); opacity:1; } 100% { transform:scale(1); opacity:.95; } }
   /* Level with each other: in lesson 2 the two prompts are level and the two
      hands were 100 px apart vertically, so the pairing did not read. */
   #tutorhand.up, #tutorhand2.up     { left:26%; top:58%; animation:handup 1.9s ease-in-out infinite; }
-  #tutorhand.side, #tutorhand2.side { left:74%; top:58%; animation:handside 2.3s ease-in-out infinite; }
+  #tutorhand.side, #tutorhand2.side { left:74%; top:58%; animation:handside 1.9s ease-in-out infinite; }
   #tutorhand.tap, #tutorhand2.tap   { animation:handtap 1.15s ease-in-out infinite; }
   /* the time button's grand entrance */
   @keyframes tbarrive { 0% { transform:scale(.2); opacity:0; }
@@ -563,7 +596,7 @@
   <div id="flash"></div>
   <div id="warn"></div>
   <div id="banner"></div>
-  <div id="tutor"><div id="tutorline"></div><div id="tutorhand"></div><div id="tutorhand2"></div><div id="tutorarrow"></div><div id="tutorup">▲</div><div id="ts-top" class="tslot top"></div><div id="ts-mid" class="tslot mid"></div><div id="ts-left" class="tslot left"></div><div id="ts-right" class="tslot right"></div><div id="ts-atbtn" class="tslot atbtn"></div><div id="ts-world" class="tslot world"></div></div>
+  <div id="tutor"><div id="tutorline"></div><div id="tutorhand"></div><div id="tutorhand2"></div><div id="tutorarrow"></div><div id="tutorup"></div><div id="ts-top" class="tslot top"></div><div id="ts-mid" class="tslot mid"></div><div id="ts-left" class="tslot left"></div><div id="ts-right" class="tslot right"></div><div id="ts-atbtn" class="tslot atbtn"></div><div id="ts-world" class="tslot world"></div></div>
   <div id="ammo">PISTOL · ∞</div>
   <div id="reloadbar"><div id="reloadfill"></div></div>
   <div id="pausebtn">❚❚</div>
