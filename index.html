@@ -307,7 +307,16 @@
   /* Centred on the anchor and lifted clear of it, so the words sit ON TOP of
      the barrier rather than growing down across it. `translate` rather than a
      negative margin, because the box wraps and its height is not known here. */
-  #ts-world { left:0; top:0; width:92vw; font-size:min(6.2vw,28px); line-height:1.02;
+  /* Sized to its text, so the box can be nudged back on screen by a few pixels
+     instead of a 92vw slab sliding bodily off the edge. */
+  /* PADDING IN EM, not pixels. The sign is scaled by setting its font-size to
+     whatever the barrier's projected width works out to, which only tracks the
+     barrier if every part of the box scales with the type — 28 px of fixed
+     side padding put a constant on the end of a proportional measurement and
+     the words drifted out of step with the slab they are painted on. */
+  #ts-world { left:0; top:0; width:max-content; max-width:94vw; white-space:nowrap;
+           padding:0 .34em;
+           font-size:min(6.2vw,28px); line-height:1.02;
            color:#ff2d1a; text-shadow:0 2px 16px rgba(238,240,243,.8);
            transition:opacity .35s ease; transform:translate(-50%, -108%); }
   body.slowmo #ts-world { text-shadow:0 2px 16px rgba(12,13,16,.9); }

@@ -20,6 +20,8 @@
 // ---------------------------------------------------------------------------
 
 // --- the numbers -----------------------------------------------------------
+import { planToCells } from './genleg.js';
+
 export const TUTOR = {
   hallCells: 7,         // default straight cells, when a leg does not say
   barrierCells: 6,      // cells from the fork's rejoin to the barrier
@@ -86,18 +88,55 @@ const TEACH_MOVES = [
   ['f', 5],    // ...and rejoins
   ['f', 14],   // 4-9. the barrier, the dodging, the shooting, the door
 ];
-// Cumulative spine index at the end of each move, so a mark is a count of
-// moves rather than a magic number.
-const AFTER = TEACH_MOVES.reduce((a, [, n]) => (a.push(a[a.length - 1] + n), a), [0]);
-export const TEACH_MARKS = {
-  firstCorner: AFTER[1],   // end of the opening straight
-  secondRun: AFTER[3],     // ...and of the straight after the first turn
-  // THE LAST CORNER. Everything past it is one straight run to the door, so
-  // this is where the barrier first comes into view — and therefore where
-  // STAND HERE should appear, small, in the distance.
-  finalRun: AFTER[6],
-  forkEnd: AFTER[8],       // where both routes rejoin: the barrier is measured here
-};
+// --- marks: named cells on the walked path ---------------------------------
+// DERIVED, NEVER TYPED. A mark is a place in the lesson — "the first corner",
+// "where the fork rejoins" — and the level tool lets the path be redrawn. Held
+// as literals they went stale the instant it was: redrawing the teaching leg
+// in the tool left the barrier standing 24 m inside solid rock, with lesson 4
+// waiting for the player to reach a cell the corridor no longer had and the
+// STAND HERE sign gated off a spine index the leg no longer reached. Nothing
+// on screen, no way forward, no error.
+//
+// So they are computed from the plan, every load, for every leg — which means
+// a path edit cannot strand them and the tool needs no control for them.
+export function marksFromPlan(plan) {
+  const moves = (plan && plan.moves) || [];
+  let n = 0;
+  const runs = [];
+  for (const m of moves) {
+    const dir = String((m && m[0]) || 'f');
+    n += Math.max(0, (m && m[1]) | 0);
+    runs.push({ dir, at: n });
+  }
+  const fwd = runs.filter((r) => r.dir === 'f');
+  const turns = runs.filter((r) => r.dir !== 'f');
+  const marks = {
+    firstCorner: fwd.length ? fwd[0].at : n,          // end of the opening straight
+    secondRun: fwd.length > 1 ? fwd[1].at : n,        // ...and of the next one
+    // THE LAST CORNER. Everything past it is one straight run to the door, so
+    // it is where the barrier first comes into view — and therefore where the
+    // STAND HERE sign is allowed to appear, small, in the distance.
+    finalRun: turns.length ? turns[turns.length - 1].at : 0,
+    forkEnd: n,   // ...the end of the walk, unless a side lane rejoins sooner
+  };
+  // The rejoin is the one mark the moves alone cannot state, because the fork's
+  // second lane is `extra` cells hanging off the spine. It is the furthest cell
+  // of the walked path that any of them touches.
+  const extra = (plan && plan.extra) || [];
+  if (extra.length) {
+    const { spine } = planToCells(0, 0, moves);
+    let best = -1;
+    for (const [ex, ez] of extra) {
+      for (let i = 0; i < spine.length; i++) {
+        if (Math.abs(spine[i][0] - ex) + Math.abs(spine[i][1] - ez) <= 1) {
+          best = Math.max(best, i);
+        }
+      }
+    }
+    if (best > 0) marks.forkEnd = best;
+  }
+  return marks;
+}
 
 // The fork's second lane: out to the right at the split, forward alongside,
 // and back in at the rejoin. Both routes reach the same place, which is the
@@ -110,6 +149,8 @@ const FORK_LANE = [
 
 // A room is the spine plus width. Three cells across and four deep reads as a
 // room on a portrait phone without becoming a space you can get lost in.
+export const TEACH_MARKS = marksFromPlan({ moves: TEACH_MOVES, extra: FORK_LANE });
+
 const room = (halfW, z0, z1) => {
   const out = [];
   for (let x = -halfW; x <= halfW; x++) {
@@ -125,7 +166,6 @@ export const LEGS = [
     note: 'Lessons 1-9. Straight run, right turn, two more turns, a fork that '
       + 'rejoins, then the hallway where the whole combat lesson happens.',
     plan: { moves: TEACH_MOVES, extra: FORK_LANE, approach: 4 },
-    marks: TEACH_MARKS,
   },
   // WITHIN ENGAGE RANGE OF THE DOOR YOU COME IN THROUGH. A gunner's
   // engageDist is 19-25 m; bodies parked at z 7-10 stood 28 m from the entry,
@@ -159,8 +199,12 @@ export const LEGS = [
       { x: 0, z: 8, type: 'gunner' }], fireOrder: 'free' },
   { id: 'hall3', form: 'corridor', kind: 'hall', note: '15. Three: one, then two close behind.',
     plan: { moves: [['f', 11]], approach: 3 },
-    enemies: [{ x: 0, z: 4, type: 'gunner' }, { x: -0.24, z: 8, type: 'gunner' },
-      { x: 0.24, z: 9, type: 'gunner' }], fireOrder: 'turns' },
+    // NONE OF THEM ON THE CENTRE LINE. The leading man stood at x 0 and the
+    // third at x 0.24 nine cells back — 1.5° apart from the door, so he was
+    // hidden inside the silhouette of the man in front of him until the first
+    // one dropped. Spread across the corridor they read as three.
+    enemies: [{ x: -0.28, z: 4, type: 'gunner' }, { x: 0.28, z: 8, type: 'gunner' },
+      { x: -0.12, z: 10, type: 'gunner' }], fireOrder: 'turns' },
 ];
 
 // --- what the player is allowed to do --------------------------------------
@@ -192,8 +236,10 @@ const PLAYING = { gun: true, fire: true, timebtn: true, meter: true,
 // --- when a cue comes and goes ---------------------------------------------
 export const CUE_EVENTS = [
   ['enter',   'the step begins'],
+  ['held',    'the world stops mid-telegraph'],
   ['freeze',  'the player stops time'],
   ['dodge',   'a round goes past them'],
+  ['kill',    'they drop one'],
   ['meter',   'the meter warning lands'],
   ['resume',  'the player lets time run again'],
   ['advance', 'the step ends'],
@@ -240,7 +286,7 @@ export const STEPS = [
   // that leaves while somebody is still working out what it meant.
   {
     id: 'move', label: '1 · Move',
-    advance: { kind: 'reached', need: TEACH_MARKS.firstCorner },
+    advance: { kind: 'reached', need: 'firstCorner' },
     grants: {}, divider: true,
     cues: [{ text: 'DRAG TO MOVE', slot: 'left', arrow: 'none', hand: 'up',
       pulse: false, on: 'enter', off: 'advance' }],
@@ -250,7 +296,7 @@ export const STEPS = [
   // action that happens at the same time as moving, not a mode you enter.
   {
     id: 'look', label: '2 · Look',
-    advance: { kind: 'reached', need: TEACH_MARKS.secondRun },
+    advance: { kind: 'reached', need: 'secondRun' },
     grants: {}, divider: true,
     cues: [
       { text: 'DRAG TO MOVE', slot: 'left', arrow: 'none', hand: 'up',
@@ -262,7 +308,7 @@ export const STEPS = [
   // --- 3. CORNERS AND A FORK ----------------------------------------------
   {
     id: 'corners', label: '3 · Corners + fork',
-    advance: { kind: 'reached', need: TEACH_MARKS.forkEnd },
+    advance: { kind: 'reached', need: 'forkEnd' },
     grants: {}, divider: false,
     cues: [
       { text: 'DRAG TO MOVE', slot: 'left', arrow: 'none', hand: 'up',
@@ -292,9 +338,15 @@ export const STEPS = [
     // steps after this one used to declare nothing, so clearField() on a
     // death emptied the corridor and re-entering the step put nobody back.
     grants: { timebtn: true }, bodies: 1, hardFreeze: true,
+    // ON `held`, NOT ON `enter`. The prompt used to appear the instant the
+    // gunner did — 2.6 s before the world stopped — and the button was live
+    // for that whole window. Tapping in it satisfied the step, so the freeze,
+    // the telegraph and the entire "nothing moves until you press this"
+    // lesson were skipped by a player doing exactly what the screen said.
+    // The words arrive WITH the stopped world, which is the beat.
     cues: [{ text: 'DODGE THE BULLET<span>TAP HERE TO SLOW TIME</span>',
       slot: 'atbtn', arrow: 'down', hand: 'none', pulse: true,
-      on: 'enter', off: 'advance' }],
+      on: 'held', off: 'advance' }],
   },
   // --- 5b. ...NOW MOVE OUT OF THE WAY --------------------------------------
   // Time is slow and the round is coming. The prompt is the one they already
@@ -333,7 +385,12 @@ export const STEPS = [
         pulse: false, on: 'enter', off: 'advance' },
       // ...and what refills it, which is the fact that makes the meter make
       // sense and was never stated anywhere.
-      { text: 'TAP TO LET TIME RUN<span>IT REFILLS WHEN TIME RUNS</span>',
+      // "IT REFILLS WHEN TIME RUNS" was simply false — the bank refills on
+      // KILLS (killEnemy, main.js), and at this point in the lesson there is
+      // no gun. What is true is that it is finite, which is the whole reason
+      // the bar is on the screen. The refill is taught by the shooting lesson,
+      // where it is both true and demonstrable.
+      { text: 'TAP AGAIN TO LET TIME RUN<span>SLOW TIME IS LIMITED</span>',
         slot: 'atbtn', arrow: 'down', hand: 'none',
         pulse: true, on: 'meter', off: 'advance' },
     ],
@@ -352,8 +409,17 @@ export const STEPS = [
     advance: { kind: 'cleared' },
     grants: { gun: true, fire: true, timebtn: true, meter: true, bank: true, ammo: true },
     bodies: 3,
-    cues: [{ text: 'TAP ANYWHERE TO SHOOT', slot: 'mid', arrow: 'none',
-      hand: 'none', pulse: true, on: 'enter', off: 'advance' }],
+    cues: [
+      { text: 'TAP ANYWHERE TO SHOOT', slot: 'mid', arrow: 'none',
+        hand: 'none', pulse: true, on: 'enter', off: 'advance' },
+      // ON THE FIRST KILL, not on entry — so it is not a second lesson being
+      // taught alongside the first, it is the consequence of the first one
+      // landing, named at the moment the player can see it happen. This is
+      // where the meter's other half belongs: lesson 7 can only honestly say
+      // the bar is finite, because at lesson 7 there is nothing to kill.
+      { text: 'KILLS REFILL THE METER', slot: 'top', arrow: 'up',
+        hand: 'none', pulse: false, on: 'kill', off: 'advance' },
+    ],
   },
   // --- 9. THE DOOR ---------------------------------------------------------
   {
@@ -403,7 +469,7 @@ export function previewing(search) {
 // Merged rather than replaced, so a spec written by an older build of the tool
 // still boots: anything it does not mention keeps the shipped value.
 export function loadTutorial(search) {
-  const spec = { TUTOR: { ...TUTOR }, LEGS: clone(LEGS), STEPS: clone(STEPS) };
+  const spec = { TUTOR: { ...TUTOR }, LEGS: normaliseLegs(LEGS), STEPS: normalise(STEPS) };
   if (!previewing(search)) return spec;
   let raw = null;
   try { raw = localStorage.getItem(OVERRIDE_KEY); } catch { /* private */ }
@@ -411,7 +477,7 @@ export function loadTutorial(search) {
   try {
     const o = JSON.parse(raw);
     if (o && o.TUTOR) Object.assign(spec.TUTOR, o.TUTOR);
-    if (o && Array.isArray(o.LEGS) && o.LEGS.length) spec.LEGS = clone(o.LEGS);
+    if (o && Array.isArray(o.LEGS) && o.LEGS.length) spec.LEGS = normaliseLegs(o.LEGS);
     if (o && Array.isArray(o.STEPS) && o.STEPS.length) spec.STEPS = normalise(o.STEPS);
   } catch (err) {
     console.warn('[tutorial] override ignored:', err && err.message);
@@ -419,11 +485,61 @@ export function loadTutorial(search) {
   return spec;
 }
 
+// A LEG OFF THE TOOL IS AS UNTRUSTED AS A STEP. It used to be cloned raw, so
+// `moves: 'forward'` — a string where a list of moves belongs — built a
+// one-cell corridor rather than being refused, and any hand-edited leg could
+// put a NaN into the geometry. Everything is coerced to the shape genleg reads
+// and the marks are recomputed from whatever path survives that.
+export function normaliseLegs(legs) {
+  return (legs || []).map((l) => {
+    const src = l && l.plan ? l.plan : null;
+    const moves = (Array.isArray(src && src.moves) ? src.moves : [])
+      .map((m) => [String((m && m[0]) || 'f'), Math.max(0, (m && m[1]) | 0)])
+      .filter(([dir, n]) => n > 0 && 'flrb'.includes(dir));
+    const cellList = (v) => (Array.isArray(v) ? v : [])
+      .filter((c) => Array.isArray(c) && isFinite(c[0]) && isFinite(c[1]))
+      .map((c) => [+c[0], +c[1]]);
+    const plan = src ? {
+      ...src,
+      moves: moves.length ? moves : [['f', Math.max(1, TUTOR.hallCells)]],
+      extra: cellList(src.extra),
+      pillars: cellList(src.pillars),
+      approach: Math.max(1, (src.approach | 0) || 4),
+    } : null;
+    const out = {
+      ...l,
+      id: String((l && l.id) || 'leg'),
+      form: (l && l.form) || 'corridor',
+      barrier: !!(l && l.barrier),
+      enemies: ((l && l.enemies) || [])
+        .filter((e) => e && isFinite(e.x) && isFinite(e.z))
+        .map((e) => ({ x: +e.x, z: +e.z, type: String(e.type || 'gunner') })),
+      fireOrder: (l && l.fireOrder) === 'turns' ? 'turns' : 'free',
+    };
+    if (plan) { out.plan = plan; out.marks = marksFromPlan(plan); }
+    else delete out.marks;   // no path, no marks: main.js falls back on distance
+    return out;
+  });
+}
+
 // An edited step may be missing anything, including its cue list. Fill it in
 // rather than letting a half-written step throw inside the frame loop.
 function normalise(steps) {
+  // TWO STEPS WITH THE SAME ID MAKE THE SEQUENCE A LOOP. `tutorAfter` and
+  // `tutorSpecOf` both take the FIRST match, so renaming step 7 to `stand` in
+  // the tool produced move → look → corners → stand → dodge1 → dodgeMove →
+  // stand → … for as long as anybody cared to watch: an onboarding that can
+  // never be finished, with nothing on screen to say why. Ids are made unique
+  // on the way in, and the tool warns about the collision separately.
+  const seen = new Set();
+  const uniq = (id) => {
+    let out = id, n = 2;
+    while (seen.has(out)) out = `${id}-${n++}`;
+    seen.add(out);
+    return out;
+  };
   return steps.map((s) => ({
-    id: String(s.id || 'step'),
+    id: uniq(String(s.id || 'step')),
     label: s.label || s.id || 'Step',
     advance: { kind: (s.advance && s.advance.kind) || 'none',
       need: s.advance && s.advance.need },
