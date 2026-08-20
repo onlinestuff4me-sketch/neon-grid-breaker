@@ -6122,11 +6122,13 @@ function tutorNext(step) {
   tutorHardFreeze = false;
   const sp = tutorSpecOf(step);
   if (sp) {
-    // where to put them back if this beat is failed
-    if (sp.checkpoint || sp.placeEnemy) {
-      tutorAnchorStep = step;
-      tutorAnchor = { x: player.pos.x, z: player.pos.z, yaw: player.yaw, pitch: player.pitch };
-    }
+    // WHERE TO PUT THEM BACK IF THIS BEAT IS FAILED — every beat, not just the
+    // ones that place a body. Anchoring only on `placeEnemy` meant one death
+    // during the shooting lesson cost the freeze, all three dodges and the
+    // meter lesson again: about forty-five seconds of replaying things the
+    // player had already proved. Goal 4 says the current area and no further.
+    tutorAnchorStep = step;
+    tutorAnchor = { x: player.pos.x, z: player.pos.z, yaw: player.yaw, pitch: player.pitch };
     if (sp.buildBarrier) tutorBuildBarrier();
     if (sp.placeEnemy) {
       tutorMark = tutorPlaceEnemy(tutorBarrierZ() + TUTOR.enemyCells * HALL.cell);
@@ -6137,15 +6139,24 @@ function tutorNext(step) {
       // Abreast, INSIDE the corridor: ±2.4 m put the outer two through the
       // walls of a one-cell leg, which has only ±1.7 m of floor and less
       // than that once a body has a width of its own.
+      // Abreast and LEVEL. They used to be staggered 1.5 m in depth as well as
+      // offset, which at 22 m put the third man almost exactly behind the
+      // first: the lesson said three and the screen showed one.
       const z = tutorBarrierZ() + TUTOR.enemyCells * HALL.cell;
       for (let i = 1; i < TUTOR.finalEnemies; i++) {
-        tutorPlaceEnemy(z + (i - 1) * 1.5, i === 1 ? -TUTOR.enemyX : TUTOR.enemyX);
+        tutorPlaceEnemy(z, i === 1 ? -TUTOR.enemyX : TUTOR.enemyX);
       }
       tutorSub = TUTOR.volleyGap;
     }
     if (sp.startMeter) {
       tutorMeterOn = true; tutorMeterEverShown = true; tutorMeterAt = 0;
       slowBank = SLOWMO.cap; updateSlowMeter();
+      // THE LESSON IS WATCHING IT DRAIN, so time is slow whether or not they
+      // arrived that way. A player who tapped the button off one beat early
+      // used to pass this step at 1.6 s with the bar sitting at 100% — the
+      // only explanation of the resource the whole game is built on, skipped
+      // by not doing it.
+      if (!timeLocked) setTimeLocked(true);
     }
     if (sp.raiseGun) { gunRiseT = TUTOR.gunRise; game.noFireBefore = 0; }
     if (sp.dropBarrier) tutorDropBarrier();
@@ -6338,7 +6349,14 @@ function updateTutorial(dtReal, movedM, yawDelta) {
   if (tutorMeterOn && timeLocked) {
     const frac = slowBank / SLOWMO.cap;
     if (frac > TUTOR.meterFloor) {
-      const rate = SLOWMO.cap / (frac > TUTOR.meterKnee ? TUTOR.meterSecs : TUTOR.meterCrawlSecs);
+      // meterSecs is FULL TO THE KNEE, which is what its comment always said
+      // and what the code never did: `cap / meterSecs` is a full-to-empty
+      // rate, so the first half went in 3.5 s instead of 7 and the bar the
+      // player is being introduced to was half gone before they read the
+      // sentence about it.
+      const rate = frac > TUTOR.meterKnee
+        ? SLOWMO.cap * (1 - TUTOR.meterKnee) / TUTOR.meterSecs
+        : SLOWMO.cap * (TUTOR.meterKnee - TUTOR.meterFloor) / TUTOR.meterCrawlSecs;
       slowBank = Math.max(SLOWMO.cap * TUTOR.meterFloor, slowBank - dtReal * rate);
       updateSlowMeter();
     }
@@ -6388,7 +6406,11 @@ function updateTutorial(dtReal, movedM, yawDelta) {
         tutorMeterSaid = true;
         tutorEmit('meter');
       }
-      if (tutorMeterSaid && !timeLocked) { tutorEmit('resume'); done(); }
+      // ...and it is not over until the bar has visibly gone somewhere. Goal 4:
+      // the step ends on success, and success here is having SEEN it drain.
+      if (tutorMeterSaid && slowBank <= SLOWMO.cap * TUTOR.meterKnee && !timeLocked) {
+        tutorEmit('resume'); done();
+      }
       break;
 
     case 'gunUp':
@@ -6398,6 +6420,10 @@ function updateTutorial(dtReal, movedM, yawDelta) {
     case 'cleared':
       // never let them run dry while they are learning to pull the trigger
       if (player.mag <= 0 && player.reloadT <= 0) {
+        // the PISTOL back, not just rounds for whatever is in hand: emptying a
+        // magazine drops you to the knife, and finishing the shooting lesson
+        // holding a knife reading KNIFE · NO AMMO is not the lesson
+        if (player.weapon === 'knife') setWeapon('pistol');
         player.mag = WEAPONS[player.weapon].mag;
         player.clips = Math.max(player.clips, 1);
         updateAmmoHud();
@@ -8643,7 +8669,8 @@ window.__ts = {
   game, player, enemies, bullets, pickups, ripples, camera, input, obstacles, crowd,
   sprint: () => sprintTo,
   audio: () => sfx.debug(), sfx,
-  slow: () => ({ bank: +slowBank.toFixed(2), locked: timeLocked, mode: timeMode }),
+  slow: () => ({ bank: +slowBank.toFixed(2), cap: SLOWMO.cap, base: SLOWMO.base,
+    frac: +(slowBank / SLOWMO.cap).toFixed(3), locked: timeLocked, mode: timeMode }),
   setSlow: (v) => { slowBank = v; updateSlowMeter(); },
   look: applyLook,   // inject a look sample exactly as the pointer handler does
   lookStats: () => ({ ...lookStats, pending: +Math.hypot(lookPendX, lookPendY).toFixed(2) }),
@@ -8690,6 +8717,7 @@ window.__ts = {
     meterSaid: tutorMeterSaid, deadPending: tutorDeadPending,
     awaitShot: tutorAwaitShot, froze: tutorFroze,
     anchor: tutorAnchor && { x: +tutorAnchor.x.toFixed(2), z: +tutorAnchor.z.toFixed(2) },
+    anchorStep: tutorAnchorStep,
     legIx: tutorLegIx, spineIx: tutorSpineIx, held: tutorWorldHeld,
     barrierZ: tutorBar ? +tutorBar.z.toFixed(1) : null,
     moved: +tutorMoved.toFixed(2), looked: +tutorLooked.toFixed(2) }),

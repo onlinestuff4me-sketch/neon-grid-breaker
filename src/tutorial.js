@@ -44,7 +44,10 @@ export const TUTOR = {
   // slows to a crawl, and never goes below a quarter: the player is being
   // taught that time is finite, not put in a hole they cannot climb out of
   // before anyone has told them how.
-  meterSecs: 7,         // full to half, in seconds
+  meterSecs: 7,         // full to the knee, in seconds. The code used to read
+                        // this as full-to-EMPTY, so the half the player is
+                        // being introduced to went in 3.5 s.
+
   meterCrawlSecs: 70,   // ...and the rate below that
   meterKnee: 0.5,
   meterFloor: 0.25,
@@ -317,7 +320,7 @@ export const STEPS = [
     advance: { kind: 'resumed' },
     grants: { timebtn: true, meter: true }, startMeter: true,
     cues: [
-      { text: 'SLOW TIME METER<span>IT EMPTIES WHILE TIME IS SLOW</span>',
+      { text: 'SLOW TIME METER<span>IT DRAINS WHILE TIME IS SLOW</span>',
         slot: 'top', arrow: 'up', hand: 'none',
         pulse: false, on: 'enter', off: 'advance' },
       // ...and what refills it, which is the fact that makes the meter make

@@ -71,7 +71,10 @@
             display:flex; justify-content:space-between; align-items:flex-start;
             font-weight:800; letter-spacing:.12em; color:#16181d; font-size:14px; }
 
-  #ammo { position:absolute; left:0; right:0; bottom:calc(env(safe-area-inset-bottom, 0px) + 18px);
+  /* Clear of the bottom letterbox bar (7vh, 1.4x in bullet time): it used to
+     sit at 18 px, dark-on-dark and half inside the black band, on the very
+     beat the onboarding introduces it. */
+  #ammo { position:absolute; left:0; right:0; bottom:calc(env(safe-area-inset-bottom, 0px) + 11vh);
           text-align:center; font-size:13px; font-weight:900; letter-spacing:.26em; color:#16181d; }
   #ammo.shotgun { color:#ff2d1a; }
   #reloadbar { position:absolute; left:50%; transform:translateX(-50%);
@@ -283,7 +286,11 @@
      instead, into clear frame, in the button's own red, pulsing with it. */
   #ts-atbtn { left:0; right:0; top:42%; font-size:min(6.6vw,30px); color:#ff2d1a;
            text-shadow:0 2px 18px rgba(238,240,243,.75); }
-  body.slowmo #ts-atbtn { color:#ff5d4a; text-shadow:0 2px 18px rgba(12,13,16,.8); }
+  /* In bullet time the corridor is a white-red wash and red-on-it measured
+     badly — and these are the two prompts carrying the mechanic being taught.
+     A tight dark outline plus the soft glow, so they read on either grade. */
+  body.slowmo #ts-atbtn { color:#ff6a56;
+     text-shadow:0 0 3px #0c0d10, 0 0 3px #0c0d10, 0 2px 18px rgba(12,13,16,.95); }
 
   /* the meter's own sentence, directly under the bar it is about */
   /* Clear of the letterbox. .lbar is 7vh scaled 1.4 = ~86 px in bullet time,
@@ -291,7 +298,8 @@
   #ts-top   { left:0; right:0; top:calc(env(safe-area-inset-top, 0px) + 104px);
            font-size:min(5.4vw,24px); color:#ff2d1a;
            text-shadow:0 2px 18px rgba(238,240,243,.75); }
-  body.slowmo #ts-top { text-shadow:0 2px 18px rgba(12,13,16,.85); }
+  body.slowmo #ts-top { color:#ff6a56;
+     text-shadow:0 0 3px #0c0d10, 0 0 3px #0c0d10, 0 2px 18px rgba(12,13,16,.95); }
 
   /* WORLD-ANCHORED. Positioned every frame from a projected point, so STAND
      HERE hangs over the barrier and grows as you walk up to it — which is the
