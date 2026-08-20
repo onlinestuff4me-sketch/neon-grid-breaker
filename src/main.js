@@ -5813,7 +5813,10 @@ function tutorPlaceWorldCue() {
   // whole of lessons 1-3, hanging over blank walls three corners away from
   // the barrier it names.
   if (!n.classList.contains('show') || !tutorBar) { n.style.visibility = 'hidden'; return; }
-  const ax = tutorBar.m.position.x, ay = TUTOR.barrierH + 1.05, az = tutorBar.z;
+  // Anchored at the TOP EDGE of the barrier: the label is a sign mounted on
+  // it, and the box is shifted up by its own height (see the transform below)
+  // so the words sit above the slab instead of growing down over it.
+  const ax = tutorBar.m.position.x, ay = TUTOR.barrierH + 0.12, az = tutorBar.z;
   // BEHIND THE PLAYER, ROUND A CORNER, OR THROUGH A WALL — all of them mean
   // it is not on screen. It used to be clamped into the frame instead, which
   // made a label on a barrier follow the player around the corridor and hang
@@ -5841,13 +5844,12 @@ function tutorPlaceWorldCue() {
   // Inverse of distance, the way a thing painted on the barrier behaves. The
   // ceiling used to be 46 px, which it hit at 22 m — so for the entire second
   // half of the walk it stopped growing and went back to reading as a caption.
-  const px = Math.max(10, Math.min(104, 1150 / Math.max(dist, 2.5)));
+  // Inverse of distance, so it behaves like paint on the barrier — but capped
+  // well short of the screen. At 104 px it filled the frame and completely
+  // eclipsed the slab it was naming, which is worse than a caption: the
+  // player could no longer see the thing they were being told to stand at.
+  const px = Math.max(11, Math.min(46, 620 / Math.max(dist, 3)));
   n.style.fontSize = `${px}px`;
-  // A fixed box that WRAPS, rather than one sized to the text: at a hundred
-  // pixels "STAND HERE" is eight hundred wide and ran off both edges. It
-  // breaks to two lines instead, which is what a sign that big does anyway.
-  n.style.width = '92vw';
-  n.style.marginLeft = '-46vw';
 }
 
 function tutorHand(kind, kind2) {

@@ -304,15 +304,20 @@
   /* WORLD-ANCHORED. Positioned every frame from a projected point, so STAND
      HERE hangs over the barrier and grows as you walk up to it — which is the
      difference between a label on a thing and a caption about a thing. */
-  #ts-world { left:0; top:0; width:220px; margin-left:-110px; font-size:min(6.2vw,28px);
+  /* Centred on the anchor and lifted clear of it, so the words sit ON TOP of
+     the barrier rather than growing down across it. `translate` rather than a
+     negative margin, because the box wraps and its height is not known here. */
+  #ts-world { left:0; top:0; width:92vw; font-size:min(6.2vw,28px); line-height:1.02;
            color:#ff2d1a; text-shadow:0 2px 16px rgba(238,240,243,.8);
-           transition:opacity .35s ease; transform:none; }
-  body.slowmo #ts-world { text-shadow:0 2px 16px rgba(12,13,16,.85); }
+           transition:opacity .35s ease; transform:translate(-50%, -108%); }
+  body.slowmo #ts-world { text-shadow:0 2px 16px rgba(12,13,16,.9); }
 
   /* It used to dip to 32%, which meant every critical instruction — STAND
      HERE, TAP HERE TO SLOW TIME — was half-absent on a 1.05 s loop. A prompt
      that is gone half the time is a prompt on a timer. It breathes now. */
   @keyframes tutorpulse { 0%,100% { opacity:1; } 50% { opacity:.78; } }
+  /* the world label's transform IS its placement, so it never animates */
+  #ts-world.pulse.show { animation:tutorpulse 1.05s ease-in-out infinite; }
   .tslot.pulse.show { animation:tutorpulse 1.05s ease-in-out infinite; }
 
   /* Straight down at the button, from directly above it. A LINE, not a floating
