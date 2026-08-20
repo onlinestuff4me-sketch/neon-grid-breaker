@@ -84,6 +84,17 @@
   #tutmapbar .lg{padding:3px 8px;font-size:10.5px}
   #tutmapbar button.on{background:var(--red);border-color:var(--red);color:#fff}
   .legrow .r1 button{padding:4px 7px;line-height:1;flex:none}
+  /* WHAT THIS SPEC WILL DO WRONG, said out loud. Every one of these was found
+     by playing an edited tutorial until it stopped, with nothing on screen to
+     say why: a renamed step that made the sequence cycle for ever, a cue hung
+     on an event its step never fires, a barrier nobody raises for a step that
+     waits to reach one. */
+  #tutwarn{padding:0 13px;display:none}
+  #tutwarn.on{display:block;padding:9px 13px 2px}
+  #tutwarn div{background:#2a1a12;border:1px solid #7a4a20;color:#ffbb84;
+       border-radius:6px;padding:6px 9px;font-size:11px;line-height:1.35;
+       margin-bottom:6px}
+  #tutwarn div b{color:#ffd9b8}
   #tutsteps{overflow-y:auto;padding:11px 13px}
   #tutprev{border-left:1px solid var(--line);background:#0a0b0e;display:flex;
        flex-direction:column;overflow:hidden}
@@ -234,6 +245,7 @@
         <div id="tutmapbar"></div>
         <div id="tutmaphud"></div>
       </div>
+      <div id="tutwarn"></div>
       <div id="tutsteps"></div>
     </div>
     <div id="tutprev">

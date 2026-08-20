@@ -32,7 +32,14 @@ let cv = null, ctx = null;
 let px = 0, py = 0, zoom = 14;
 let tool = 'floor';
 let drag = null, panning = false, sel = null;
+// WHAT KIND OF MAN. This was declared and never assigned, so every enemy the
+// tutorial map placed was a gunner and the leg's `type` field — which the game
+// reads on every placement — could only be changed by editing src/tutorial.js.
+// The LEVELS pane's own type picker is display:none in TUTORIAL mode, so there
+// was nothing to assign it from either.
 let etype = 'gunner';
+const ETYPES = ['gunner', 'rusher', 'heavy', 'shotgunner', 'armored', 'sniper',
+  'bomber', 'shieldbearer', 'rocketeer', 'laser'];
 
 const TOOLS = [
   ['floor',  'Floor',  '#39404b'],
@@ -360,6 +367,26 @@ function buildBar() {
     b.onclick = () => { tool = id; buildBar(); };
     bar.appendChild(b);
   }
+  // ...and which kind, for the Enemy tool
+  const ty = document.createElement('select');
+  ty.title = 'What the Enemy tool places, and what a selected enemy becomes.';
+  ty.style.cssText = 'font-size:11px;margin-left:6px';
+  for (const t of ETYPES) {
+    const o = document.createElement('option');
+    o.value = t; o.textContent = t; o.selected = t === etype;
+    ty.appendChild(o);
+  }
+  ty.onchange = () => {
+    etype = ty.value;
+    // a selected body changes kind with it, which is how you fix one you have
+    // already placed without deleting and re-placing it
+    const L = spec.LEGS[legIx];
+    if (sel && sel.kind === 'spawn' && L && L.enemies && L.enemies[sel.i]) {
+      L.enemies[sel.i].type = etype;
+      onChange(false); draw();
+    }
+  };
+  bar.appendChild(ty);
   const f = document.createElement('button');
   f.textContent = '⤢'; f.title = 'Fit the leg to the pane';
   f.onclick = () => { fit(); draw(); };

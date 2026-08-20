@@ -6141,25 +6141,45 @@ function tutorPlaceEnemyAt(x, z, type = 'gunner') {
   const e = enemies[enemies.length - 1];
   if (!e) return null;
   // A held body ignores collision, so the script is the only thing keeping it
-  // out of the masonry — clamp to the floor of the row it stands in.
-  const cx = tutorClampX(x, z);
-  e.hold = { x: cx, z };
-  e.pos.set(cx, 0, z);
-  e.g.position.set(cx, 0, z);
+  // out of the masonry — snapped to the nearest row of floor there is, and
+  // clamped across it. Clamping x alone was not enough: a body authored two
+  // cells past the end of a room was still two cells into the end wall.
+  const row = tutorRow(z);
+  const cz = row ? row.gz * HALL.cell : z;
+  const cx = tutorClampX(x, cz);
+  e.hold = { x: cx, z: cz };
+  e.pos.set(cx, 0, cz);
+  e.g.position.set(cx, 0, cz);
   return e;
 }
 // The clear floor at a given z: the row's cell extent, less half a wall and
 // half a body at each end.
-function tutorClampX(x, z) {
+// THE NEAREST ROW OF FLOOR THERE ACTUALLY IS. Both the clamp and the centre
+// used to give up when the row they were asked about held no cells and hand
+// back the number they were given — which is how a body authored one cell past
+// the end of a room ended up standing in rock, invisible and unshootable, on a
+// step that waits for the floor to be cleared. There is always a nearest row.
+function tutorRow(z) {
   const L = hall && hall.legs[hall.cur];
-  if (!L || !L.cells) return x;
-  const C = HALL.cell, gz = Math.round(z / C);
+  if (!L || !L.cells || !L.cells.length) return null;
+  const C = HALL.cell, want = Math.round(z / C);
+  let bestGz = null, bestD = Infinity;
+  for (const [, cgz] of L.cells) {
+    const d = Math.abs(cgz - want);
+    if (d < bestD) { bestD = d; bestGz = cgz; }
+  }
+  if (bestGz === null) return null;
   let lo = Infinity, hi = -Infinity;
   for (const [gx, cgz] of L.cells) {
-    if (cgz !== gz) continue;
+    if (cgz !== bestGz) continue;
     lo = Math.min(lo, gx); hi = Math.max(hi, gx);
   }
-  if (!isFinite(lo)) return x;
+  return isFinite(lo) ? { lo, hi, gz: bestGz } : null;
+}
+function tutorClampX(x, z) {
+  const C = HALL.cell, row = tutorRow(z);
+  if (!row) return x;
+  const { lo, hi } = row;
   const a = (lo - 0.5) * C + HALL.wall / 2 + 0.55;
   const b = (hi + 0.5) * C - HALL.wall / 2 - 0.55;
   return b > a ? Math.max(a, Math.min(b, x)) : (a + b) / 2;
@@ -6170,15 +6190,8 @@ function tutorClampX(x, z) {
 // left and the left-hand man went into the wall with you, where he is both
 // invisible and unshootable, and `shoot` waits on `cleared`.
 function tutorCentreX(z) {
-  const L = hall && hall.legs[hall.cur];
-  if (!L || !L.cells) return player.pos.x;
-  const C = HALL.cell, gz = Math.round(z / C);
-  let lo = Infinity, hi = -Infinity;
-  for (const [gx, cgz] of L.cells) {
-    if (cgz !== gz) continue;
-    lo = Math.min(lo, gx); hi = Math.max(hi, gx);
-  }
-  return isFinite(lo) ? (lo + hi) / 2 * C : player.pos.x;
+  const row = tutorRow(z);
+  return row ? (row.lo + row.hi) / 2 * HALL.cell : player.pos.x;
 }
 function tutorPlaceEnemy(z, xOff = 0) {
   return tutorPlaceEnemyAt(tutorCentreX(z) + xOff, z, 'gunner');

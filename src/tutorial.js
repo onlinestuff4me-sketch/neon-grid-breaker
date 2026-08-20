@@ -41,7 +41,6 @@ export const TUTOR = {
   freezeAt: 0.55,       // fraction of the telegraph at which the world stops
   volleyGap: 2.6,       // seconds between rounds in the three-round lesson
   reshoot: 3.2,         // ...and the gap before a missed shot is retried
-  dodgeRounds: 3,       // how many have to be dodged before the meter appears
   // THE METER LESSON HAS A FLOOR. It empties at a readable rate to half, then
   // slows to a crawl, and never goes below a quarter: the player is being
   // taught that time is finite, not put in a hole they cannot climb out of
@@ -54,10 +53,14 @@ export const TUTOR = {
   meterKnee: 0.5,
   meterFloor: 0.25,
   resumeDelay: 1.6,     // beat between the warning and what to do about it
-  faceRate: 5.5,        // how fast the view is eased back down the hallway
   gunRise: 0.6,         // seconds for the weapon to swing up into frame
-  finalEnemies: 3,      // how many stand there for the shooting lesson
   rampFireDelay: 0.9,   // beat after entering a ramp room before anyone fires
+  // NOTHING DEAD IN HERE. `dodgeRounds`, `faceRate` and `finalEnemies` used to
+  // sit in this list, complete with sliders and help text in the tool, and not
+  // one line of main.js read any of them: dragging "how many rounds must be
+  // dodged" changed nothing at all. The real controls are `advance.need` on
+  // the dodging step and `bodies` on each step, both of which the step editor
+  // already has. Every key below IS read — see the greps in docs/TESTING.md.
 };
 
 // --- the legs --------------------------------------------------------------

@@ -49,8 +49,107 @@ function save() {
   try { localStorage.setItem(OVERRIDE_KEY, JSON.stringify(spec)); } catch { /* private */ }
 }
 function markDirty(refresh = true) {
-  dirty = true; save(); paintApply();
+  dirty = true; save(); paintApply(); validate();
   if (refresh) { try { refreshMap(); } catch { /* map not up yet */ } }
+}
+
+// --- what this spec will do wrong ------------------------------------------
+// Every check here is a failure somebody actually hit, all of them silent: the
+// tutorial simply stopped, or the screen went blank, and nothing anywhere said
+// why. The tool knows enough to say so before the preview is even reloaded.
+//
+// Deliberately warnings, not refusals. A half-finished sequence is a normal
+// thing to be looking at while you are editing one.
+function validate() {
+  const host = $('tutwarn');
+  if (!host) return;
+  const out = [];
+  const S = spec.STEPS, L = spec.LEGS;
+
+  // 1. two steps with the same id: `tutorAfter` takes the FIRST match, so the
+  //    sequence walks back to it and cycles for ever
+  const byId = new Map();
+  for (const st of S) byId.set(st.id, (byId.get(st.id) || 0) + 1);
+  for (const [id, n] of byId) {
+    if (n > 1) {
+      out.push(`<b>${n} steps are called “${id}”.</b> The sequence is walked by id, `
+        + 'so it will loop back to the first of them and never reach the end.');
+    }
+  }
+
+  // 2. a cue hung on an event its step cannot fire — the lesson runs blank
+  const KIND_EVENTS = {
+    froze: ['held', 'freeze'], dodged: ['dodge'], resumed: ['meter', 'resume'],
+    cleared: ['kill'],
+  };
+  for (const st of S) {
+    const can = new Set(['enter', 'advance', ...(KIND_EVENTS[st.advance.kind] || [])]);
+    for (const c of st.cues || []) {
+      if (!can.has(c.on)) {
+        out.push(`<b>${st.id}</b> shows “${(c.text || '').slice(0, 24)}…” on <b>${c.on}</b>, `
+          + `which a “${st.advance.kind}” step never fires. Those words will never appear.`);
+      }
+    }
+  }
+
+  // 3. a condition whose machinery nothing sets up
+  const raises = S.some((x) => x.buildBarrier);
+  for (const st of S) {
+    if (st.advance.kind === 'atBarrier' && !raises) {
+      out.push(`<b>${st.id}</b> ends when the player reaches the barrier, and no step `
+        + 'raises one. It can never end.');
+    }
+    if (st.advance.kind === 'cleared' && !st.bodies
+        && !(L[0] && (L[0].enemies || []).length)) {
+      out.push(`<b>${st.id}</b> ends when the floor is clear and puts nobody on it. `
+        + 'It ends on its first frame.');
+    }
+    if (st.advance.kind === 'dodged' && !st.bodies) {
+      out.push(`<b>${st.id}</b> waits for a round to be dodged and stands nobody there `
+        + 'to fire one.');
+    }
+  }
+  if (S.length && S[S.length - 1].advance.kind !== 'none') {
+    out.push('<b>The last step ends on a condition.</b> There is nothing after it, so '
+      + 'the onboarding will sit on it rather than handing over to the game.');
+  }
+
+  // 4. a named threshold that this leg has no mark for
+  const MARKS = ['firstCorner', 'secondRun', 'finalRun', 'forkEnd'];
+  for (const st of S) {
+    const nd = st.advance.need;
+    if (typeof nd === 'string' && nd && !MARKS.includes(nd)) {
+      out.push(`<b>${st.id}</b> ends at “${nd}”, which is not a mark. `
+        + `The marks are: ${MARKS.join(', ')}.`);
+    }
+  }
+
+  // 5. a path that walks over itself — the corridor doubles back through a
+  //    cell it has already used and the leg is shorter than it looks
+  for (const leg of L) {
+    const mv = (leg.plan && leg.plan.moves) || [];
+    if (!mv.length) continue;
+    let gx = 0, gz = 0;
+    const seen = new Set(['0,0']);
+    let dup = 0;
+    for (const [dir, n] of mv) {
+      for (let i = 0; i < n; i++) {
+        if (dir === 'f') gz += 1; else if (dir === 'b') gz -= 1;
+        else if (dir === 'r') gx += 1; else if (dir === 'l') gx -= 1;
+        const k = `${gx},${gz}`;
+        if (seen.has(k)) dup++;
+        seen.add(k);
+      }
+    }
+    if (dup) {
+      out.push(`<b>${leg.id}</b>’s path crosses itself in ${dup} cell${dup > 1 ? 's' : ''}. `
+        + 'The walk is shorter than the moves say, and every mark past the crossing '
+        + 'is off by that much.');
+    }
+  }
+
+  host.className = out.length ? 'on' : '';
+  host.innerHTML = out.map((t) => `<div>${t}</div>`).join('');
 }
 function paintApply() {
   const b = $('tutApply');
@@ -101,12 +200,20 @@ function renderLegs() {
     len.style.cssText = 'font-size:10.5px;color:var(--dim);white-space:nowrap';
     // the same number the map's readout gives, in the same units
     len.textContent = `${(leg.plan && leg.plan.moves || []).reduce((n, [, k]) => n + k, 0) * 4} m`;
+    // TURN ORDER. The game reads `fireOrder` on every leg — it is what makes
+    // room2 and hall3 hand the trigger from one man to the next instead of
+    // firing together — and 541 controls in this pane mentioned it nowhere.
+    // (`straight` used to live here and did nothing: genHallLeg short-circuits
+    // to the authored plan before it is ever read, so ticking it on any of the
+    // shipped legs left the leg at exactly the length it already was.)
     const st = document.createElement('label');
     st.style.cssText = 'font-size:10.5px;color:var(--dim);display:flex;gap:4px;align-items:center';
+    st.title = 'One man shoots, and the next only starts when his round has gone '
+      + 'past you. Off, they fire whenever their own timer says so.';
     const stc = document.createElement('input');
-    stc.type = 'checkbox'; stc.checked = !!leg.straight;
-    stc.onchange = () => { leg.straight = stc.checked; markDirty(); reload(); };
-    st.append(stc, document.createTextNode('straight'));
+    stc.type = 'checkbox'; stc.checked = leg.fireOrder === 'turns';
+    stc.onchange = () => { leg.fireOrder = stc.checked ? 'turns' : 'free'; markDirty(); reload(); };
+    st.append(stc, document.createTextNode('take turns'));
     const ba = document.createElement('label');
     ba.style.cssText = st.style.cssText;
     ba.title = 'A wall-to-wall block already standing when the leg begins, so the '
@@ -138,32 +245,44 @@ function renderLegs() {
   });
 }
 function addLeg() {
-  spec.LEGS.push({ id: `leg${spec.LEGS.length + 1}`, form: 'corridor',
-    straight: false, cells: 7, barrier: false, note: '' });
-  markDirty(); renderLegs(); reload();
+  // WITH A PATH. A leg with no `plan` is a leg the map cannot touch — it
+  // answers "this leg has no plan" and floor, pillar, enemy and path are all
+  // no-ops on it — so "+ Add leg" used to make something only a text editor
+  // could finish. It starts as a short straight run with one gunner in it,
+  // which is a leg, and every tool in the pane works on it from that moment.
+  spec.LEGS.push({
+    id: `leg${spec.LEGS.length + 1}`, form: 'corridor',
+    straight: false, barrier: false, note: '',
+    plan: { moves: [['f', 8]], extra: [], approach: 3 },
+    enemies: [{ x: 0, z: 5, type: 'gunner' }],
+    fireOrder: 'free',
+  });
+  markDirty(); renderLegs(); setMapLeg(spec.LEGS.length - 1); reload();
 }
 
 // --- the numbers -----------------------------------------------------------
+// Every key of TUTOR, and nothing else: the six entries that used to head this
+// list — moveNeeded, lookNeeded, barrierAt, enemyAt, shots, afterBarrier —
+// documented numbers that had not existed since the rewrite, while half the
+// numbers that DO exist had no help at all.
 const NUM_HELP = {
-  moveNeeded: 'metres walked before the move lesson is satisfied',
-  lookNeeded: 'radians of yaw swept before the look lesson is',
-  barrierAt: 'metres ahead the barrier already stands',
+  hallCells: 'default straight cells, for a leg that does not carry a path',
+  barrierCells: 'cells from the fork\'s rejoin to the barrier',
   barrierH: 'barrier height — low enough to see and shoot over',
-  enemyAt: 'metres ahead the first gunner stands',
-  enemyX: 'how far to either side the other two stand (±1.7 is the wall)',
-  aimBeat: 'seconds the prompt is up before his arm starts to rise',
-  reshoot: 'gap before he tries again after a miss',
-  shots: 'most rounds the beat will ever fire',
-  afterBarrier: 'beat after a round clears the barrier',
-  meterSecs: 'meter: full to half, in seconds',
+  standWithin: 'metres from the barrier that count as standing at it',
+  enemyCells: 'cells beyond the barrier the first gunner stands',
+  enemyX: 'how far to either side the others stand (±1.7 is the wall)',
+  aimBeat: 'seconds from the gunner appearing to his arm rising',
+  freezeAt: 'fraction of the telegraph at which the world stops',
+  volleyGap: 'seconds between rounds in the three-round lesson',
+  reshoot: 'the gap before a missed shot is retried',
+  meterSecs: 'meter: full to the knee, in seconds',
   meterCrawlSecs: 'meter: the rate below the knee',
   meterKnee: 'meter: where the drain slows',
   meterFloor: 'meter: how low it is ever allowed to go',
-  resumeDelay: 'beat between the warning and what to do about it',
-  faceRate: 'how fast the view is eased back down the hallway',
+  resumeDelay: 'beat between the meter appearing and the way out of it',
   gunRise: 'seconds for the weapon to swing up into frame',
-  finalEnemies: 'how many stand there for the shooting lesson',
-  hallCells: 'default straight cells, when a leg does not say',
+  rampFireDelay: 'beat after entering a ramp area before anyone fires',
 };
 function renderNums() {
   const host = $('tutnums');
@@ -274,15 +393,34 @@ function stepCard(st, i) {
   advRow.style.marginTop = '6px';
   const kindSel = sel(st.advance.kind, ADVANCE_KINDS.map(([k, d]) => [k, `${k} — ${d}`]),
     (v) => { st.advance.kind = v; tag.textContent = v; markDirty(); });
+  // A THRESHOLD MAY BE A NAMED PLACE. `reached` counts cells along the walked
+  // path, and the map can redraw that path — so a step that says "7" is a step
+  // that means something different every time somebody drags a corner. Naming
+  // the mark instead ("the first corner") survives the edit, because the marks
+  // are derived from the path on every load. Typing a number still works, for
+  // the conditions that genuinely count things.
   const needIn = document.createElement('input');
-  needIn.type = 'number'; needIn.step = '0.05';
+  needIn.type = 'text';
   needIn.value = st.advance.need != null ? st.advance.need : '';
   needIn.placeholder = 'default';
+  needIn.title = 'A number, or one of: firstCorner, secondRun, finalRun, forkEnd '
+    + '— named places on the leg\'s path, which move when the path does.';
+  needIn.setAttribute('list', 'tutmarks');
   needIn.oninput = () => {
-    const v = parseFloat(needIn.value);
-    st.advance.need = isFinite(v) ? v : undefined;
+    const raw = needIn.value.trim();
+    const v = parseFloat(raw);
+    st.advance.need = raw === '' ? undefined
+      : (isFinite(v) && String(v) === raw ? v : raw);
     markDirty();
   };
+  if (!$('tutmarks')) {
+    const dl = document.createElement('datalist');
+    dl.id = 'tutmarks';
+    for (const m of ['firstCorner', 'secondRun', 'finalRun', 'forkEnd']) {
+      const o = document.createElement('option'); o.value = m; dl.appendChild(o);
+    }
+    document.body.appendChild(dl);
+  }
   advRow.append(field('ends when', kindSel), field('threshold', needIn));
   bd.appendChild(advRow);
   bodyRow.append(field('gunners standing here', bodIn), document.createElement('div'));
@@ -464,7 +602,7 @@ addEventListener('message', (ev) => {
 
 // --- wiring ----------------------------------------------------------------
 export function initTutorialPane() {
-  renderLegs(); renderNums(); renderSteps(); renderJump(); paintApply();
+  renderLegs(); renderNums(); renderSteps(); renderJump(); paintApply(); validate();
   // The map edits the SAME spec object, so painting a room and typing a cue
   // are the same edit as far as everything downstream is concerned.
   initTutorialMap(spec, (legChanged) => {
@@ -475,10 +613,22 @@ export function initTutorialPane() {
   $('pReload').onclick = reload;
   $('tutApply').onclick = reload;
   $('tutRevert').onclick = () => {
-    spec = clone(DEFAULT_SPEC);
+    // IN PLACE, NOT REBOUND. The map was handed this object once, at boot, and
+    // keeps its own reference to it — so replacing the variable here left the
+    // two views editing different specs. The rails read the new one, the map
+    // read the dead one, and every floor cell, pillar, enemy and path drag
+    // after a revert was written into an object nothing would ever save.
+    // Measured: the map's own HUD counted 21 -> 23 floor cells while the store
+    // and the preview both stayed on the shipped leg.
+    const fresh = clone(DEFAULT_SPEC);
+    spec.TUTOR = fresh.TUTOR;
+    spec.LEGS = fresh.LEGS;
+    spec.STEPS = fresh.STEPS;
     open = new Set([spec.STEPS[0].id]);
     try { localStorage.removeItem(OVERRIDE_KEY); } catch { /* private */ }
-    renderLegs(); renderNums(); renderSteps(); renderJump(); reload();
+    renderLegs(); renderNums(); renderSteps(); renderJump();
+    try { setMapLeg(0); } catch { /* map not up yet */ }
+    reload();
   };
   $('pJump').onchange = (e) => {
     const f = $('pFrame');
