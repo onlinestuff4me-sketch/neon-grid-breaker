@@ -15,7 +15,73 @@ import { LEG } from './balance.js';
 
 export const HALL = { cell: LEG.cellM, h: 3.1, wall: 0.3 };
 
+// ---------------------------------------------------------------------------
+// AUTHORED LEGS
+//
+// The onboarding cannot roll dice. "A straight run, then a right turn, then a
+// fork that rejoins" is a sequence of specific corners, and a generator that
+// produces something like it four times out of five is no use for a lesson
+// whose whole point is that the player knows what to expect.
+//
+// So a leg may instead carry a PLAN: a list of moves for the spine, plus any
+// extra cells that hang off it (a fork's second lane). It comes out in exactly
+// the shape genHallLeg returns, so buildHallLeg cannot tell the difference and
+// the level tool can draw and edit both with the same code.
+//
+// Moves are relative and read as instructions: ['f', 8] walks eight cells
+// forward, ['r', 3] steps three to the right, ['l', 3] three to the left.
+// Written that way because that is how the lesson is described — "down the
+// hallway, then right" — and a list of absolute coordinates is unreadable the
+// moment anybody wants to make the first hallway one cell longer.
+// ---------------------------------------------------------------------------
+export function planToCells(sgx, sgz, moves) {
+  let gx = sgx, gz = sgz;
+  const spine = [[gx, gz]];
+  const breaks = new Set();
+  for (const [dir, n] of moves || []) {
+    // Each change of direction is a stretch boundary — the same thing a jog
+    // means in a generated leg, so spawn pacing treats both alike.
+    if (dir !== 'f' && spine.length > 1) breaks.add(spine.length);
+    for (let i = 0; i < (n || 0); i++) {
+      if (dir === 'f') gz += 1;
+      else if (dir === 'b') gz -= 1;
+      else if (dir === 'r') gx += 1;
+      else if (dir === 'l') gx -= 1;
+      spine.push([gx, gz]);
+    }
+  }
+  return { spine, breaks, endGx: gx, endGz: gz };
+}
+
+export function genAuthoredLeg(sgx, sgz, plan, grid) {
+  const cells = [];
+  const add = (gx, gz) => {
+    const k = gx + ',' + gz;
+    if (!grid.has(k)) { grid.add(k); cells.push([gx, gz]); }
+  };
+  const { spine, breaks, endGx, endGz } = planToCells(sgx, sgz, plan.moves);
+  for (const [x, z] of spine) add(x, z);
+  // extra cells are offsets from the START of the leg, not absolutes, so a
+  // plan can be dropped in at any door without rewriting every number
+  for (const [dx, dz] of plan.extra || []) add(sgx + dx, sgz + dz);
+  const off = (list) => (list || []).map(([dx, dz]) => [sgx + dx, sgz + dz]);
+  const APPROACH = Math.max(1, Math.min(plan.approach || 4, spine.length));
+  return {
+    cells, spine,
+    approach: spine.slice(spine.length - APPROACH),
+    stretches: splitStretches(spine, APPROACH, breaks),
+    doorways: off(plan.doorways),
+    pillars: off(plan.pillars).map(([x, z]) => [x * HALL.cell, z * HALL.cell]),
+    // covers are [x, z, w, d, h] in metres, the same tuple the generator emits
+    covers: off(plan.covers).map(([x, z]) => [x * HALL.cell, z * HALL.cell,
+      LEG.coverLowW, LEG.coverLowD, LEG.coverLowH]),
+    endGx, endGz, authored: true,
+  };
+}
+
 export function genHallLeg(sgx, sgz, proto, grid, straightCells = 7) {
+  // an authored plan short-circuits the whole generator
+  if (proto && proto.plan) return genAuthoredLeg(sgx, sgz, proto.plan, grid);
   const cells = [];
   const pillars = [];
   const covers = [];   // low blocks: see over, cannot shoot through

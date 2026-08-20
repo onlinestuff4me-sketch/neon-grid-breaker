@@ -16,7 +16,7 @@
 import { HALL, genHallLeg } from '../src/genleg.js';
 import { composeProtocol, newRunMemory, ELEMENTS } from '../src/protocols.js';
 import * as B from '../src/balance.js';
-import { initTutorialPane, tutorialSpec, reload as reloadPreview } from './tutorial-pane.js';
+import { initTutorialPane, tutorialSpec, reload as reloadPreview, fitMap } from './tutorial-pane.js';
 
 const $ = (id) => document.getElementById(id);
 const C = HALL.cell;
@@ -422,10 +422,14 @@ function setMode(m) {
   $('mTutor').classList.toggle('on', m === 'tutor');
   for (const n of document.querySelectorAll('.tutonly')) n.hidden = m !== 'tutor';
   for (const n of document.querySelectorAll('.lvlonly')) n.hidden = m !== 'levels';
-  if (m === 'tutor' && !tutorBooted) {
-    tutorBooted = true;
-    initTutorialPane();
-    reloadPreview();          // the preview only starts when it is looked at
+  if (m === 'tutor') {
+    if (!tutorBooted) {
+      tutorBooted = true;
+      initTutorialPane();
+      reloadPreview();        // the preview only starts when it is looked at
+    }
+    // the map pane has a size only now that it is on screen
+    requestAnimationFrame(() => { try { fitMap(); } catch { /* not up yet */ } });
   }
   if (m === 'levels') { resize(); fit(); render(); }
 }

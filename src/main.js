@@ -5681,12 +5681,25 @@ let tutorT = 0, tutorSub = 0;
 let tutorMoved = 0, tutorLooked = 0, tutorFroze = false;
 let tutorMark = null;      // the enemy the hallway beat is about
 let tutorRound = null;     // the one round currently in the air
-let tutorShotsFired = 0, tutorDodged = 0, tutorCrossed = false;
+let tutorShotsFired = 0, tutorDodged = 0;
+// Latched by the leg advance, read by the `crossed` condition. A step cannot
+// watch doorsPassed directly because the ramp areas all advance the same way
+// and would each see every previous crossing.
+let tutorCrossedDoor = false;
 // The dodge beat can be failed, so it has to be restartable. The anchor is
 // where you stood and what you were looking at the instant it began; the
 // pending flag is what turns the ordinary death screen into this one's.
 let tutorAwaitShot = false, tutorAnchor = null, tutorDeadPending = false;
 let tutorAnchorStep = null, tutorButtonShown = false;
+// THE HARD FREEZE. The first round is fair because the world STOPS on the
+// telegraph — bullet, enemy, everything — until the button has been pressed.
+// It is the only way to be sure a first-time player has read the prompt
+// before a round is in the air, and it costs nothing after that.
+let tutorHardFreeze = false;   // this STEP wants the freeze
+let tutorWorldHeld = false;    // ...and right now the world is actually held
+let tutorLegIx = 0;          // which entry of TUTOR_LEGS the current leg is
+let tutorVolleyT = 0;        // beat between rounds in the three-round lesson
+let tutorSpineIx = 0;        // how far along the leg's spine they have walked
 let tutorMeterOn = false, tutorMeterAt = 0, tutorMeterSaid = false;
 let tutorBar = null;
 let tutorArmed = false, tutorSeen = false;
@@ -5716,30 +5729,24 @@ const tutorHoldsPlayerFire = () => tutorStep !== null && !tutorMay('fire');
 // middle of the sentence explaining that the bank runs out.
 const tutorFreeIsFree = () => tutorStep !== null && !tutorMay('bank');
 
-// --- the two text slots ----------------------------------------------------
-// Low-level setters only. WHICH words are in them, and when, is decided by the
-// cue list in src/tutorial.js and played back by tutorRenderCues below — so
-// the wording and its timing are editable without touching this file.
-function tutorMsg(html, where, pulse) {
-  if (!el.tutormsg) return;
-  el.tutormsg.innerHTML = html;
-  el.tutormsg.className = `${where}${pulse ? ' pulse' : ''} show`;
-}
-// The top slot, under the meter. Independent of the centre one, so the thing
-// you are being told about the meter and the thing you are being told to do
-// with your feet can be on screen together without stacking.
-function tutorTop(html, pulse) {
-  if (!el.tutortop) return;
-  el.tutortop.innerHTML = html || '';
-  el.tutortop.className = html ? (pulse ? 'pulse show' : 'show') : '';
+// --- the text slots --------------------------------------------------------
+// One element per slot, all able to be on screen at once. They used to share a
+// single element that took its position from a class, which made DRAG TO MOVE
+// and DRAG TO LOOK mutually exclusive — and the whole point of lesson 2 is
+// that looking is a separate action you do AT THE SAME TIME as moving.
+function tutorSlot(slot, html, pulse) {
+  const n = el.tslot && el.tslot[slot];
+  if (!n) return;
+  if (!html) { n.className = `tslot ${slot}`; n.innerHTML = ''; return; }
+  n.innerHTML = html;
+  n.className = `tslot ${slot}${pulse ? ' pulse' : ''} show`;
 }
 function tutorArrows(down, up) {
   if (el.tutorarrow) el.tutorarrow.classList.toggle('on', !!down);
   if (el.tutorup) el.tutorup.classList.toggle('on', !!up);
 }
 function tutorHideMsg() {
-  if (el.tutormsg) el.tutormsg.className = '';
-  tutorTop(null);
+  if (el.tslot) for (const k of Object.keys(el.tslot)) tutorSlot(k, null);
   tutorArrows(false, false);
 }
 
@@ -5748,6 +5755,9 @@ function tutorHideMsg() {
 // the set of beats that have fired so far, so "is this on screen" is a pure
 // function of that set — which means the same render can be re-run at any time
 // (after a retry, after a death) and land on exactly the right frame.
+//
+// GOAL 2: a cue with off:'advance' stays until the LESSON is over. Nothing
+// here is on a timer, and nothing here can be.
 let tutorFired = new Set();
 function tutorEmit(ev) {
   if (tutorStep === null) return;
@@ -5758,22 +5768,44 @@ function tutorRenderCues() {
   const sp = tutorSpecOf(tutorStep);
   if (!sp) { tutorHideMsg(); tutorHand(null); tutorLine(false); return; }
   const live = (c) => tutorFired.has(c.on) && !tutorFired.has(c.off);
-  // One centre cue and one top cue can share the screen; a later live cue in
-  // the list wins its slot, which is how the sub-line is swapped on the tap.
-  let mid = null, top = null;
-  for (const c of sp.cues || []) {
-    if (!live(c)) continue;
-    if (c.slot === 'top') top = c; else mid = c;
+  const bySlot = {};
+  for (const c of sp.cues || []) if (live(c)) bySlot[c.slot || 'mid'] = c;
+  for (const k of Object.keys(el.tslot || {})) {
+    const c = bySlot[k];
+    tutorSlot(k, c ? c.text : null, c && c.pulse);
   }
-  if (mid) tutorMsg(mid.text, mid.slot, mid.pulse);
-  else if (el.tutormsg) el.tutormsg.className = '';
-  tutorTop(top ? top.text : null, top && top.pulse);
-  tutorArrows((mid && mid.arrow === 'down') || (top && top.arrow === 'down'),
-    (mid && mid.arrow === 'up') || (top && top.arrow === 'up'));
-  tutorHand(mid && mid.hand && mid.hand !== 'none' ? mid.hand : null);
+  const any = (fn) => Object.values(bySlot).some(fn);
+  tutorArrows(any((c) => c.arrow === 'down'), any((c) => c.arrow === 'up'));
+  // TWO HANDS. The move coach lives on the left, the look coach on the right,
+  // and lesson 2 needs both at once or it has not made its point.
+  const hands = Object.values(bySlot).map((c) => c.hand).filter((h) => h && h !== 'none');
+  tutorHand(hands[0] || null, hands[1] || null);
   tutorLine(!!sp.divider);
 }
-function tutorHand(kind) { if (el.tutorhand) el.tutorhand.className = kind ? `${kind} on` : ''; }
+
+// STAND HERE hangs over the barrier rather than floating in the middle of the
+// screen — the difference between a label on a thing and a caption about it.
+// Projected every frame, so it grows as you walk up to it.
+const _vWorld = new THREE.Vector3();
+function tutorPlaceWorldCue() {
+  const n = el.tslot && el.tslot.world;
+  if (!n || !n.classList.contains('show')) return;
+  const anchor = tutorBar ? { x: tutorBar.m.position.x, y: TUTOR.barrierH + 1.15, z: tutorBar.z }
+    : null;
+  if (!anchor) { n.style.opacity = '0'; return; }
+  _vWorld.set(anchor.x, anchor.y, anchor.z).project(camera);
+  const w = renderer.domElement.clientWidth, h = renderer.domElement.clientHeight;
+  const behind = _vWorld.z > 1;
+  n.style.opacity = behind ? '0' : '';
+  if (behind) return;
+  n.style.left = `${(_vWorld.x * 0.5 + 0.5) * w}px`;
+  n.style.top = `${(-_vWorld.y * 0.5 + 0.5) * h}px`;
+}
+
+function tutorHand(kind, kind2) {
+  if (el.tutorhand) el.tutorhand.className = kind ? `${kind} on` : '';
+  if (el.tutorhand2) el.tutorhand2.className = kind2 ? `${kind2} on` : '';
+}
 function tutorLine(on) { if (el.tutorline) el.tutorline.classList.toggle('on', !!on); }
 function tutorShowMeter(on) { if (el.slowmeter) el.slowmeter.style.display = on ? 'block' : 'none'; }
 
@@ -5783,13 +5815,37 @@ function tutorShowMeter(on) { if (el.slowmeter) el.slowmeter.style.display = on 
 // only when it is built mid-lesson, which it no longer is — hence no stray
 // airlock thump on the opening frame.
 const TUTOR_BAR_MAT = new THREE.MeshLambertMaterial({ color: 0x3b4148 });
+// A ramp area's enemies belong to the AREA, not to a step: it is the room
+// that is "the room with two in it", and the retry has to be able to rebuild
+// it without replaying the step that placed them.
+function tutorPopulateLeg() {
+  const spec = TUTOR_LEGS[tutorLegIx];
+  const L = hall && hall.legs[hall.cur];
+  if (!spec || !spec.enemies || !L || !L.spine) return;
+  const base = L.spine[0];
+  for (const e of spec.enemies) {
+    const b = tutorPlaceEnemyAt((base[0] + (e.x || 0)) * HALL.cell,
+      (base[1] + (e.z || 0)) * HALL.cell, e.type || 'gunner');
+    if (b) b.turnOrder = spec.fireOrder === 'turns';
+  }
+  tutorRampFireAt = tutorT + TUTOR.rampFireDelay;
+}
+let tutorRampFireAt = 0;
+
 function tutorBuildBarrier() {
   if (tutorBar || game.mode !== 'hall' || !hall) return;
   // the leg says whether it has one — the tool's per-leg toggle
-  const legSpec = TUTOR_LEGS[hall.cur];
+  const legSpec = TUTOR_LEGS[tutorLegIx];
   if (legSpec && !legSpec.barrier) return;
   const L = hall.legs[hall.cur], C = HALL.cell;
-  const z = player.pos.z + TUTOR.barrierAt;
+  // MEASURED FROM THE FORK, not from wherever the player happens to be
+  // standing when the step begins. It is a fixture of the corridor — the
+  // thing STAND HERE points at — so it belongs to the geometry.
+  const marks = (TUTOR_LEGS[tutorLegIx] || {}).marks;
+  const anchor = marks && marks.forkEnd != null && L.spine
+    ? L.spine[Math.min(L.spine.length - 1, marks.forkEnd)] : null;
+  const z = anchor ? (anchor[1] + TUTOR.barrierCells) * C
+    : player.pos.z + TUTOR.barrierCells * C;
   // WALL TO WALL, derived from the leg's own extent: it is a barrier, not a
   // crate, and there must be no edge to walk round.
   let minGx = Infinity, maxGx = -Infinity;
@@ -5836,6 +5892,18 @@ function tutorAim(e) {
 }
 // enemyFire calls this on the way out, so the script gets a handle on the
 // round it asked for without having to guess which of the bullets is his.
+// Whichever of the placed bodies is still standing takes the next turn, so
+// the three-round lesson keeps going if the player shoots one of them (they
+// cannot yet) or one dies to a stray. Round-robin, so it is not always the
+// same man and the rounds arrive from different places.
+let tutorTurn = 0;
+function tutorAimNext() {
+  const live = enemies.filter((e) => e.alive && e.hold);
+  if (!live.length) return false;
+  const e = live[tutorTurn++ % live.length];
+  tutorMark = e;
+  return tutorAim(e);
+}
 function tutorNoteShot() {
   if (!tutorAwaitShot) return;
   tutorAwaitShot = false;
@@ -5848,6 +5916,15 @@ function tutorNoteShot() {
 // offset is measured from the player, but the result is clamped to the leg's
 // own floor: a player hugging the left wall must not push the left-hand man
 // through it.
+function tutorPlaceEnemyAt(x, z, type = 'gunner') {
+  spawnEnemy(type);
+  const e = enemies[enemies.length - 1];
+  if (!e) return null;
+  e.hold = { x, z };
+  e.pos.set(x, 0, z);
+  e.g.position.set(x, 0, z);
+  return e;
+}
 function tutorPlaceEnemy(z, xOff = 0) {
   spawnEnemy('gunner');
   const e = enemies[enemies.length - 1];
@@ -5883,6 +5960,8 @@ function tutorResetWorld() {
   tutorMeterOn = false; tutorMeterAt = 0; tutorMeterSaid = false;
   tutorAwaitShot = false; tutorAnchor = null; tutorDeadPending = false;
   tutorAnchorStep = null; tutorButtonShown = false; tutorFired = new Set();
+  tutorHardFreeze = false; tutorWorldHeld = false;
+  tutorLegIx = 0; tutorSpineIx = 0; tutorTurn = 0; tutorCrossedDoor = false;
   document.body.classList.remove('tutoring');
   tutorHideMsg(); tutorHand(null); tutorLine(false);
   if (el.timebtn) el.timebtn.classList.remove('arrive', 'hint');
@@ -5898,21 +5977,23 @@ function startTutorial() {
   tutorT = 0; tutorSub = 0;
   tutorMoved = 0; tutorLooked = 0; tutorFroze = false;
   tutorMark = null; tutorRound = null;
-  tutorShotsFired = 0; tutorDodged = 0; tutorMeterOn = false; tutorCrossed = false;
+  tutorShotsFired = 0; tutorDodged = 0; tutorMeterOn = false; tutorCrossedDoor = false;
   tutorMeterSaid = false; tutorAwaitShot = false; tutorAnchor = null;
   tutorDeadPending = false; tutorAnchorStep = null; tutorButtonShown = false;
-  tutorFired = new Set();
+  tutorFired = new Set(); tutorHardFreeze = false; tutorWorldHeld = false;
+  tutorLegIx = 0; tutorSpineIx = 0; tutorTurn = 0; tutorCrossedDoor = false;
   document.body.classList.add('tutoring');
   gun.visible = false;
   el.timebtn.style.display = 'none';
   tutorShowMeter(false);
   hideTimeTip();
-  tutorBuildBarrier();          // already standing: nothing to hear
+  tutorLegIx = 0; tutorSpineIx = 0; tutorTurn = 0;
   tutorNext(TUTOR_ORDER[0]);
 }
 function endTutorial(taught = true) {
   tutorStep = null;
   tutorDeadPending = false;
+  tutorHardFreeze = false; tutorWorldHeld = false;
   tutorShaping = false;
   document.body.classList.remove('tutoring');
   tutorHideMsg(); tutorHand(null); tutorLine(false);
@@ -5937,21 +6018,42 @@ const tutorAfter = (id) => {
 // it — so the retry can re-enter a step and get exactly the same world, and so
 // the level tool can move `placeEnemy` to a different step without anybody
 // having to find the line that used to place him.
+// A step's furniture is declared, not written into the transition that reaches
+// it — so the retry can re-enter a step and get exactly the same world, and so
+// the level tool can move `placeEnemy` to a different step without anybody
+// having to find the line that used to place him.
 function tutorNext(step) {
   tutorStep = step; tutorT = 0; tutorSub = 0;
   tutorFired = new Set();
+  tutorHardFreeze = false;
   const sp = tutorSpecOf(step);
   if (sp) {
-    if (sp.placeEnemy) tutorMark = tutorPlaceEnemy(player.pos.z + TUTOR.enemyAt);
+    // where to put them back if this beat is failed
+    if (sp.checkpoint || sp.placeEnemy) {
+      tutorAnchorStep = step;
+      tutorAnchor = { x: player.pos.x, z: player.pos.z, yaw: player.yaw, pitch: player.pitch };
+    }
+    if (sp.buildBarrier) tutorBuildBarrier();
+    if (sp.placeEnemy) {
+      tutorMark = tutorPlaceEnemy(tutorBarrierZ() + TUTOR.enemyCells * HALL.cell);
+      tutorSub = TUTOR.aimBeat;
+      tutorHardFreeze = !!sp.hardFreeze;
+    }
     if (sp.placeSquad) {
       // Abreast, INSIDE the corridor: ±2.4 m put the outer two through the
       // walls of a one-cell leg, which has only ±1.7 m of floor and less
       // than that once a body has a width of its own.
+      const z = tutorBarrierZ() + TUTOR.enemyCells * HALL.cell;
       for (let i = 1; i < TUTOR.finalEnemies; i++) {
-        tutorPlaceEnemy(player.pos.z + TUTOR.enemyAt + (i - 1) * 1.5,
-          i === 1 ? -TUTOR.enemyX : TUTOR.enemyX);
+        tutorPlaceEnemy(z + (i - 1) * 1.5, i === 1 ? -TUTOR.enemyX : TUTOR.enemyX);
       }
+      tutorSub = TUTOR.volleyGap;
     }
+    if (sp.startMeter) {
+      tutorMeterOn = true; tutorMeterAt = 0;
+      slowBank = SLOWMO.cap; updateSlowMeter();
+    }
+    if (sp.raiseGun) { gunRiseT = TUTOR.gunRise; game.noFireBefore = 0; }
     if (sp.dropBarrier) tutorDropBarrier();
     if (sp.openDoor && hall && hall.legs[hall.cur] && !hall.legs[hall.cur].door.open) openHallDoor();
   }
@@ -5960,6 +6062,37 @@ function tutorNext(step) {
   if (wants && !tutorButtonShown) { tutorButtonShown = true; tutorRevealButton(); }
   else updateModeUI();
   tutorEmit('enter');
+}
+
+// Where the barrier is, or where it would be. Measured from the fork's rejoin
+// so the whole combat section moves with the geometry rather than with a
+// number somebody has to remember to change.
+function tutorBarrierZ() {
+  if (tutorBar) return tutorBar.z;
+  const L = hall && hall.legs[hall.cur];
+  const marks = (TUTOR_LEGS[tutorLegIx] || {}).marks;
+  if (L && L.spine && marks && marks.forkEnd != null) {
+    const c = L.spine[Math.min(L.spine.length - 1, marks.forkEnd)];
+    if (c) return (c[1] + TUTOR.barrierCells) * HALL.cell;
+  }
+  return player.pos.z + TUTOR.barrierCells * HALL.cell;
+}
+
+// How far along the leg they have walked, as a spine index. "Reached the
+// corner" has to be a place, not a distance: a player who wanders back and
+// forth has still not turned the corner, and one who hugs the outside of a
+// bend has walked further than one who cuts it.
+function tutorUpdateSpineIx() {
+  const L = hall && hall.legs[hall.cur];
+  if (!L || !L.spine) return;
+  let best = tutorSpineIx, bd = 1e9;
+  for (let i = 0; i < L.spine.length; i++) {
+    const [gx, gz] = L.spine[i];
+    const d = Math.hypot(gx * HALL.cell - player.pos.x, gz * HALL.cell - player.pos.z);
+    if (d < bd) { bd = d; best = i; }
+  }
+  // monotonic: walking backwards does not un-complete a lesson
+  tutorSpineIx = Math.max(tutorSpineIx, best);
 }
 
 // Back to the instant before the shot. Not to the top of the onboarding —
@@ -6018,21 +6151,33 @@ function updateTutorial(dtReal, movedM, yawDelta) {
   if (!player.alive) { endTutorial(false); return; }
   const sp = tutorSpecOf(tutorStep);
   tutorUpdateBarrier(dtReal);
+  tutorUpdateSpineIx();
   tutorShowMeter(tutorMeterOn);
   if (el.ammo) el.ammo.style.display = tutorMay('ammo') ? '' : 'none';
+
+  // THE TELEGRAPH FREEZE. Held from the moment his arm is most of the way up
+  // until the button is pressed — see the `froze` case below, which is the
+  // only thing that clears it.
+  if (tutorHardFreeze && tutorMark && tutorMark.alive) {
+    const spec = ENEMY_TYPES[tutorMark.type];
+    const aimT = spec.aimTime * aimSpeedFactor();
+    if (tutorMark.state === 'aim' && tutorMark.stateT >= aimT * TUTOR.freezeAt) {
+      tutorWorldHeld = true;
+    }
+  } else {
+    tutorWorldHeld = false;
+  }
 
   // the one round in the air: has it cleared the barrier, and has it gone past
   if (tutorRound) {
     const alive = bullets.indexOf(tutorRound.b) >= 0;
     if (alive) {
       const bz = tutorRound.b.pos.z;
-      if (!tutorRound.passedBar && tutorBar && bz < tutorBar.z) {
-        tutorRound.passedBar = true;
-        tutorSub = TUTOR.afterBarrier;   // two seconds, then the next one
-      }
       if (!tutorRound.counted && bz < player.pos.z - 0.3) {
         tutorRound.counted = true;
         tutorDodged++;
+        tutorEmit('dodge');
+        tutorSub = TUTOR.volleyGap;   // a beat, then the next one
       }
     } else if (!tutorRound.counted) {
       tutorRound = null;   // it hit something; the next shot still comes
@@ -6051,79 +6196,51 @@ function updateTutorial(dtReal, movedM, yawDelta) {
   }
 
   // THE SWITCH IS KEYED ON THE ADVANCE CONDITION, not on the step's name. The
-  // condition is the one part of a step that genuinely has to be code — "moved
-  // 2.2 m", "faced within 0.05 rad" — so it is what selects the machinery, and
-  // a step is free to be called whatever the person editing it wants.
+  // condition is the one part of a step that genuinely has to be code — "reached
+  // the corner", "dodged three" — so it is what selects the machinery, and a
+  // step is free to be called whatever the person editing it wants.
   const need = (dflt) => (sp && sp.advance && sp.advance.need != null ? sp.advance.need : dflt);
+  const done = () => tutorNext(tutorAfter(tutorStep));
   switch (sp ? sp.advance.kind : 'none') {
-    case 'moved':
-      tutorMoved += movedM;
-      if (tutorMoved > need(TUTOR.moveNeeded)) tutorNext(tutorAfter(tutorStep));
+    // GOAL 4: the lesson ends where the corridor turns, not after n metres.
+    case 'reached':
+      if (tutorSpineIx >= need(7)) done();
       break;
 
-    case 'looked':
-      tutorLooked += Math.abs(yawDelta);
-      if (tutorLooked > need(TUTOR.lookNeeded)) tutorNext(tutorAfter(tutorStep));
+    case 'atBarrier':
+      if (tutorBar && player.pos.z > tutorBar.z - TUTOR.standWithin) done();
       break;
 
-    case 'faced': {
-      // FACE THE HALLWAY AGAIN. The look lesson ends wherever the thumb left
-      // them, which can be a blank wall, and the next beat is "a man is
-      // standing down there and he has just shot at you".
-      const k = 1 - Math.exp(-TUTOR.faceRate * dtReal);
-      let d = Math.PI - player.yaw;                     // +z is yaw = PI
-      while (d > Math.PI) d -= Math.PI * 2;
-      while (d < -Math.PI) d += Math.PI * 2;
-      player.yaw += d * k;
-      player.pitch += (0 - player.pitch) * k;
-      if (Math.abs(d) < need(0.05)) {
-        // where to put them back if the round connects
-        tutorAnchor = { x: player.pos.x, z: player.pos.z,
-          yaw: player.yaw, pitch: player.pitch };
-        tutorAnchorStep = tutorAfter(tutorStep);
-        tutorNext(tutorAnchorStep);
-        tutorSub = TUTOR.aimBeat;   // the prompt lands before his arm moves
-      }
-      break;
-    }
-
-    case 'dodgeDone':
-      // ONE round in the air at a time, and it is an ordinary round at
-      // ordinary speed. He does not begin the telegraph until the prompt has
-      // had its beat on screen, and if the round goes past he waits again
-      // before raising the arm — so the rhythm is always read, press, move.
-      if (!tutorRound && !tutorAwaitShot && tutorSub <= 0 &&
-          !tutorMeterSaid && tutorShotsFired < TUTOR.shots) {
+    // He raises his arm, and part-way up THE WORLD STOPS — and stays stopped
+    // until the button is pressed. Nothing here is on a clock: the freeze is
+    // released by the tap and by nothing else, which is the only way to be
+    // sure a first-time player has read the prompt before a round is in flight.
+    case 'froze':
+      if (!tutorAwaitShot && !tutorRound && tutorSub <= 0 && !tutorWorldHeld) {
         tutorSub = tutorAim(tutorMark) ? TUTOR.reshoot : 1;
       }
-      // THE POINTER BELONGS TO THE CONTROL, NOT THE STEP. The instant the
-      // button has been used, the line running down to it and the words
-      // naming it both go — what is left is the thing still being asked for.
-      if (tutorFroze && !tutorMeterOn) {
-        el.timebtn.classList.remove('hint');
-        tutorMeterOn = true;
-        tutorMeterAt = tutorT;
-        slowBank = SLOWMO.cap;
-        updateSlowMeter();
-        tutorEmit('freeze');
+      if (tutorFroze) { tutorHardFreeze = false; tutorEmit('freeze'); done(); }
+      break;
+
+    case 'dodged':
+      if (tutorDodged >= need(1)) { done(); break; }
+      // ...and the next round comes on a beat, one at a time
+      if (!tutorRound && !tutorAwaitShot && tutorSub <= 0) {
+        tutorSub = tutorAimNext() ? TUTOR.reshoot : 1;
       }
-      // ...and a beat later the meter explains itself, up at the top directly
-      // under the bar it is about, with the way back out of it named down on
-      // the button it belongs to.
-      if (tutorMeterOn && !tutorMeterSaid && tutorT > tutorMeterAt + TUTOR.resumeDelay) {
+      break;
+
+    case 'resumed':
+      // the sentence about the meter, then the way out of it
+      if (!tutorMeterSaid && tutorT > TUTOR.resumeDelay) {
         tutorMeterSaid = true;
         tutorEmit('meter');
       }
-      if (tutorMeterSaid && !timeLocked) {
-        tutorEmit('resume');
-        gunRiseT = TUTOR.gunRise;
-        game.noFireBefore = 0;
-        tutorNext(tutorAfter(tutorStep));
-      }
+      if (tutorMeterSaid && !timeLocked) { tutorEmit('resume'); done(); }
       break;
 
     case 'gunUp':
-      if (gunRiseT <= 0) tutorNext(tutorAfter(tutorStep));
+      if (gunRiseT <= 0) done();
       break;
 
     case 'cleared':
@@ -6133,18 +6250,15 @@ function updateTutorial(dtReal, movedM, yawDelta) {
         player.clips = Math.max(player.clips, 1);
         updateAmmoHud();
       }
-      if (!enemies.length && !game.spawnQueue.length) {
-        tutorMark = null;
-        tutorNext(tutorAfter(tutorStep));
-      }
+      if (!enemies.length && !game.spawnQueue.length) { tutorMark = null; done(); }
       break;
 
     case 'crossed':
-      if (hall && hall.doorsPassed >= 1) { tutorNext(tutorAfter(tutorStep)); tutorSub = 0.4; }
+      if (tutorCrossedDoor) { tutorCrossedDoor = false; done(); }
       break;
 
     case 'none':
-      if (tutorSub <= 0) endTutorial(true);
+      if (tutorT > 0.4) endTutorial(true);
       break;
 
     default: break;
@@ -6196,12 +6310,21 @@ const el = {
   condlink: document.getElementById('condlink'),
   gtime: document.getElementById('gtime'),
   slowmeter: document.getElementById('slowmeter'),
-  tutormsg: document.getElementById('tutormsg'),
+
   tutorhand: document.getElementById('tutorhand'),
   tutorline: document.getElementById('tutorline'),
   tutorarrow: document.getElementById('tutorarrow'),
   tutorup: document.getElementById('tutorup'),
-  tutortop: document.getElementById('tutortop'),
+  tutorhand2: document.getElementById('tutorhand2'),
+  // one element per text slot, so several prompts can share the screen
+  tslot: {
+    mid: document.getElementById('ts-mid'),
+    left: document.getElementById('ts-left'),
+    right: document.getElementById('ts-right'),
+    atbtn: document.getElementById('ts-atbtn'),
+    top: document.getElementById('ts-top'),
+    world: document.getElementById('ts-world'),
+  },
   tutlink: document.getElementById('tutlink'),
   saves: document.getElementById('saves'),
   slotlist: document.getElementById('slotlist'),
@@ -6882,7 +7005,7 @@ function setEnvironment(env) {
 // The approach is always the last stretch, however the leg was built.
 
 function buildHallLeg(sgx, sgz, proto) {
-  const { cells, approach, stretches, doorways, pillars, covers, endGx, endGz } =
+  const { cells, spine, approach, stretches, doorways, pillars, covers, endGx, endGz, authored } =
     genHallLeg(sgx, sgz, proto, hall.grid, proto.tutorCells || TUTOR.hallCells);
   const cond = (proto && proto.condition && proto.condition.id) || null;
   const measures = new Set((proto && proto.measures || []).map((m) => m.id));
@@ -7043,8 +7166,10 @@ function buildHallLeg(sgx, sgz, proto) {
       max: new THREE.Vector3(dx0 + 1, H, dz0 + 0.2),
     },
   };
-  return { cells, approach, stretches, doorways, pillars, meshes, obs, door, seal, grind,
-    endGx, endGz, proto, retired: false, nextBuilt: false };
+  // `spine` comes out too: the onboarding measures "have they reached the
+  // corner yet" against it, which a list of floor cells cannot answer.
+  return { cells, spine, approach, stretches, doorways, pillars, meshes, obs, door, seal, grind,
+    endGx, endGz, proto, authored: !!authored, retired: false, nextBuilt: false };
 }
 
 // ---------------------------------------------------------------------------
@@ -7412,6 +7537,10 @@ function forced(proto) {
       proto.form = ELEMENTS.find((e) => e.id === spec.form) || proto.form;
       proto.straight = !!spec.straight;
       proto.tutorCells = spec.cells;
+      // AUTHORED GEOMETRY. The lesson's corners and its fork are specific
+      // things, not rolls that usually come out right.
+      proto.plan = spec.plan || null;
+      proto.tutorLeg = spec;
       return proto;
     }
   }
@@ -7643,10 +7772,24 @@ function crossHallDoor() {
   game.spawnTimer = 0.9;
   slowBank = Math.max(slowBank, SLOWMO.base);
   updateSlowMeter();
-  showBanner(legHeadline(hall.legs[hall.cur] && hall.legs[hall.cur].proto), 2000);
-  showTimeTip();
+  if (tutorStep === null) {
+    showBanner(legHeadline(hall.legs[hall.cur] && hall.legs[hall.cur].proto), 2000);
+    showTimeTip();
+  }
   sfx.wave();
   vibrate([15, 30, 15]);
+  // GOAL 3: an area of the lesson holds only what the lesson needs, so the
+  // generated wave is thrown away and the leg's own bodies are placed instead.
+  if (tutorStep !== null) {
+    tutorLegIx++;
+    tutorSpineIx = 0;
+    tutorCrossedDoor = true;
+    game.spawnQueue = [];
+    tutorPopulateLeg();
+    // GOAL 4: each area is its own checkpoint, so a death here costs this
+    // area and nothing further back.
+    tutorAnchor = { x: player.pos.x, z: player.pos.z, yaw: player.yaw, pitch: player.pitch };
+  }
 }
 
 // Corridor AI steers straight at the player, so a wall corner or a branch
@@ -7905,6 +8048,11 @@ function frame(now) {
   if (game.state === 'dead') target = 0.12;
   if (game.state === 'menu') target = 0.5;   // dreamy half-speed attract mode
   timeScale += (target - timeScale) * Math.min(dt * TIME_EASE, 1);
+  // THE ONBOARDING'S HARD FREEZE. Snapped rather than eased, and applied after
+  // the ease so nothing creeps: the arm stops mid-raise and the world waits.
+  // The player's own controls keep working — they can look around at the man
+  // about to shoot them, which is rather the point.
+  if (tutorWorldHeld) timeScale = 0;
   const sdt = dt * timeScale;   // scaled dt: the world's clock
   worldT += sdt;                // ...and its running total, for world-time gaps
 
@@ -8259,6 +8407,7 @@ function frame(now) {
   if (game.state === 'menu') updateShimmer(now / 1000);
   sfx.update(playing || game.state === 'clear' ? timeScale : 1, dt);
   el.crosshair.classList.toggle('hot', player.fireCd > 0);
+  if (tutorStep !== null) tutorPlaceWorldCue();
 
   renderFrame(dt);
 }
@@ -8362,6 +8511,8 @@ window.__ts = {
     meterSaid: tutorMeterSaid, deadPending: tutorDeadPending,
     awaitShot: tutorAwaitShot, froze: tutorFroze,
     anchor: tutorAnchor && { x: +tutorAnchor.x.toFixed(2), z: +tutorAnchor.z.toFixed(2) },
+    legIx: tutorLegIx, spineIx: tutorSpineIx, held: tutorWorldHeld,
+    barrierZ: tutorBar ? +tutorBar.z.toFixed(1) : null,
     moved: +tutorMoved.toFixed(2), looked: +tutorLooked.toFixed(2) }),
   // what the bodies are doing and where they are, for the wall-clip check
   bodies: () => enemies.map((e) => ({ x: +e.pos.x.toFixed(2), z: +e.pos.z.toFixed(2),

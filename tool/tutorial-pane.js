@@ -17,6 +17,7 @@ import {
   CUE_EVENTS, CUE_SHOW, ADVANCE_KINDS, OVERRIDE_KEY, PREVIEW_PARAM,
 } from '../src/tutorial.js';
 import { ELEMENTS } from '../src/protocols.js';
+import { initTutorialMap, setMapLeg, refreshMap, fitMap } from './tutorial-map.js';
 
 const $ = (id) => document.getElementById(id);
 const clone = (v) => JSON.parse(JSON.stringify(v));
@@ -39,6 +40,7 @@ let open = new Set([spec.STEPS[0] && spec.STEPS[0].id]);
 let dirty = false;
 
 export function tutorialSpec() { return spec; }
+export { fitMap };
 
 // --- persistence -----------------------------------------------------------
 // The preview reads this key, and ONLY under ?tutorpreview=1 — see the note in
@@ -46,7 +48,10 @@ export function tutorialSpec() { return spec; }
 function save() {
   try { localStorage.setItem(OVERRIDE_KEY, JSON.stringify(spec)); } catch { /* private */ }
 }
-function markDirty() { dirty = true; save(); paintApply(); }
+function markDirty(refresh = true) {
+  dirty = true; save(); paintApply();
+  if (refresh) { try { refreshMap(); } catch { /* map not up yet */ } }
+}
 function paintApply() {
   const b = $('tutApply');
   if (b) { b.classList.toggle('on', dirty); b.textContent = dirty ? 'Apply to preview ●' : 'Apply to preview'; }
@@ -91,10 +96,10 @@ function renderLegs() {
     name.type = 'text'; name.value = leg.id;
     name.oninput = () => { leg.id = name.value; markDirty(); };
     const form = sel(leg.form, FORMS.map((f) => [f, f]), (v) => { leg.form = v; markDirty(); reload(); }, 'The space this leg is');
-    const cells = document.createElement('input');
-    cells.type = 'number'; cells.min = 2; cells.max = 24; cells.value = leg.cells;
-    cells.title = 'Straight cells before the leg is allowed to do anything else';
-    cells.oninput = () => { leg.cells = parseInt(cells.value, 10) || 7; markDirty(); };
+    // An authored leg's length is its PATH — edit it on the map, not here.
+    const len = document.createElement('span');
+    len.style.cssText = 'font-size:10.5px;color:var(--dim);white-space:nowrap';
+    len.textContent = `${(leg.plan && leg.plan.moves || []).reduce((n, [, k]) => n + k, 0)} cells`;
     const st = document.createElement('label');
     st.style.cssText = 'font-size:10.5px;color:var(--dim);display:flex;gap:4px;align-items:center';
     const stc = document.createElement('input');
@@ -113,13 +118,11 @@ function renderLegs() {
       if (spec.LEGS.length <= 1) return;
       spec.LEGS.splice(i, 1); markDirty(); renderLegs(); reload();
     }, 'Remove this leg');
+    const pick = btn('▦', () => { setMapLeg(i); renderLegs(); }, 'Show this leg on the map');
     const r1 = document.createElement('div'); r1.className = 'r1';
-    r1.append(name, del);
+    r1.append(pick, name, del);
     const r2 = document.createElement('div'); r2.className = 'r2';
-    const cl = document.createElement('span');
-    cl.style.cssText = 'font-size:10.5px;color:var(--dim)';
-    cl.textContent = 'cells';
-    r2.append(form, cl, cells);
+    r2.append(form, len);
     const r3 = document.createElement('div'); r3.className = 'r2';
     r3.style.marginTop = '5px';
     r3.append(st, ba);
@@ -190,7 +193,7 @@ function renderNums() {
 
 // --- 2 + 3. the steps ------------------------------------------------------
 function renderSteps() {
-  const host = $('tutedit');
+  const host = $('tutsteps');
   if (!host) return;
   host.innerHTML = '';
   const head = document.createElement('div');
@@ -440,6 +443,12 @@ addEventListener('message', (ev) => {
 // --- wiring ----------------------------------------------------------------
 export function initTutorialPane() {
   renderLegs(); renderNums(); renderSteps(); renderJump(); paintApply();
+  // The map edits the SAME spec object, so painting a room and typing a cue
+  // are the same edit as far as everything downstream is concerned.
+  initTutorialMap(spec, (legChanged) => {
+    dirty = true; save(); paintApply();
+    if (legChanged) renderLegs();
+  });
   $('legAdd').onclick = addLeg;
   $('pReload').onclick = reload;
   $('tutApply').onclick = reload;

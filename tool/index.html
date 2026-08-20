@@ -61,11 +61,27 @@
   body.tutmode{grid-template-columns:250px 1fr 0}
 
   /* --- the tutorial panes --- */
-  #tutmain{position:absolute;inset:0;display:none;grid-template-columns:1fr 420px;
+  #tutmain{position:absolute;inset:0;display:none;grid-template-columns:1fr 400px;
        overflow:hidden}
   body.tutmode #tutmain{display:grid}
   body.tutmode canvas,body.tutmode #hud{display:none}
-  #tutedit{overflow-y:auto;padding:12px 14px}
+  /* the editor column: the leg's overhead map on top, its steps underneath */
+  #tutedit{overflow:hidden;display:grid;grid-template-rows:minmax(180px,42%) 1fr}
+  #tutmap{position:relative;border-bottom:1px solid var(--line);background:#0e1014;
+       overflow:hidden}
+  #tutmap canvas{position:absolute;inset:0;width:100%;height:100%;display:block;
+       cursor:crosshair}
+  #tutmaphud{position:absolute;left:8px;bottom:8px;background:rgba(12,13,16,.86);
+       border:1px solid var(--line);border-radius:7px;padding:6px 9px;font-size:10.5px;
+       color:var(--dim);pointer-events:none}
+  #tutmaphud b{color:var(--ink)}
+  #tutmapbar{position:absolute;left:8px;top:8px;right:8px;display:flex;gap:4px;
+       flex-wrap:wrap;align-items:center}
+  #tutmapbar button{padding:3px 7px;font-size:10.5px;line-height:1.3}
+  #tutmapbar .lg{padding:3px 8px;font-size:10.5px}
+  #tutmapbar button.on{background:var(--red);border-color:var(--red);color:#fff}
+  .legrow .r1 button{padding:4px 7px;line-height:1;flex:none}
+  #tutsteps{overflow-y:auto;padding:11px 13px}
   #tutprev{border-left:1px solid var(--line);background:#0a0b0e;display:flex;
        flex-direction:column;overflow:hidden}
   #tutprev .pbar{display:flex;align-items:center;gap:6px;padding:8px 10px;
@@ -209,7 +225,14 @@
   <canvas id="map"></canvas>
   <div id="hud"></div>
   <div id="tutmain">
-    <div id="tutedit"></div>
+    <div id="tutedit">
+      <div id="tutmap">
+        <canvas id="tutcanvas"></canvas>
+        <div id="tutmapbar"></div>
+        <div id="tutmaphud"></div>
+      </div>
+      <div id="tutsteps"></div>
+    </div>
     <div id="tutprev">
       <div class="pbar">
         <button id="pReload">⟳ Restart</button>
