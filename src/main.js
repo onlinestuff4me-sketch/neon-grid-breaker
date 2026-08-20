@@ -3279,7 +3279,12 @@ function enemyFire(e, toPlayer) {
   }
   muzzleFlash(origin.x, origin.y, origin.z, 0.85);
   sfx.enemyShot();
-  if (tutorStep !== null) tutorNoteShot();
+  if (tutorStep !== null) {
+    const b = bullets[bullets.length - 1];
+    if (b) b.turnOwner = e;
+    e.firedOnce = true;
+    tutorNoteShot();
+  }
 }
 
 // Telegraph flash: shotgunners light up both muzzle tips; other grouped guns
@@ -3467,7 +3472,7 @@ function updateEnemy(e, sdt) {
       e.seenT = los ? (e.seenT || 0) + sdt : 0;
       if (e.type !== 'rusher' && dist < e.engageDist && e.fireCd <= 0 &&
           (!ENEMY_TYPES[e.type].shielded || Math.cos(e.g.rotation.y - wantYaw) > 0.8) &&
-          performance.now() >= game.noFireBefore && !tutorHoldsFire() &&
+          performance.now() >= game.noFireBefore && !tutorHoldsFire(e) &&
           !earlyRoundInFlight() &&
           los && e.seenT > RAMP.sightGrace) {
         // take turns on the trigger: only a couple of guns telegraph at once,
@@ -5716,7 +5721,8 @@ const tutorBefore = (step) => tutorStep !== null &&
   TUTOR_ORDER.indexOf(tutorStep) < TUTOR_ORDER.indexOf(step);
 // Every round here is scripted: the AI never STARTS a telegraph of its own.
 // Once the script has pushed him into `aim`, the ordinary path runs untouched.
-const tutorHoldsFire = () => tutorStep !== null && !tutorMay('aiFire');
+const tutorHoldsFire = (e) => tutorStep !== null
+  && (!tutorMay('aiFire') || (e ? tutorTurnHolds(e) : false));
 const tutorHoldsSpawns = () => tutorStep !== null && !tutorMay('spawns');
 // YOU CANNOT SHOOT WHAT YOU HAVE NOT BEEN GIVEN. Tapping fired a round with no
 // weapon on screen, which is the sort of thing a tutorial exists to prevent.
@@ -5821,16 +5827,40 @@ const TUTOR_BAR_MAT = new THREE.MeshLambertMaterial({ color: 0x3b4148 });
 function tutorPopulateLeg() {
   const spec = TUTOR_LEGS[tutorLegIx];
   const L = hall && hall.legs[hall.cur];
+  tutorTurnOrder = false;
+  tutorTurnHolder = null;
   if (!spec || !spec.enemies || !L || !L.spine) return;
   const base = L.spine[0];
   for (const e of spec.enemies) {
-    const b = tutorPlaceEnemyAt((base[0] + (e.x || 0)) * HALL.cell,
+    tutorPlaceEnemyAt((base[0] + (e.x || 0)) * HALL.cell,
       (base[1] + (e.z || 0)) * HALL.cell, e.type || 'gunner');
-    if (b) b.turnOrder = spec.fireOrder === 'turns';
   }
-  tutorRampFireAt = tutorT + TUTOR.rampFireDelay;
+  tutorTurnOrder = spec.fireOrder === 'turns';
+  // A beat to see the room before anyone shoots at you. Walking through a
+  // door into a round already in the air is not a fight, it is an ambush,
+  // and the first room of the ramp is not the place to teach that.
+  game.noFireBefore = performance.now() + TUTOR.rampFireDelay * 1000;
 }
-let tutorRampFireAt = 0;
+
+// ONE AT A TIME, in area 12. The second man waits until the first's round has
+// gone past you or the first is down — so the room is two problems in a row
+// rather than one problem twice as fast, which is a different lesson.
+let tutorTurnOrder = false;
+let tutorTurnHolder = null;
+function tutorTurnHolds(e) {
+  if (!tutorTurnOrder) return false;
+  if (tutorTurnHolder && (!tutorTurnHolder.alive || enemies.indexOf(tutorTurnHolder) < 0)) {
+    tutorTurnHolder = null;
+  }
+  if (!tutorTurnHolder) { tutorTurnHolder = e; return false; }
+  return tutorTurnHolder !== e;
+}
+// ...and his turn ends when the round he fired is past the player.
+function tutorNoteTurnDodged(b) {
+  if (tutorTurnOrder && b && b.turnOwner && b.turnOwner === tutorTurnHolder) {
+    tutorTurnHolder = null;
+  }
+}
 
 function tutorBuildBarrier() {
   if (tutorBar || game.mode !== 'hall' || !hall) return;
@@ -6166,6 +6196,19 @@ function updateTutorial(dtReal, movedM, yawDelta) {
     }
   } else {
     tutorWorldHeld = false;
+  }
+
+  // A turn-ordered room hands the trigger on when the round goes past, so the
+  // second man is a second problem rather than a simultaneous one.
+  if (tutorTurnOrder) {
+    for (const b of bullets) {
+      if (!b.fromPlayer && b.turnOwner && b.pos.z < player.pos.z - 0.3) tutorNoteTurnDodged(b);
+    }
+    if (tutorTurnHolder && !bullets.some((b) => b.turnOwner === tutorTurnHolder)
+        && tutorTurnHolder.state !== 'aim' && tutorTurnHolder.state !== 'burst'
+        && tutorTurnHolder.firedOnce) {
+      tutorTurnHolder = null;
+    }
   }
 
   // the one round in the air: has it cleared the barrier, and has it gone past
@@ -8528,6 +8571,19 @@ window.__ts = {
     tutorStep = v; tutorNext(v);
   },
   tutorSpec: () => JSON.parse(JSON.stringify(TUTOR_SPEC)),
+  // Stage a named ramp area's bodies in whatever corridor is currently up.
+  // Walking to area 12 to check that area 12 takes turns costs minutes of
+  // headless wall clock and tests the walking, not the taking of turns.
+  tutorPopulate: (legId) => {
+    const i = TUTOR_LEGS.findIndex((l) => l.id === legId);
+    if (i < 0) return false;
+    tutorLegIx = i;
+    for (let k = enemies.length - 1; k >= 0; k--) { scene.remove(enemies[k].g); enemies.splice(k, 1); }
+    tutorPopulateLeg();
+    return true;
+  },
+  tutorTurn: () => ({ order: tutorTurnOrder,
+    holder: tutorTurnHolder ? enemies.indexOf(tutorTurnHolder) : -1 }),
   tutorGrants: () => tutorGrants(),
   tutorCues: () => {
     const sp = tutorSpecOf(tutorStep);
