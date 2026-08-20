@@ -95,6 +95,35 @@ a round is in flight. Everything after it runs at ordinary speed, because a
 tutorial that teaches a slower bullet than the game fires has taught the wrong
 timing.
 
+## Four bugs the playtest found, and what they were really about
+
+Three independent critics played the rebuild. The pattern in what they found is
+worth more than the fixes:
+
+**A clamp that never bit.** The squad was clamped to "the leg's cell extent" —
+except the teaching leg zig-zags across six columns, so the permitted range was
+23 m wide in a 3.4 m corridor. The check existed, read correctly, and did
+nothing. Bodies landed inside walls, where they are invisible AND unkillable
+(417 rounds through the chest of one against 11 for a body on the floor), and
+`shoot` waits on `cleared` — so the lesson deadlocked for anyone who dodged.
+*A bound derived from the wrong set is worse than no bound: it looks like the
+problem is handled.*
+
+**A constant whose comment and code disagreed.** `meterSecs: 7 // full to half`
+was read as full-to-empty, so the half being introduced went in 3.5 s.
+
+**A lesson that could be passed by not doing it.** The meter step ended on
+`meterSaid && !timeLocked`. Arrive with time already running and both are true
+at 1.6 s with the bar at 100%. Goal 4 says progress on success; nothing checked
+that the success had happened.
+
+**A mode switch one tap away.** The pause menu's BUTTON/CLASSIC link is
+reachable throughout, and lesson 5 waits on the time *button*. Switching
+mid-lesson removed the button, left `timeScale` at 0, and pointed an arrow at
+nothing — unfinishable, with the only exit permanently ending the onboarding.
+*Every control that is reachable during a scripted beat is part of that beat's
+state machine whether it was designed to be or not.*
+
 ## Failing it
 
 The onboarding used to hand out invulnerability: being hit flashed the screen
