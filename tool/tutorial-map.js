@@ -20,6 +20,7 @@
 // move when the geometry does rather than being separately maintained.
 // ---------------------------------------------------------------------------
 import { HALL, genAuthoredLeg, planToCells } from '../src/genleg.js';
+import { NO_GRANTS } from '../src/tutorial.js';
 
 const $ = (id) => document.getElementById(id);
 const C = HALL.cell;
@@ -113,6 +114,16 @@ function draw() {
     ctx.fillStyle = spineKey.has(gx + ',' + gz) ? '#39404b' : '#2a3038';
     ctx.fillRect(sx - zoom / 2 + 1, sy - zoom / 2 + 1, zoom - 2, zoom - 2);
   }
+  // ANY CELL THAT IS NOT ON THE PATH is an alternate route — a fork's lane or
+  // a room's width. Outlined, because the fork drew as a detached rectangle
+  // floating beside the spine: the one structure that has to read as a branch
+  // read as debris.
+  ctx.strokeStyle = '#4d5763'; ctx.lineWidth = 1;
+  for (const [gx, gz] of g.cells) {
+    if (spineKey.has(gx + ',' + gz)) continue;
+    const [sx, sy] = g2s(gx, gz);
+    ctx.strokeRect(sx - zoom / 2 + 1.5, sy - zoom / 2 + 1.5, zoom - 3, zoom - 3);
+  }
   // the walked path, so a corner reads as a corner
   ctx.strokeStyle = '#6b7684'; ctx.lineWidth = Math.max(1.5, zoom * 0.1);
   ctx.beginPath();
@@ -127,6 +138,24 @@ function draw() {
     ctx.fillStyle = '#9aa3ad';
     ctx.fillRect(sx - zoom * 0.18, sy - zoom * 0.18, zoom * 0.36, zoom * 0.36);
   }
+
+  // WHERE THE LESSONS CHANGE. The steps advance on spine indices, so a
+  // designer redrawing the path needs to see which cell ends lesson 1 — that
+  // is the whole reason to be looking at this map rather than the data.
+  ctx.textAlign = 'left';
+  for (const st of (spec.STEPS || [])) {
+    if (!st.advance || st.advance.kind !== 'reached') continue;
+    const i = st.advance.need;
+    const cell = g.spine[Math.min(g.spine.length - 1, i | 0)];
+    if (!cell || legIx !== 0) continue;
+    const [sx, sy] = g2s(cell[0], cell[1]);
+    ctx.strokeStyle = '#ff8a2e'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(sx - zoom, sy); ctx.lineTo(sx + zoom, sy); ctx.stroke();
+    ctx.fillStyle = '#ff8a2e';
+    ctx.font = `800 ${Math.max(8, Math.min(12, zoom * 0.42))}px ui-sans-serif`;
+    ctx.fillText(st.label || st.id, sx + zoom * 1.2, sy + 3);
+  }
+  ctx.textAlign = 'center';
 
   // START and DOOR: derived, never painted
   const tag = (gx, gz, col, txt) => {
@@ -149,10 +178,10 @@ function draw() {
       const [sx, sy] = g2s(a[0], bz);
       ctx.fillStyle = '#16181d';
       ctx.fillRect(sx - zoom * 0.5, sy - zoom * 0.16, zoom, zoom * 0.32);
-      ctx.fillStyle = '#8b929c';
-      ctx.font = `800 ${Math.max(7, zoom * 0.3)}px ui-sans-serif`;
+      ctx.fillStyle = '#c8ced6';
+      ctx.font = `800 ${Math.max(9, Math.min(12, zoom * 0.4))}px ui-sans-serif`;
       ctx.textAlign = 'center';
-      ctx.fillText('STAND HERE', sx, sy - zoom * 0.34);
+      ctx.fillText('STAND HERE', sx, sy - zoom * 0.5);
       // ...and the gunner the lesson puts beyond it
       const [ex, ey] = g2s(a[0], bz + (spec.TUTOR.enemyCells || 5));
       ctx.beginPath(); ctx.arc(ex, ey, zoom * 0.3, 0, 7);
@@ -172,8 +201,16 @@ function draw() {
     ctx.fillText((e.type || 'gunner').slice(0, 2).toUpperCase(), sx, sy + zoom * 0.11);
   });
 
-  hud(`<b>${L.id}</b> · ${g.cells.length} cells · path ${g.spine.length} · `
-    + `${(L.enemies || []).length} enemies · ${(g.endGz - g.spine[0][1]) * C} m long`);
+  // WALKED length, not z-extent. The teaching leg zig-zags, so measuring the
+  // depth of its bounding box under-reported the walk by 20% — and the leg
+  // card in the sidebar counted moves while this counted floor cells, so two
+  // places on one screen gave three different numbers for the same corridor.
+  const walked = (g.spine.length - 1) * C;
+  // the teaching leg's bodies come from its STEPS, not from the leg
+  const bodies = (L.enemies || []).length;
+  const who = bodies ? `${bodies} enemies` : 'enemies from the steps';
+  hud(`<b>${L.id}</b> · ${g.cells.length} floor cells · ${who} · `
+    + `<b>${walked} m</b> walked`);
 }
 function hud(html) { const n = $('tutmaphud'); if (n) n.innerHTML = html; }
 

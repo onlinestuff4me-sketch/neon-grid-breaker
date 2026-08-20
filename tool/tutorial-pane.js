@@ -99,7 +99,8 @@ function renderLegs() {
     // An authored leg's length is its PATH — edit it on the map, not here.
     const len = document.createElement('span');
     len.style.cssText = 'font-size:10.5px;color:var(--dim);white-space:nowrap';
-    len.textContent = `${(leg.plan && leg.plan.moves || []).reduce((n, [, k]) => n + k, 0)} cells`;
+    // the same number the map's readout gives, in the same units
+    len.textContent = `${(leg.plan && leg.plan.moves || []).reduce((n, [, k]) => n + k, 0) * 4} m`;
     const st = document.createElement('label');
     st.style.cssText = 'font-size:10.5px;color:var(--dim);display:flex;gap:4px;align-items:center';
     const stc = document.createElement('input');
@@ -302,11 +303,21 @@ function stepCard(st, i) {
   fh.textContent = 'AND ON ENTERING IT';
   bd.appendChild(fh);
   const furn = document.createElement('div'); furn.className = 'mech';
+  // ALL of them. Five of these used to be missing, and the omission had teeth:
+  // moving `placeEnemy` to another step — which the code specifically invites —
+  // moved the gunner and left `hardFreeze` behind on the old step, silently
+  // killing the freeze that makes the first round survivable. A tool that can
+  // author some of what the game reads is a second source of truth.
   const FURNITURE = [
-    ['placeEnemy', 'Place one gunner', 'One body at enemyAt metres, straight ahead.'],
+    ['buildBarrier', 'Raise the barrier', 'The wall-to-wall block the STAND HERE label hangs over.'],
+    ['placeEnemy', 'Place one gunner', 'One body enemyCells beyond the barrier.'],
     ['placeSquad', 'Place the squad', 'finalEnemies − 1 more, abreast at ±enemyX.'],
-    ['dropBarrier', 'Drop the barrier', 'The wall-to-wall block sinks into the floor.'],
+    ['hardFreeze', 'Stop the world', 'Hold everything mid-telegraph until the time button is pressed.'],
+    ['startMeter', 'Reveal the meter', 'The bar appears full and begins to drain.'],
+    ['raiseGun', 'Raise the weapon', 'The viewmodel swings up on the reload rig.'],
+    ['dropBarrier', 'Drop the barrier', 'It sinks into the floor.'],
     ['openDoor', 'Open the door', 'The red door at the end of the leg.'],
+    ['checkpoint', 'Checkpoint', 'Dying rewinds to here, and the area is rebuilt.'],
     ['divider', 'Dotted divider', 'The centre line that splits move from look.'],
   ];
   for (const [key, label, why] of FURNITURE) {
