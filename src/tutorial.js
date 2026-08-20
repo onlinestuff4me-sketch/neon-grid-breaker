@@ -120,28 +120,40 @@ export const LEGS = [
     plan: { moves: TEACH_MOVES, extra: FORK_LANE, approach: 4 },
     marks: TEACH_MARKS,
   },
+  // WITHIN ENGAGE RANGE OF THE DOOR YOU COME IN THROUGH. A gunner's
+  // engageDist is 19-25 m; bodies parked at z 7-10 stood 28 m from the entry,
+  // so nothing happened for the first four cells of every area and "fires as
+  // they enter" never once happened. They stand at 4-6 cells now.
+  //
+  // ROOMS ARE WIDE AT THE MOUTH. A three-cell bay buried mid-leg is
+  // indistinguishable from a corridor at the only moment the difference
+  // matters, which is when you walk in.
   { id: 'room1', form: 'vault', kind: 'room', note: '10. One enemy, fires as you enter.',
-    plan: { moves: [['f', 9]], extra: room(1, 3, 6), approach: 3 },
-    enemies: [{ x: 0, z: 7, type: 'gunner' }], fireOrder: 'free' },
+    plan: { moves: [['f', 8]], extra: room(1, 1, 6), approach: 3 },
+    enemies: [{ x: 0, z: 5, type: 'gunner' }], fireOrder: 'free' },
   { id: 'hall1', form: 'corridor', kind: 'hall', note: '11. One enemy blocking the door.',
-    plan: { moves: [['f', 9]], approach: 3 },
-    enemies: [{ x: 0, z: 7, type: 'gunner' }], fireOrder: 'free' },
+    plan: { moves: [['f', 8]], approach: 3 },
+    enemies: [{ x: 0, z: 5, type: 'gunner' }], fireOrder: 'free' },
   { id: 'room2', form: 'vault', kind: 'room', note: '12. Two side by side, taking turns.',
-    plan: { moves: [['f', 10]], extra: room(1, 3, 7), approach: 3 },
-    enemies: [{ x: -1, z: 7, type: 'gunner' }, { x: 1, z: 7, type: 'gunner' }],
+    plan: { moves: [['f', 9]], extra: room(1, 1, 7), approach: 3 },
+    enemies: [{ x: -1, z: 5, type: 'gunner' }, { x: 1, z: 5, type: 'gunner' }],
     fireOrder: 'turns' },
+  // OFF THE CENTRE LINE. Three bodies at x = 0 are one silhouette: the front
+  // one occludes the others perfectly and the HUD count contradicts the screen.
   { id: 'hall2', form: 'corridor', kind: 'hall', note: '13. Two in a hallway.',
-    plan: { moves: [['f', 11]], approach: 3 },
-    enemies: [{ x: 0, z: 7, type: 'gunner' }, { x: 0, z: 9, type: 'gunner' }],
+    plan: { moves: [['f', 10]], approach: 3 },
+    // x is in CELLS, so a quarter is a metre — enough to break the silhouette
+    // in a corridor that only has 3.4 m of floor to play with.
+    enemies: [{ x: -0.22, z: 5, type: 'gunner' }, { x: 0.22, z: 8, type: 'gunner' }],
     fireOrder: 'free' },
   { id: 'room3', form: 'vault', kind: 'room', note: '14. Three in a room.',
-    plan: { moves: [['f', 11]], extra: room(1, 3, 8), approach: 3 },
-    enemies: [{ x: -1, z: 7, type: 'gunner' }, { x: 1, z: 7, type: 'gunner' },
-      { x: 0, z: 9, type: 'gunner' }], fireOrder: 'free' },
+    plan: { moves: [['f', 10]], extra: room(1, 1, 8), approach: 3 },
+    enemies: [{ x: -1, z: 5, type: 'gunner' }, { x: 1, z: 5, type: 'gunner' },
+      { x: 0, z: 8, type: 'gunner' }], fireOrder: 'free' },
   { id: 'hall3', form: 'corridor', kind: 'hall', note: '15. Three: one, then two close behind.',
-    plan: { moves: [['f', 12]], approach: 3 },
-    enemies: [{ x: 0, z: 6, type: 'gunner' }, { x: 0, z: 9, type: 'gunner' },
-      { x: 0, z: 10, type: 'gunner' }], fireOrder: 'free' },
+    plan: { moves: [['f', 11]], approach: 3 },
+    enemies: [{ x: 0, z: 4, type: 'gunner' }, { x: -0.24, z: 8, type: 'gunner' },
+      { x: 0.24, z: 9, type: 'gunner' }], fireOrder: 'turns' },
 ];
 
 // --- what the player is allowed to do --------------------------------------
@@ -291,8 +303,11 @@ export const STEPS = [
     id: 'dodge3', label: '6 · Dodge three',
     advance: { kind: 'dodged', need: 3 },
     grants: { timebtn: true }, placeSquad: true,
+    // off:'advance', not off:'dodge'. It used to leave on the first of the
+    // three, so rounds two and three arrived with a blank screen — the exact
+    // failure goal 2 exists to prevent, in the lesson whose name is "three".
     cues: [{ text: 'DODGE THE BULLETS', slot: 'mid', arrow: 'none', hand: 'none',
-      pulse: false, on: 'enter', off: 'dodge' }],
+      pulse: false, on: 'enter', off: 'advance' }],
   },
   // --- 7. THE METER --------------------------------------------------------
   // Only now. A resource you watch drain while you are learning to dodge is
@@ -302,9 +317,13 @@ export const STEPS = [
     advance: { kind: 'resumed' },
     grants: { timebtn: true, meter: true }, startMeter: true,
     cues: [
-      { text: 'YOUR TIME IS RUNNING OUT', slot: 'top', arrow: 'up', hand: 'none',
-        pulse: true, on: 'enter', off: 'advance' },
-      { text: 'TAP TO LET TIME RUN', slot: 'atbtn', arrow: 'down', hand: 'none',
+      { text: 'SLOW TIME METER<span>IT EMPTIES WHILE TIME IS SLOW</span>',
+        slot: 'top', arrow: 'up', hand: 'none',
+        pulse: false, on: 'enter', off: 'advance' },
+      // ...and what refills it, which is the fact that makes the meter make
+      // sense and was never stated anywhere.
+      { text: 'TAP TO LET TIME RUN<span>IT REFILLS WHEN TIME RUNS</span>',
+        slot: 'atbtn', arrow: 'down', hand: 'none',
         pulse: true, on: 'meter', off: 'advance' },
     ],
   },
@@ -312,7 +331,9 @@ export const STEPS = [
   {
     id: 'gunup', label: '8a · Weapon up',
     advance: { kind: 'gunUp' },
-    grants: { timebtn: true, meter: true, bank: true }, raiseGun: true,
+    // gun: true so the rise is SEEN. Without it this step was 0.6 s of an
+    // empty corridor and the weapon then popped into frame on the next one.
+    grants: { gun: true, timebtn: true, meter: true, bank: true }, raiseGun: true,
     cues: [],
   },
   {

@@ -50,6 +50,12 @@
      the thing you are aiming at. Built from two elements with a gradient so
      the gap costs no extra nodes. */
   #crosshair { position:absolute; left:50%; top:50%; width:20px; height:20px; transform:translate(-50%,-50%); }
+  /* The crosshair belongs to the weapon. It was on screen from the first frame
+     of the onboarding, five lessons before there is a gun — and it sat inside
+     STAND HERE and under TAP HERE TO SLOW TIME. Goal 3: it arrives with the
+     thing it aims. `body.armed` is set the moment the gun is granted. */
+  body.tutoring:not(.armed) #crosshair { display:none; }
+  body.tutoring:not(.armed) #pausebtn { opacity:0; pointer-events:none; }
   #crosshair::before, #crosshair::after { content:""; position:absolute; }
   #crosshair::before { left:50%; top:0; width:3px; height:100%; transform:translateX(-50%);
                        background:linear-gradient(180deg,#111 0 35%,transparent 35% 65%,#111 65% 100%); }
@@ -258,7 +264,13 @@
            transition:opacity .35s ease, transform .35s ease;
            transform:translateY(8px); pointer-events:none; }
   .tslot.show { opacity:1; transform:none; }
-  body.slowmo .tslot { color:#eef0f3; }
+  /* In bullet time the corridor is a pale wash and white text on it measured
+     about 1.2:1 — DRAG TO MOVE, the one instruction you need while a round is
+     in the air, was effectively invisible. Every slot gets the shadow the red
+     ones already had. */
+  .tslot { text-shadow:0 2px 14px rgba(238,240,243,.9), 0 0 2px rgba(238,240,243,.7); }
+  body.slowmo .tslot { color:#eef0f3;
+     text-shadow:0 2px 14px rgba(12,13,16,.92), 0 0 2px rgba(12,13,16,.8); }
   .tslot span { display:block; margin-top:14px; font-size:min(5.2vw,24px);
            letter-spacing:.1em; }
 
@@ -274,7 +286,9 @@
   body.slowmo #ts-atbtn { color:#ff5d4a; text-shadow:0 2px 18px rgba(12,13,16,.8); }
 
   /* the meter's own sentence, directly under the bar it is about */
-  #ts-top   { left:0; right:0; top:calc(env(safe-area-inset-top, 0px) + 80px);
+  /* Clear of the letterbox. .lbar is 7vh scaled 1.4 = ~86 px in bullet time,
+     and at 80 px the top third of every capital was printed on black. */
+  #ts-top   { left:0; right:0; top:calc(env(safe-area-inset-top, 0px) + 104px);
            font-size:min(5.4vw,24px); color:#ff2d1a;
            text-shadow:0 2px 18px rgba(238,240,243,.75); }
   body.slowmo #ts-top { text-shadow:0 2px 18px rgba(12,13,16,.85); }
@@ -287,7 +301,10 @@
            transition:opacity .35s ease; transform:none; }
   body.slowmo #ts-world { text-shadow:0 2px 16px rgba(12,13,16,.85); }
 
-  @keyframes tutorpulse { 0%,100% { opacity:1; } 50% { opacity:.32; } }
+  /* It used to dip to 32%, which meant every critical instruction — STAND
+     HERE, TAP HERE TO SLOW TIME — was half-absent on a 1.05 s loop. A prompt
+     that is gone half the time is a prompt on a timer. It breathes now. */
+  @keyframes tutorpulse { 0%,100% { opacity:1; } 50% { opacity:.78; } }
   .tslot.pulse.show { animation:tutorpulse 1.05s ease-in-out infinite; }
 
   /* Straight down at the button, from directly above it. A LINE, not a floating
@@ -312,7 +329,7 @@
   }
   /* ...and its opposite, pointing UP at the meter that is emptying. */
   #tutorup { position:absolute; left:0; right:0; text-align:center;
-             top:calc(env(safe-area-inset-top, 0px) + 48px);
+             top:calc(env(safe-area-inset-top, 0px) + 74px);
              font-size:24px; line-height:1; font-weight:900; color:#ff2d1a;
              opacity:0; pointer-events:none;
              text-shadow:0 2px 12px rgba(238,240,243,.8); }
@@ -326,16 +343,18 @@
   /* the simulated thumb: a soft disc with a ring, moved by keyframes */
   #tutorhand, #tutorhand2 { position:absolute; width:74px; height:74px; margin:-37px 0 0 -37px;
                border-radius:50%; opacity:0; transition:opacity .3s ease;
-               background:radial-gradient(circle, rgba(22,24,29,.34) 0%, rgba(22,24,29,.16) 55%, rgba(22,24,29,0) 70%);
-               box-shadow:inset 0 0 0 2px rgba(22,24,29,.34); }
+               background:radial-gradient(circle, rgba(22,24,29,.5) 0%, rgba(22,24,29,.26) 55%, rgba(22,24,29,0) 70%);
+               box-shadow:inset 0 0 0 3px rgba(22,24,29,.55); }
   body.slowmo #tutorhand, body.slowmo #tutorhand2 { background:radial-gradient(circle, rgba(238,240,243,.42) 0%, rgba(238,240,243,.2) 55%, rgba(238,240,243,0) 70%);
                box-shadow:inset 0 0 0 2px rgba(238,240,243,.5); }
   #tutorhand.on, #tutorhand2.on { opacity:1; }
   @keyframes handup   { 0% { transform:translateY(46px); }  60% { transform:translateY(-46px); } 100% { transform:translateY(-46px); opacity:0; } }
   @keyframes handside { 0% { transform:translateX(52px); }  50% { transform:translateX(-52px); } 100% { transform:translateX(52px); } }
   @keyframes handtap  { 0%,72% { transform:scale(1); opacity:.95; } 84% { transform:scale(.62); opacity:1; } 100% { transform:scale(1); opacity:.95; } }
+  /* Level with each other: in lesson 2 the two prompts are level and the two
+     hands were 100 px apart vertically, so the pairing did not read. */
   #tutorhand.up, #tutorhand2.up     { left:26%; top:58%; animation:handup 1.9s ease-in-out infinite; }
-  #tutorhand.side, #tutorhand2.side { left:74%; top:52%; animation:handside 2.3s ease-in-out infinite; }
+  #tutorhand.side, #tutorhand2.side { left:74%; top:58%; animation:handside 2.3s ease-in-out infinite; }
   #tutorhand.tap, #tutorhand2.tap   { animation:handtap 1.15s ease-in-out infinite; }
   /* the time button's grand entrance */
   @keyframes tbarrive { 0% { transform:scale(.2); opacity:0; }

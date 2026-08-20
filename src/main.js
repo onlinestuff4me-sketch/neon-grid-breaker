@@ -4023,6 +4023,15 @@ function onPointerDown(ev) {
         vibrate(12);
       }
       if (ev.target.closest && ev.target.closest('#modelink')) {
+        // NOT DURING THE LESSON. The onboarding only starts in button mode,
+        // and lesson 5 waits on the time BUTTON being pressed — switch to
+        // classic half-way through and the button is no longer rendered, the
+        // world stays frozen at timeScale 0, and the arrow points at nothing.
+        // The tutorial becomes unfinishable and the only way out is the menu.
+        if (tutorStep !== null) {
+          showBanner('NOT DURING THE LESSON', 1400);
+          return;
+        }
         timeMode = timeMode === 'toggle' ? 'classic' : 'toggle';
         try { localStorage.setItem('timeshard_mode', timeMode); } catch { /* private mode */ }
         updateModeUI();
@@ -5706,6 +5715,7 @@ let tutorLegIx = 0;          // which entry of TUTOR_LEGS the current leg is
 let tutorVolleyT = 0;        // beat between rounds in the three-round lesson
 let tutorSpineIx = 0;        // how far along the leg's spine they have walked
 let tutorMeterOn = false, tutorMeterAt = 0, tutorMeterSaid = false;
+let tutorMeterEverShown = false;   // once taught, it does not un-teach
 let tutorBar = null;
 let tutorArmed = false, tutorSeen = false;
 let tutorShaping = false, tutorLegsBuilt = 0;
@@ -5804,8 +5814,12 @@ function tutorPlaceWorldCue() {
   const behind = _vWorld.z > 1;
   n.style.opacity = behind ? '0' : '';
   if (behind) return;
-  n.style.left = `${(_vWorld.x * 0.5 + 0.5) * w}px`;
-  n.style.top = `${(-_vWorld.y * 0.5 + 0.5) * h}px`;
+  // CLAMPED. Even anchored correctly, a label on a thing you are standing at
+  // wants to be behind your shoulder; it stays on screen instead, because a
+  // prompt that leaves when the player arrives is the failure goal 2 names.
+  const halfW = n.offsetWidth / 2 || 110;
+  n.style.left = `${Math.max(halfW + 6, Math.min(w - halfW - 6, (_vWorld.x * 0.5 + 0.5) * w))}px`;
+  n.style.top = `${Math.max(90, Math.min(h - 160, (-_vWorld.y * 0.5 + 0.5) * h))}px`;
 }
 
 function tutorHand(kind, kind2) {
@@ -5829,6 +5843,16 @@ function tutorPopulateLeg() {
   const L = hall && hall.legs[hall.cur];
   tutorTurnOrder = false;
   tutorTurnHolder = null;
+  // Whatever was left in the last area does not follow you into this one. In
+  // ordinary play the previous leg is cleared before its door opens, so this
+  // never fires — but "an area holds exactly what the area declares" should be
+  // true because it is enforced, not because it usually happens to be.
+  for (let i = enemies.length - 1; i >= 0; i--) {
+    removeEnemyShards(enemies[i]);
+    removeBeam(enemies[i]);
+    scene.remove(enemies[i].g);
+    enemies.splice(i, 1);
+  }
   if (!spec || !spec.enemies || !L || !L.spine) return;
   const base = L.spine[0];
   for (const e of spec.enemies) {
@@ -5876,11 +5900,23 @@ function tutorBuildBarrier() {
     ? L.spine[Math.min(L.spine.length - 1, marks.forkEnd)] : null;
   const z = anchor ? (anchor[1] + TUTOR.barrierCells) * C
     : player.pos.z + TUTOR.barrierCells * C;
-  // WALL TO WALL, derived from the leg's own extent: it is a barrier, not a
-  // crate, and there must be no edge to walk round.
+  // WALL TO WALL — of the row it actually stands in, not of the whole leg.
+  // Taking the extent of every cell in a leg that zig-zags across six columns
+  // produced a 25.6 m slab in a 3.4 m corridor, centred two metres off the
+  // spine: it read as a rendering fault, and because the STAND HERE label
+  // anchors to the mesh, perspective dragged the words off the right-hand edge
+  // of the screen exactly as the player walked up to it. Goal 2 failing
+  // because the player did the right thing.
+  const gzHere = Math.round(z / C);
   let minGx = Infinity, maxGx = -Infinity;
-  for (const [gx] of L.cells) { minGx = Math.min(minGx, gx); maxGx = Math.max(maxGx, gx); }
-  const w = (maxGx - minGx + 1) * C + 1.6;
+  for (const [gx, gz] of L.cells) {
+    if (Math.abs(gz - gzHere) > 0.5) continue;
+    minGx = Math.min(minGx, gx); maxGx = Math.max(maxGx, gx);
+  }
+  if (!isFinite(minGx)) {   // no row there: fall back to the spine cell
+    minGx = maxGx = anchor ? anchor[0] : Math.round(player.pos.x / C);
+  }
+  const w = (maxGx - minGx + 1) * C + 1.2;
   const x = (minGx + maxGx) / 2 * C;
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, TUTOR.barrierH, 0.5), TUTOR_BAR_MAT);
   m.position.set(x, TUTOR.barrierH / 2, z);
@@ -5950,10 +5986,29 @@ function tutorPlaceEnemyAt(x, z, type = 'gunner') {
   spawnEnemy(type);
   const e = enemies[enemies.length - 1];
   if (!e) return null;
-  e.hold = { x, z };
-  e.pos.set(x, 0, z);
-  e.g.position.set(x, 0, z);
+  // A held body ignores collision, so the script is the only thing keeping it
+  // out of the masonry — clamp to the floor of the row it stands in.
+  const cx = tutorClampX(x, z);
+  e.hold = { x: cx, z };
+  e.pos.set(cx, 0, z);
+  e.g.position.set(cx, 0, z);
   return e;
+}
+// The clear floor at a given z: the row's cell extent, less half a wall and
+// half a body at each end.
+function tutorClampX(x, z) {
+  const L = hall && hall.legs[hall.cur];
+  if (!L || !L.cells) return x;
+  const C = HALL.cell, gz = Math.round(z / C);
+  let lo = Infinity, hi = -Infinity;
+  for (const [gx, cgz] of L.cells) {
+    if (cgz !== gz) continue;
+    lo = Math.min(lo, gx); hi = Math.max(hi, gx);
+  }
+  if (!isFinite(lo)) return x;
+  const a = (lo - 0.5) * C + HALL.wall / 2 + 0.55;
+  const b = (hi + 0.5) * C - HALL.wall / 2 - 0.55;
+  return b > a ? Math.max(a, Math.min(b, x)) : (a + b) / 2;
 }
 function tutorPlaceEnemy(z, xOff = 0) {
   spawnEnemy('gunner');
@@ -5988,6 +6043,7 @@ function tutorResetWorld() {
   tutorMoved = 0; tutorLooked = 0; tutorFroze = false;
   tutorShotsFired = 0; tutorDodged = 0;
   tutorMeterOn = false; tutorMeterAt = 0; tutorMeterSaid = false;
+  tutorMeterEverShown = false;
   tutorAwaitShot = false; tutorAnchor = null; tutorDeadPending = false;
   tutorAnchorStep = null; tutorButtonShown = false; tutorFired = new Set();
   tutorHardFreeze = false; tutorWorldHeld = false;
@@ -6033,12 +6089,20 @@ function endTutorial(taught = true) {
   if (tutorBar) tutorDropBarrier();
   for (const e of enemies) e.hold = null;
   updateModeUI();
+  document.body.classList.add('armed');
   tutorSeen = true;
   try { persist('timeshard_taught', '1'); } catch { /* private */ }
   tutorArmed = false;
   try { persist('timeshard_tutarm', ''); } catch { /* private */ }
   updateTutPill();
-  if (taught) { const t = 'REACH THE RED DOOR'; setTimeout(() => showBanner(t, 2200), 60); }
+  // IT HAS TO END, not just stop. Everything the lesson withheld arrives on
+  // one frame — score line, meter, ammo, gun, button — and without a word for
+  // it the only thing that tells the player the training wheels are off is the
+  // next room being harder.
+  if (taught) {
+    setTimeout(() => showBanner("TRAINING OVER \u00B7 YOU'RE ON YOUR OWN", 2400), 60);
+    setTimeout(() => showBanner('REACH THE RED DOOR', 2200), 2600);
+  }
 }
 const tutorAfter = (id) => {
   const i = TUTOR_ORDER.indexOf(id);
@@ -6080,7 +6144,7 @@ function tutorNext(step) {
       tutorSub = TUTOR.volleyGap;
     }
     if (sp.startMeter) {
-      tutorMeterOn = true; tutorMeterAt = 0;
+      tutorMeterOn = true; tutorMeterEverShown = true; tutorMeterAt = 0;
       slowBank = SLOWMO.cap; updateSlowMeter();
     }
     if (sp.raiseGun) { gunRiseT = TUTOR.gunRise; game.noFireBefore = 0; }
@@ -6092,6 +6156,34 @@ function tutorNext(step) {
   if (wants && !tutorButtonShown) { tutorButtonShown = true; tutorRevealButton(); }
   else updateModeUI();
   tutorEmit('enter');
+}
+
+// JUMPING TO A BEAT has to build the world that beat stands in, not just set
+// the step. The dodge lesson happens AT the barrier and places its gunner five
+// cells beyond it — jump straight there without the barrier and he is placed
+// a hundred metres down the corridor and never fires at anybody.
+//
+// So a jump replays the world furniture of every step up to the target (which
+// is only ever "does this step build the barrier"), puts the player where that
+// step expects them to be standing, and only then enters it.
+function tutorJumpTo(id) {
+  const target = TUTOR_ORDER.indexOf(id);
+  if (target < 0) return;
+  for (let i = 0; i < target; i++) {
+    const sp = TUTOR_STEPS[i];
+    if (sp && sp.buildBarrier) { tutorStep = sp.id; tutorBuildBarrier(); }
+    if (sp && sp.dropBarrier) tutorDropBarrier();
+  }
+  // stand them where the beat happens: at the barrier if there is one, else
+  // wherever the leg's own spine has got to
+  if (tutorBar) {
+    player.pos.set(tutorBar.m.position.x, 0, tutorBar.z - 1.6);
+  }
+  player.yaw = Math.PI; player.pitch = 0;
+  player.vel.set(0, 0, 0);
+  tutorUpdateSpineIx();
+  tutorStep = id;
+  tutorNext(id);
 }
 
 // Where the barrier is, or where it would be. Measured from the fork's rejoin
@@ -6150,13 +6242,27 @@ function tutorRetry() {
   slowBank = SLOWMO.cap;
   updateSlowMeter();
   tutorFroze = false;
-  tutorMeterOn = false; tutorMeterAt = 0; tutorMeterSaid = false;
+  tutorMeterAt = 0; tutorMeterSaid = false;
   tutorRound = null; tutorAwaitShot = false;
   tutorShotsFired = 0; tutorDodged = 0;
   el.pausebtn.style.display = '';
   el.guide.style.display = 'none';
-  gun.visible = false;                // the weapon is still two steps away
-  tutorNext(tutorAnchorStep || 'incoming');
+  const step = tutorAnchorStep && tutorSpecOf(tutorAnchorStep)
+    ? tutorAnchorStep : TUTOR_ORDER[0];
+  const sp = tutorSpecOf(step);
+  gun.visible = !!(sp && sp.grants && sp.grants.gun);
+  // A RAMP AREA'S FIGHT BELONGS TO THE AREA. clearField() has just swept it,
+  // and a ramp step declares no bodies of its own — so without this the retry
+  // handed the player an empty room with the exit already open, which teaches
+  // "if this is hard, die and walk through". The opposite of the lesson.
+  if (sp && sp.checkpoint) tutorPopulateLeg();
+  // ...and the meter stays on if this area is past the lesson that introduced
+  // it: turning it off on every retry hid it for the whole rest of the run.
+  tutorMeterOn = !!(sp && sp.grants && sp.grants.meter && tutorMeterEverShown);
+  // the button's teaching halo is stripped by the death; put it back, because
+  // the beat you die on repeatedly is the beat that most needs it
+  tutorButtonShown = false;
+  tutorNext(step);
   updateModeUI();
   tutorShowMeter(false);
   tutorSub = TUTOR.aimBeat;
@@ -6262,7 +6368,10 @@ function updateTutorial(dtReal, movedM, yawDelta) {
       if (!tutorAwaitShot && !tutorRound && tutorSub <= 0 && !tutorWorldHeld) {
         tutorSub = tutorAim(tutorMark) ? TUTOR.reshoot : 1;
       }
-      if (tutorFroze) { tutorHardFreeze = false; tutorEmit('freeze'); done(); }
+      // `tutorFroze` is set by the time BUTTON. `input.holding` is how classic
+      // mode slows time. Accept either, so a build that somehow arrives here
+      // without a button cannot deadlock the world at timeScale 0.
+      if (tutorFroze || input.holding) { tutorHardFreeze = false; tutorEmit('freeze'); done(); }
       break;
 
     case 'dodged':
@@ -6793,7 +6902,11 @@ function hitPlayer(ended = false) {
       const g = el.overlay.querySelector('.go');
       g.textContent = 'TAP TO TRY AGAIN';
       g.classList.add('long');
-      el.menubtn.style.display = 'inline-block';
+      // NO WAY OUT BUT FORWARD. `timeshard_taught` is written on the first
+      // frame of the lesson, so tapping MAIN MENU here lost the onboarding
+      // permanently — and the only route back is a Settings row that is
+      // signposted nowhere. There is one button on this screen.
+      el.menubtn.style.display = 'none';
       el.overlay.classList.remove('hidden');
       return;
     }
@@ -7794,11 +7907,25 @@ function crossHallDoor() {
   prev.door.slab.material = DOOR_SEAL_MAT;
   prev.door.slab.position.y = 1.36;
   hall.cur++;
-  hall.doorsPassed++;
-  game.wave++;
-  lifetimeDoors++;
-  slotNoteDoor(hall.doorsPassed + 1);
-  saveProgress();
+  // A TUTORIAL DOOR IS NOT A DOOR OF THE RUN. The onboarding's seven legs used
+  // to advance the wave, which meant the generated game resumed at wave 8 with
+  // every one of the EARLY allowances (oneBodyDoors, soloDoors,
+  // gunnerOnlyDoors, oneRoundDoors — the metronome written for exactly this
+  // moment) already spent on legs that ignore them. Measured: three stationary
+  // gunners in the last taught area, then a door wanting twenty-five bodies
+  // with charging rushers. A player who did the tutorial got a HARDER first
+  // real fight than one who skipped it.
+  //
+  // So the lesson is a prologue: it costs no doors, and the run's own door 1
+  // is the first one after it, with the whole early curve intact.
+  const counts = tutorStep === null;
+  if (counts) {
+    hall.doorsPassed++;
+    game.wave++;
+    lifetimeDoors++;
+    slotNoteDoor(hall.doorsPassed + 1);
+    saveProgress();
+  }
   recordMetProto(hall.legs[hall.cur] && hall.legs[hall.cur].proto);
   applyLegVisibility(false);   // eased, so you walk INTO the next leg's air
   hall.checkpoint = { x: prev.door.x, z: prev.door.z + 2 };
@@ -7823,12 +7950,19 @@ function crossHallDoor() {
   vibrate([15, 30, 15]);
   // GOAL 3: an area of the lesson holds only what the lesson needs, so the
   // generated wave is thrown away and the leg's own bodies are placed instead.
+  //
+  // ...but ONLY while there is still a lesson to serve. The crossing that
+  // leaves the last authored leg is the handover, and wiping the queue there
+  // handed the player the first leg of the real game with nothing in it and
+  // the exit already open.
   if (tutorStep !== null) {
     tutorLegIx++;
     tutorSpineIx = 0;
     tutorCrossedDoor = true;
-    game.spawnQueue = [];
-    tutorPopulateLeg();
+    if (TUTOR_LEGS[tutorLegIx]) {
+      game.spawnQueue = [];
+      tutorPopulateLeg();
+    }
     // GOAL 4: each area is its own checkpoint, so a death here costs this
     // area and nothing further back.
     tutorAnchor = { x: player.pos.x, z: player.pos.z, yaw: player.yaw, pitch: player.pitch };
@@ -8236,6 +8370,8 @@ function frame(now) {
     camera.lookAt(0, 1.2, 0);
   } else {
     gun.visible = tutorMay('gun');
+    // the crosshair and the pause button ride with the weapon — see index.html
+    document.body.classList.toggle('armed', gun.visible);
     camera.position.set(player.pos.x, EYE_HEIGHT, player.pos.z);
     camera.rotation.order = 'YXZ';
     camera.rotation.y = player.yaw;
@@ -8568,7 +8704,7 @@ window.__ts = {
   // hand skipped it and left the beat with nobody standing in the corridor.
   setTutorStep: (v) => {
     if (v === null) { tutorStep = null; tutorFired = new Set(); return; }
-    tutorStep = v; tutorNext(v);
+    tutorJumpTo(v);
   },
   tutorSpec: () => JSON.parse(JSON.stringify(TUTOR_SPEC)),
   // Stage a named ramp area's bodies in whatever corridor is currently up.
