@@ -152,4 +152,44 @@ existing state and costs nothing — but nothing in `src/` may depend on it.
 | `tutiso.js` | isolation — after a **failed** lesson, an ordinary run carries none of it |
 | `mapround.js` / `toolround.js` | the tool's edits reaching the running game, and the override never reaching an ordinary run |
 | `seal.js` | the one-way bulkhead, including that it actually blocks |
+| `fixbatch.js` | the wedges: the meter beat's early tap, the long press on the freeze, the retry's clock, the barrier after END RUN, six bodies in six places |
+| `signwalk.js` / `four.js` | STAND HERE as an object — hidden round the corners, and width × distance constant down the straight |
+| `pastbar.js` | the men past the barrier stand where they are put, and a death rebuilds the fight behind a shut door |
+| `coachcue.js` | the words and the arrow that name the time button, sampled on the frame the world stops |
+| `tutool.js` | the tutorial pane: a clean spec warns about nothing, a duplicate id is named, the revert leaves the map on the live object, and a new leg is editable |
 | `physics.js`, `halldoor3.js`, `timebtn.js`, `slots.js`, `meterfloor.js` | the rest of the game, so a tutorial change that breaks it is caught |
+
+## A test that cannot fail is worse than no test
+
+Six files in this suite were passing into nothing, and the audit that found
+them is the reason `__ts.setTutorStep` now warns. Four of them asked for a step
+called `aim` or `incoming` — names deleted two rewrites ago — got a silent
+no-op, and went on to assert things about a run that had never moved. Two more
+read `#tutormsg` and `#tutortop`, single elements that became six cue slots.
+`toolround.js`, the round-trip test for the tool, had been crashing on its own
+first step since that change, and asserted 2 legs and 8 steps against a spec
+with 7 and 18.
+
+Every debug hook a harness steers with should be **loud when it cannot do what
+it was asked**. `setTutorStep` returns false and names the ids there are;
+`timeTap()` exists so a beat waiting on the time button can be answered without
+a pointer.
+
+And repairing a stale test can find a real bug. `seal.js` asserted
+`sealShut === true` from a loop that stopped on the frame the door unlocked —
+metres short of the seal, on a leg that might not have been given one. Walked
+past the seal, the property it was written to check holds. It had never once
+been checked.
+
+## The dodge simulator that never worked
+
+`walk.js` section 6 spent two rewrites trying to sidestep a round: 1.3 m did
+not clear one travelling at 8.8 m/s, so the harness died on the second shot;
+2.1 m put it inside the wall, where the next gunner in the rotation never got a
+shot away. Both failures cascaded into every assertion after them, and both
+looked exactly like a broken tutorial.
+
+What that section tests is the **script** — one round at a time, then the squad,
+then the meter — not whether a machine can dodge. So the player stands still
+and is immortal, and the rounds go past. Decide what a test is for, and do not
+let the part that is only scaffolding be the part that fails.

@@ -124,6 +124,123 @@ nothing — unfinishable, with the only exit permanently ending the onboarding.
 *Every control that is reachable during a scripted beat is part of that beat's
 state machine whether it was designed to be or not.*
 
+## The second adversarial round
+
+Three more critics played the build after the first set of fixes. What they
+found was a different shape: not clamps that never bit, but **beats that could
+be entered and never left**, and controls whose ordinary behaviour was wrong
+for one specific beat.
+
+**The meter lesson instructed the player into a dead end.** The prompt said
+`TAP TO LET TIME RUN` 1.6 s in. The step ends when the bar has fallen to the
+knee AND time is running. The bar only falls while time is slow. So doing
+exactly what the screen said stopped the drain, and the knee could never be
+reached: measured at 58 s stuck, bar at 97.5%, player alive, nothing on screen
+changing. The words wait for the bar now, and until the bar has fallen the
+button holds — `tutorRefusesResume()`.
+*A prompt that instructs an action the step cannot survive is worse than no
+prompt: the player who fails is the one who obeyed.*
+
+**And the sentence under it was false.** `IT REFILLS WHEN TIME RUNS` — the bank
+refills on **kills** (`killEnemy`), and at lesson 7 there is nothing to kill.
+Lesson 7 says what is true there (`SLOW TIME IS LIMITED`); the refill is named
+in the shooting lesson, on the `kill` cue event, at the moment the player can
+watch it happen.
+
+**A long press on the freeze beat handed the round back at full speed.** The
+time button is a toggle on a quick tap and hold-to-slow on a long press — and
+a first-time player who has just read `TAP HERE TO SLOW TIME` presses it like
+a button, which is to say slowly. Time snapped back the instant the thumb
+lifted, on the one beat in the game with a round already in the air and the
+words on screen saying `DRAG TO MOVE`. The freeze and dodge beats latch.
+*A control's default behaviour is not neutral during a scripted beat.*
+
+**A retry gave back the beat but not its clock.** `tutorRetry` always called
+`setTimeLocked(false)`, so every death on a dodge made the next attempt
+strictly harder than the first, with nothing on screen to say time was no
+longer slow. The anchor records the clock, and dying on the beat that teaches
+the freeze re-arms the freeze (`tutorEverHeld`).
+
+**The barrier outlived the lesson.** `tutorDropBarrier` starts a sink driven by
+`tutorUpdateBarrier`, which is called from `updateTutorial`, which returns on
+its first line once `tutorStep` is null. END RUN half way through left a slab
+standing in the corridor of whatever run came next, frozen at whatever height
+it had reached.
+
+**The last step re-entered itself every frame.** `tutorAfter` clamps at the
+last id, so a final step whose condition is satisfiable called `tutorNext` on
+its own id forever: furniture rebuilt, cue sets re-fired, and the death anchor
+dragged along behind the player for the length of the run.
+
+**Two steps with the same id made the sequence a loop.** `tutorAfter` and
+`tutorSpecOf` both take the first match, so renaming one step in the tool
+produced `move → look → corners → stand → dodge1 → dodgeMove → stand → …` for
+as long as anybody cared to watch. Ids are made unique on the way in, and the
+tool warns.
+
+## STAND HERE is an object, not a caption
+
+Three attempts at this were all curve-fitting: `620/dist`, capped at 46 px,
+floored at 11. Every one of them was wrong somewhere — too small to read at the
+far end of the straight, or hitting its ceiling half way down it and going back
+to reading as a caption, or (uncapped) filling the frame and eclipsing the slab
+it was naming.
+
+A sign does not need a curve. It has a **width in metres**, painted across the
+barrier, and the projection already knows what that is worth in pixels from
+where the player is standing:
+
+```js
+const signM = clamp(tutorBarWidth() * 0.72, 2.4, 4.4);
+_vSignA.set(ax - signM / 2, ay, az).project(camera);
+_vSignB.set(ax + signM / 2, ay, az).project(camera);
+const spanPx = Math.abs(_vSignB.x - _vSignA.x) * 0.5 * w;
+```
+
+The text is then scaled to fill that span, measured against its own width at a
+known size so any words the tool authors scale by their own metrics rather than
+by a constant tuned to "STAND HERE". Measured across the approach, **width ×
+distance is constant to 0.4%** — the same arithmetic three.js does for the
+barrier itself, so the words and the slab grow together exactly.
+
+Two details that matter:
+
+* the element's padding is in `em`. With `padding: 0 14px` a fixed 28 px sat on
+  the end of a proportional measurement and the words drifted out of step with
+  the slab. Anything scaled by font-size must be *entirely* scaled by it.
+* there is a floor of 8 px and no distance cut-off. It used to vanish past
+  46 m, which put its first appearance ten metres down a straight the player
+  can see the whole of — a sign popping into existence out of clear air. From
+  the last corner it is small and far away, which is what being far away looks
+  like.
+
+Visibility is gated on the `finalRun` mark and on actually being on the walked
+path (the fork's second lane shares a z with the spine, so a spine *index*
+cannot tell them apart — `tutorNearestSpineDist()` can).
+
+## Marks are derived, never typed
+
+A mark is a named cell on the walked path: `firstCorner`, `secondRun`,
+`finalRun`, `forkEnd`. They are read in three places — the STAND HERE gate, the
+barrier's anchor, and `tutorBarrierZ` — and they used to be authored as
+literals next to the leg.
+
+The level tool can redraw that path. Redrawing it left the marks behind: the
+barrier stood 24 m inside solid rock, lesson 4 waited for the player to reach a
+cell the corridor no longer had, and the sign was gated off a spine index the
+leg never reached. An empty corridor, no words, no way forward, no error.
+
+`marksFromPlan(plan)` computes all four from the moves, plus the fork's rejoin
+from the `extra` cells (the one mark the moves alone cannot state — it is the
+furthest cell of the walked path that any side-lane cell touches). It runs on
+every load for every leg, so a path edit cannot strand them. On the shipped leg
+it reproduces the hand-written numbers exactly: 7, 14, 24, 32.
+
+A step's `advance.need` may then **name** a mark rather than quote a number,
+which is how a lesson says "ends at the corner" and stays right when the corner
+moves. `reached` also clamps to the spine that exists, so a stale mark can no
+longer make a lesson unfinishable.
+
 ## Failing it
 
 The onboarding used to hand out invulnerability: being hit flashed the screen
@@ -140,8 +257,14 @@ teach — that a round which connects is survivable. It does not any more.
   so its declared furniture is rebuilt. You already proved you can walk and
   look; being made to prove it again is how a tutorial turns into a chore.
   Goal 4 in the other direction: failing costs this area and nothing further.
-* `MAIN MENU` on that screen calls `endTutorial(false)` — quitting the lesson
-  quits the lesson.
+* there is **no** `MAIN MENU` on that screen. `timeshard_taught` is written on
+  the lesson's first frame, so quitting from here would lose the onboarding for
+  good and the only route back is a Settings row signposted nowhere. One
+  button. (The pause menu's END RUN still works, and that is an ordinary death
+  with an ordinary menu.)
+* the retry restores the beat's **clock** as well as its furniture, clears the
+  frozen world, re-arms the freeze if this is the beat that teaches it, and
+  refills the bank only where the onboarding says the bank is free.
 
 While `tutorDeadPending` is set, `updateTutorial` returns early rather than
 calling `endTutorial`, which is what keeps the step alive across the death.

@@ -131,8 +131,14 @@ the preview is not a mock-up of the lesson, it *is* the lesson.
   place **enemies** and **pillars**, alt-drag to erase. The barrier, the start
   and the door are drawn but not painted: all three are derived, so they move
   when the geometry does instead of being separately maintained.
-* **legs** — add, remove, rename; form, `straight`, and whether the leg starts
-  with a barrier standing in it
+* **legs** — add, remove, rename; form, **turn order** (one man shoots and the
+  next only starts when his round has gone past — the game reads `fireOrder` on
+  every leg), and whether the leg starts with a barrier standing in it. A leg
+  added here comes **with a path and a gunner**: one with no `plan` is one the
+  map cannot touch, so "+ Add leg" used to make something only a text editor
+  could finish. (`straight` is gone: an authored plan short-circuits
+  `genHallLeg` before it is ever read, so the checkbox did nothing on any of
+  the seven shipped legs.)
 * **numbers** — every value in `TUTOR` on a slider, each with the reason it
   has the value it has in its tooltip
 * **steps** — reorder, add, delete. Each carries:
@@ -148,17 +154,41 @@ the preview is not a mock-up of the lesson, it *is* the lesson.
     slots it sits in, whether a pointer runs to the button or up to the meter,
     which hand animation plays, whether it pulses, and — this is the part that
     matters — the beat it **appears on** and the beat it **leaves on**
+  * a **threshold** that may be a number *or the name of a mark* —
+    `firstCorner`, `secondRun`, `finalRun`, `forkEnd`. Marks are derived from
+    the leg's path on every load, so naming one is how a lesson says "ends at
+    the corner" and stays right when you drag the corner
 * **preview** — the real game in an iframe at `?tutorpreview=1`. *Restart*
   reloads it with the current edit; *jump to step* drops the running game
   straight onto a beat with that beat's furniture built; the strip underneath
   reports the live step, the beats that have fired, and what the player may
   currently do
 
-The **beats** a cue can key off are `enter`, `freeze` (the player stopped
-time), `meter` (the meter warning landed), `resume`, and `advance`. That pair
+* **warnings** — what this spec will do wrong, said out loud, above the steps.
+  Every check is a failure somebody actually hit with nothing on screen to
+  explain it: two steps with the same id (the sequence is walked by id, so it
+  loops back and never ends), a cue hung on an event its step never fires (a
+  blank lesson), a condition whose machinery nothing sets up (a barrier nobody
+  raises; a `cleared` step with nobody on the floor, which ends on its first
+  frame), a last step that ends on a condition, an unknown mark name, and a
+  path that crosses itself. They are warnings, not refusals — a half-finished
+  sequence is a normal thing to be looking at while you edit one.
+
+The **beats** a cue can key off are `enter`, `held` (the world stopped
+mid-telegraph), `freeze` (the player stopped time), `dodge` (a round went
+past), `kill` (they dropped one), `meter` (the meter warning landed), `resume`,
+and `advance`. That pair
 — appears-on and leaves-on — is the whole of a cue's life, which is why
 `TAP TO SLOW TIME` can be made to vanish the instant the button is used
 without anyone touching `main.js`.
+
+**Revert writes through the spec, it does not replace it.** The map is handed
+the spec object once, at boot, and keeps its own reference. Rebinding the
+variable left the two views editing different objects: the rails read the new
+one, the map read the dead one, and every floor cell, pillar, enemy and path
+drag after a revert went somewhere nothing would ever save — the map's own HUD
+counting cells against a store that never changed. If two panes share a live
+object, mutate it; never re-point one half of it.
 
 Nothing is written back to the repo from the browser. The export is a patch to
 hand back, and now carries the tutorial spec alongside the layouts and balance
