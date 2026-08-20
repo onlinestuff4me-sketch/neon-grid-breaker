@@ -8985,9 +8985,25 @@ window.__ts = {
   // Jumping to a step goes through the real transition, so the step's declared
   // furniture is built exactly as it would be in play. Setting the variable by
   // hand skipped it and left the beat with nobody standing in the corridor.
+  // SAYS SO WHEN IT CANNOT. A jump to an id that does not exist used to return
+  // quietly, which is how four harness files rotted into passing into nothing:
+  // they asked for a step deleted in the rewrite, got no error, and went on to
+  // assert things about a run that had never moved.
   setTutorStep: (v) => {
-    if (v === null) { tutorStep = null; tutorFired = new Set(); return; }
+    if (v === null) { tutorStep = null; tutorFired = new Set(); return true; }
+    if (!tutorSpecOf(v)) {
+      console.warn(`[tutor] no step "${v}". steps: ${TUTOR_ORDER.join(', ')}`);
+      return false;
+    }
     tutorJumpTo(v);
+    return true;
+  },
+  // The time button, pressed, without a pointer: exactly what a quick tap
+  // does, so a harness can answer a beat that is waiting for one.
+  timeTap: () => {
+    if (timeLocked) { if (!tutorRefusesResume()) setTimeLocked(false); }
+    else setTimeLocked(true);
+    return timeLocked;
   },
   tutorSpec: () => JSON.parse(JSON.stringify(TUTOR_SPEC)),
   // Stage a named ramp area's bodies in whatever corridor is currently up.
