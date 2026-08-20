@@ -29,10 +29,38 @@ widens it.
 | **chamber** | `corridor` and `atrium` forms, spine > 10 | widens a stretch to 5 cells with four pillars in two rows |
 | **vault** | `vault` form, once per leg | a 4×4-cell pillared hall, one way in and one way out, exit offset so crossing it is the only route |
 | **branch lanes** | 2 normally, 3 for a service run, 0 for gauntlet/vault | alternate routes that only ever move forward and rejoin the spine |
-| **`straight`** | the onboarding hallway only | suppresses all of the above |
+| **`straight`** | a leg that must be a straight shot | suppresses all of the above |
+| **an authored plan** | the onboarding's seven legs | suppresses the generator entirely — see below |
 
 Width is the axis a portrait phone does not have — see `docs/PILLARS.md` §5.
 That is why the vault is four cells across and not eight.
+
+## Authored legs
+
+`genAuthoredLeg`, in the same file. A leg may carry a **plan** instead of being
+rolled:
+
+```js
+plan: {
+  moves: [['f', 7], ['r', 3], ['f', 4], ['l', 3], …],   // f b r l, in cells
+  extra: [[4, 18], [5, 18], …],   // cells hung off the path: a room's width,
+                                  // a fork's second lane. Leg-relative.
+  approach: 4,
+}
+```
+
+Moves read as instructions — "seven forward, then three right" — because that
+is how a corridor is described. A list of absolute coordinates becomes
+unreadable the moment somebody wants the first hallway one cell longer.
+
+It returns exactly the shape `genHallLeg` returns, so `buildHallLeg` cannot
+tell the difference and the tool draws and edits both with the same code. Each
+change of direction becomes a stretch boundary, so spawn pacing treats an
+authored corner exactly like a generated jog.
+
+This is what the onboarding runs on, and it is the answer to a bug that came
+back four times: a lesson that depends on a specific corner cannot be built by
+something that produces that corner most of the time.
 
 ## Forms
 
@@ -95,8 +123,16 @@ The onboarding, editable, with the real game running it in the pane on the
 right. It imports `src/tutorial.js` — the same module `main.js` consumes — so
 the preview is not a mock-up of the lesson, it *is* the lesson.
 
-* **legs** — add, remove, rename; form, straight-cell count, `straight`, and
-  whether the leg starts with a barrier standing in it
+* **the map** — the same overhead editor a generated door gets, applied to
+  whichever tutorial leg is selected, drawn by calling the game's own
+  `genAuthoredLeg`. Paint **floor** (a room's width, a fork's lane), drag the
+  **path** — the leg's `moves` are re-derived from where you drop it, so a
+  corner stays a corner rather than becoming coordinates nobody can read —
+  place **enemies** and **pillars**, alt-drag to erase. The barrier, the start
+  and the door are drawn but not painted: all three are derived, so they move
+  when the geometry does instead of being separately maintained.
+* **legs** — add, remove, rename; form, `straight`, and whether the leg starts
+  with a barrier standing in it
 * **numbers** — every value in `TUTOR` on a slider, each with the reason it
   has the value it has in its tooltip
 * **steps** — reorder, add, delete. Each carries:

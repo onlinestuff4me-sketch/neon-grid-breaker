@@ -193,20 +193,29 @@ function movesFromPath(path) {
 }
 function pathOf(L) { return planToCells(0, 0, L.plan.moves).spine; }
 
-// Extend or trim the walked path so its last cell is where you dropped it.
-// Only orthogonal steps, and only forward-ish ones, because a leg that asks
-// you to walk back the way you came is not a leg this game builds.
+// Extend or TRIM the walked path so its last cell is where you dropped it.
+// Dropping short of the end shortens the corridor; it does not walk you back
+// up it. A leg that asks you to retrace your steps is not a leg this game
+// builds, and letting the editor author one produced moves like
+// [['f',10],['b',8]] — a corridor that doubles back through itself.
 function retargetPath(gx, gz) {
   const L = leg();
   if (!L || !L.plan) return;
   const path = pathOf(L);
+  // trim first: drop every cell at or past the drop point's depth
+  if (gz < path[path.length - 1][1]) {
+    while (path.length > 1 && path[path.length - 1][1] > gz) path.pop();
+  }
   const [lx, lz] = path[path.length - 1];
   let x = lx, z = lz, guard = 0;
-  while ((x !== gx || z !== gz) && guard++ < 60) {
-    if (z !== gz) z += Math.sign(gz - z);
-    else x += Math.sign(gx - x);
+  while ((x !== gx || z !== gz) && guard++ < 80) {
+    // lateral first, then forward — never backward
+    if (x !== gx) x += Math.sign(gx - x);
+    else if (gz > z) z += 1;
+    else break;
     path.push([x, z]);
   }
+  if (path.length < 2) return;   // a leg has to go somewhere
   L.plan.moves = movesFromPath(path);
   onChange();
 }

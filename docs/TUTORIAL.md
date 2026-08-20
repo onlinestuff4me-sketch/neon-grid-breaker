@@ -35,67 +35,65 @@ Two rules keep the split honest:
 
 ## The sequence
 
-`move → look → aim → incoming → gunup → shoot → advance → done`
+Eighteen steps carrying fifteen lessons. The spec is
+`docs/TUTORIAL-GOALS.md`; this table is what the build does.
 
-| step | what the player sees | what ends it |
-|---|---|---|
-| `move` | `DRAG TO MOVE`, left half, dotted divider, animated thumb. A barrier already stands 8 m ahead so there is something to walk to. | 2.2 m walked |
-| `look` | `DRAG TO LOOK`, right half, divider stays | 0.9 rad swept |
-| `aim` | nothing; the view eases back down the hallway | facing within 0.05 rad |
-| `incoming` | one enemy 13 m out. `DODGE THE BULLET` with `TAP TO SLOW TIME` under it and a line-and-arrow down to the button. After `aimBeat` he goes into the AI's own `aim` state — gun arm up, muzzle white — and fires an **ordinary round at ordinary speed**. On the tap, the sub-line and the arrow go; the headline stays. A beat later `YOUR TIME METER IS RUNNING OUT` lands in the top slot under the meter with a ▲ at it, and the sub-line comes back as `TAP TO RESUME TIME` with the arrow back on the button. | resumed time, after the meter sentence has shown |
-| `gunup` | the weapon swings up on the **reload rig** (`fold`), not a bespoke tween | the rise finishes |
-| `shoot` | two more bodies join the first, abreast at ±`enemyX` and clamped to the leg's own floor; `TAP ANYWHERE TO SHOOT`; magazine topped up | all three shattered |
-| `advance` | barrier sinks, door opens, `ENTER THE NEXT ROOM` | crossing the door |
+| step | lesson | what the player sees | ends when |
+|---|---|---|---|
+| `move` | 1 | `DRAG TO MOVE`, left half, thumb coach, dotted divider. Nothing else on screen at all. | they reach the corner (spine index, not a distance) |
+| `look` | 2 | `DRAG TO LOOK` joins it on the right with its own coach — **and `DRAG TO MOVE` stays**, because the point is that looking is a separate action you do at the same time | they reach the end of the next straight |
+| `corners` | 3 | both prompts stay up through two more turns and a fork that rejoins | they reach the fork's rejoin |
+| `stand` | 4 | prompts go; `STAND HERE` hangs over a barrier six cells on | they reach the barrier |
+| `dodge1` | 5 | a gunner appears five cells beyond it, raises his arm, and **the world stops** mid-telegraph. `DODGE THE BULLET` over `TAP HERE TO SLOW TIME`, pointer on the button | they press the button |
+| `dodgeMove` | 5b | everything resumes at ordinary slow motion; the prompt becomes `DRAG TO MOVE` again | the round goes past |
+| `dodge3` | 6 | two more appear; rounds arrive one at a time, `volleyGap` apart. No meter yet, so slow motion is free | three rounds dodged |
+| `meter` | 7 | the bar appears for the first time, drains, and explains itself | they let time run |
+| `gunup` | 8a | the weapon rises on the reload rig | the rise finishes |
+| `shoot` | 8b | `TAP ANYWHERE TO SHOOT`; magazine topped up | all three down |
+| `exit` | 9 | barrier sinks, door opens, `GO TO THE NEXT ROOM` | they cross |
+| `ramp1`–`ramp6` | 10–15 | room/hall/room/hall/room/hall with 1,1,2,2,3,3 enemies. No prompts: the teaching is over | they cross each door |
 
-## What each step grants
+## The legs
 
-Nine capabilities, all off unless a step says otherwise — a tutorial that has
-to remember to *take things away* has already given something to somebody by
-mistake.
+Seven, all **authored** — `genAuthoredLeg` in `src/genleg.js`, driven by a plan
+of moves (`['f', 7]`, `['r', 3]`) rather than rolled. "A straight run, then a
+right turn, then a fork that rejoins" is a sequence of specific corners, and a
+generator that produces something like it four times out of five is no use for
+a lesson whose point is that the player knows what is coming.
 
-| grant | off means |
-|---|---|
-| `gun` | no viewmodel on screen |
-| `fire` | a tap does nothing |
-| `timebtn` | the slow-motion control does not exist yet |
-| `meter` | the bank bar is not on screen |
-| `bank` | freezing is free — the script owns the bank entirely |
-| `ammo` | no magazine line |
-| `aiFire` | no enemy STARTS a telegraph of its own; the script decides when an arm goes up, and the ordinary `aim` → `enemyFire` path runs from there |
-| `spawns` | the queue is held: nobody arrives unless the script places them |
-| `score` | the `DOOR 1 · OPEN — GO` line is hidden |
+The teaching leg is 148 m: seven cells straight, right, four, left, four,
+right, three, the fork's five, then fourteen for the barrier, the dodging, the
+shooting and the door. Its marks (`firstCorner`, `secondRun`, `forkEnd`) are
+**derived from the move list**, so lengthening the first hallway in the tool
+moves the lessons with it instead of silently breaking them.
 
-As shipped, only `gun`, `fire`, `timebtn`, `meter` and `ammo` are ever granted,
-and `bank` never is — the bank is scripted for the whole lesson.
+The ramp legs carry their own `enemies` and a `fireOrder`, because it is the
+*room* that is "the room with two in it" — a step cannot own them, or the
+retry could not rebuild the area without replaying the step.
 
-## Cues
+## The text slots
 
-Each step carries a list. A cue is its words, one of five slots (`mid`,
-`left`, `right`, `atbtn`, `top`), an optional pointer (down to the button, up
-to the meter), a hand animation, whether it pulses, and the two beats that
-bound its life: the one it **appears on** and the one it **leaves on**.
+Six elements, one per slot, all able to be on screen together: `mid`, `left`,
+`right`, `atbtn`, `top`, and `world`. They used to be a single element that
+took its position from a class, which made `DRAG TO MOVE` and `DRAG TO LOOK`
+mutually exclusive — and lesson 2 exists to say they are not.
 
-The beats a step can emit are `enter`, `freeze`, `meter`, `resume` and
-`advance`. `tutorRenderCues()` is a pure function of the set of beats fired so
-far, which is what lets the retry re-enter a step and land on exactly the
-right frame.
+`world` is anchored in 3D and projected every frame, so `STAND HERE` hangs
+over the barrier and grows as you walk up to it. There are two coach hands for
+the same reason there are six slots.
 
-One centre cue and one top cue can be up at once; a later live cue wins its
-slot, which is how `TAP TO SLOW TIME` is swapped for nothing on the tap and
-then for `TAP TO RESUME TIME` a beat later.
+## The hard freeze
 
-## The rules it holds while it runs
+`dodge1` sets `hardFreeze`. When the gunner's telegraph passes `freezeAt` of
+its length, `tutorWorldHeld` goes true and `timeScale` is **snapped to zero**
+after the ease — arm stopped mid-raise, no round in the air, nothing moving.
+It is released by the button and by nothing else: measured holding for 240
+frames with the arm not moving by 0.01 rad.
 
-| rule | why |
-|---|---|
-| `tutorHoldsSpawns()` — the spawn queue is emptied every frame | a body arriving mid-lesson is the loudest thing on screen |
-| `tutorHoldsFire()` — off the `aiFire` grant | the script decides when he raises the arm; once he has, the ordinary `aim` → `enemyFire` path runs untouched, so the tell and the round are the game's, not the tutorial's |
-| `el.score` is hidden for the whole onboarding | `DOOR 1 · OPEN — GO` over `DRAG TO MOVE` is two systems talking at once, one of them contradicting the other |
-| `tutorHoldsPlayerFire()` — off the `fire` grant | tapping fired a round with no weapon on screen |
-| `tutorFreeIsFree()` — the ordinary bank drain is off, entirely | before the meter lesson the freeze is free; during it the script owns the bank. Leaving the ordinary drain running took the bank to zero and auto-resumed time in the middle of the sentence explaining that the bank runs out |
-| `showBanner` returns early | `THE DOOR IS OPEN` was landing on `DRAG TO MOVE` |
-| the gun, meter and button come off their own grants | they used to be derived from position in `TUTOR_ORDER`, which was already better than the hand-written lists before it — but it still meant reordering the lesson silently moved who could shoot |
-| the level tool's override is read only under `?tutorpreview=1` | an afternoon of editing in `/tool` must not be able to reach a real save on the same browser |
+That is the only way to be sure a first-time player has read the prompt before
+a round is in flight. Everything after it runs at ordinary speed, because a
+tutorial that teaches a slower bullet than the game fires has taught the wrong
+timing.
 
 ## Failing it
 
@@ -107,11 +105,12 @@ teach — that a round which connects is survivable. It does not any more.
 * `recordRun()` is skipped, so a lesson death files nothing and is not a run;
 * the overlay drops the stats line and the mode rows, and the button reads
   **`TAP TO TRY AGAIN`**;
-* `tutorRetry()` rewinds to the **start of this beat**, not the top of the
-  onboarding: the corridor is swept, the player goes back to `tutorAnchor`
-  (recorded the instant `incoming` began), the bank refills, and the prompt
-  comes back up exactly as it was. You already proved you can walk and look;
-  being made to prove it again is how a tutorial turns into a chore.
+* `tutorRetry()` rewinds to the **start of the current area**, not the top of
+  the onboarding: the corridor is swept, the player goes back to `tutorAnchor`
+  (recorded when the area began), the bank refills, and the step is re-entered
+  so its declared furniture is rebuilt. You already proved you can walk and
+  look; being made to prove it again is how a tutorial turns into a chore.
+  Goal 4 in the other direction: failing costs this area and nothing further.
 * `MAIN MENU` on that screen calls `endTutorial(false)` — quitting the lesson
   quits the lesson.
 
@@ -131,39 +130,48 @@ its state class collides with a utility class first.
 
 ## The numbers
 
-`TUTOR` in `src/main.js`. The ones with a reason:
+`TUTOR` in `src/tutorial.js`, every one of them on a slider in the tool. The
+ones with a reason:
 
 * **there is no bullet multiplier** — the round the tutorial fires is the round
   the game fires: `enemyBulletSpeed() * spec.mul`, ~8.8 m/s at wave 1. A
   tutorial that teaches a slower bullet than the game shoots has taught the
-  wrong timing. What makes it fair is the beat in front of it, not a handicap
-  on the round.
-* **`aimBeat: 2.6`** — seconds the prompt is up before his arm starts to rise.
-  Add the gunner's own 0.55 s telegraph and ~1.5 s of flight and there are
-  over four seconds between the prompt appearing and the round landing. At
-  1.5 s it was a death every time, which the retry makes survivable but not
-  fair.
-* **`enemyX: 1.15`** — the teaching leg is one cell wide: 4 m of cell less
-  0.3 m of wall each side is 3.4 m of floor, so ±1.7 IS the wall. The two
-  flanking bodies stood at ±2.4 and were inside the masonry.  `tutorPlaceEnemy`
-  now clamps to the leg's cell extent as well, because a held body ignores
-  collision entirely — the script is the only thing keeping it out.
+  wrong timing. What makes the first one fair is not a handicap on the round,
+  it is that the world stops until the button has been pressed.
+* **`freezeAt: 0.55`** — how far into the telegraph the world stops. Late
+  enough that the arm is visibly up and the intent is unmistakable, early
+  enough that nothing has been fired.
+* **`aimBeat: 1.2`** — seconds from the gunner appearing to his arm starting to
+  rise. Much shorter than it needed to be before the freeze existed: the prompt
+  no longer has to be read against a clock, so this only has to be long enough
+  to see him arrive.
+* **`enemyCells: 5` / `barrierCells: 6`** — measured from the fork's rejoin and
+  from the barrier respectively, so the whole combat section moves with the
+  geometry instead of with numbers somebody has to remember to change. Five
+  cells is 20 m: about 2.3 s of flight, long enough to read as a thing coming
+  towards you.
+* **`enemyX: 1.15`** — a one-cell leg is 4 m of cell less 0.3 m of wall each
+  side: 3.4 m of floor, so ±1.7 IS the wall. The flanking bodies stood at ±2.4
+  and were inside the masonry. `tutorPlaceEnemy` clamps to the leg's cell
+  extent as well, because a held body ignores collision entirely — the script
+  is the only thing keeping it out.
+* **`volleyGap: 2.6`** — between rounds in the three-round lesson. Long enough
+  that each is its own event rather than a stream.
 * **`meterSecs: 7` / `meterCrawlSecs: 70` / `meterKnee: 0.5` / `meterFloor:
   0.25`** — the bank empties at a readable rate to half, crawls to a quarter,
   and stops. The player is being taught that time is finite, not put in a hole
-  before anyone has told them how to climb out.
-* **`enemyAt: 13`** — at ordinary speed a round covers ~8.8 m/s, so thirteen
-  metres is ~1.5 s of flight: long enough to read as a thing travelling
-  towards you, short enough that standing still is punished. Placed relative
-  to the door on a long leg it was twenty metres, which reads as nothing
-  happening.
-* **`hallCells: 7`** — plus `LEG.approach`, so ~12 cells of dead straight
-  corridor.
+  before anyone has told them how to climb out. The crawl below the knee takes
+  ~17 s on its own, which is why a test that watches for 28 s and calls the
+  descent a failure is testing its own patience.
+* **`standWithin: 2.6`** — metres from the barrier that count as standing at
+  it. Wide enough that walking into the thing satisfies it.
 
 ## The hallway
 
-`proto.straight` on the first leg. It suppresses **four** things in
-`genHallLeg`, and it took two attempts to find them all:
+The teaching leg is **authored**, not generated, so `proto.straight` no longer
+has to hold the line for it. It is still there and still matters for any
+generated leg that wants to be straight, and it still suppresses **four**
+separate things in `genHallLeg`:
 
 1. `fwd` — the leg's length
 2. `run` — the cells between turns
@@ -172,8 +180,8 @@ its state class collides with a utility class first.
 4. the **chamber**, which a `corridor` leg gets as readily as an atrium, and
    the two **branch lanes**
 
-Miss any one and the "straight hallway" arrives with a five-cell pillared room
-in it. Measured when correct: 12 cells, 12 rows, one cell wide, zero pillars.
+Miss any one and a "straight hallway" arrives with a five-cell pillared room
+in it. This is the bug that authored geometry exists to make impossible.
 
 ## Isolation
 
