@@ -156,6 +156,9 @@ existing state and costs nothing — but nothing in `src/` may depend on it.
 | `signwalk.js` / `four.js` | STAND HERE as an object — hidden round the corners, and width × distance constant down the straight |
 | `pastbar.js` | the men past the barrier stand where they are put, and a death rebuilds the fight behind a shut door |
 | `coachcue.js` | the words and the arrow that name the time button, sampled on the frame the world stops |
+| `shatter.js` | the shooting lesson driven with the REAL weapon: three shatters, the barrier down, the door open |
+| `beat.js` | the dodge beat — fires, freezes on the round, tap, readable flight, sideways coach, and the loop repeating for all three |
+| `corner.js` | the barrier is up from frame one and its sign is on from the last corner |
 | `tutool.js` | the tutorial pane: a clean spec warns about nothing, a duplicate id is named, the revert leaves the map on the live object, and a new leg is editable |
 | `physics.js`, `halldoor3.js`, `timebtn.js`, `slots.js`, `meterfloor.js` | the rest of the game, so a tutorial change that breaks it is caught |
 
@@ -180,6 +183,24 @@ And repairing a stale test can find a real bug. `seal.js` asserted
 metres short of the seal, on a leg that might not have been given one. Walked
 past the seal, the property it was written to check holds. It had never once
 been checked.
+
+## Nothing in the suite had ever pulled the trigger
+
+`walk.js` clears a floor with `__ts.killAt(0)`, which calls `killEnemy`
+directly. So did every other test that needed a room emptied. Which meant the
+whole suite could be green while the player's own weapon was broken inside the
+lesson that teaches shooting — and it was, by a one-line variable-name
+collision, for as long as the cue system had existed.
+
+If a lesson teaches an input, a test has to make that input the way a player
+does. `shatter.js` fires the weapon; `beat.js` presses the time button;
+`coachcue.js` reads what is on the glass on the frame the world stops.
+
+Related trap, an hour of it: `playerFire` aims with
+`camera.getWorldDirection`, and the camera takes its yaw from the player in the
+frame loop. Set `player.yaw` and fire on the same tick and the round goes
+wherever you were looking *before* the turn — which looks exactly like one
+particular enemy being unkillable. Let a frame pass after a scripted turn.
 
 ## The dodge simulator that never worked
 

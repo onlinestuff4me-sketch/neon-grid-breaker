@@ -279,6 +279,46 @@ grows one. Which meant three other things had to move:
   A `reached` step now lands at the start of its walk and an `atBarrier` step
   short of the barrier, and the beat counters reset with the jump.
 
+## The shot that did nothing
+
+Shooting at the three men in lesson 8b did nothing at all: no shatter, no
+body removed, no barrier, no way forward. One line:
+
+```js
+// playerFire(), since the very first onboarding commit
+tutorFired = true;
+```
+
+`tutorFired` had been a boolean — *the player has pulled the trigger during the
+onboarding* — for a version of the shoot step that no longer exists. When the
+cue system was built it took the same name for its `Set` of fired events, and
+the declaration changed from `false` to `new Set()`. The assignment did not.
+
+So the first shot of the onboarding replaced the cue Set with `true`. The very
+next `tutorEmit` threw `tutorFired.add is not a function` — and the next one to
+run was the `kill` emit, which sat **near the top of `killEnemy`**, before
+`spawnShatter` and before the body was spliced out of `enemies`. The exception
+took the kill with it. The round hit, the man stood there, and the lesson
+waited for a floor that could never clear.
+
+Two things came out of it, both worth keeping:
+
+* **a cue is a caption on something that has happened, so it runs last.**
+  `tutorEmit('kill')` is now the final line of `killEnemy`. Anything it throws
+  can no longer abort the kill it is describing.
+* **no test had ever pulled the trigger.** `walk.js` clears the floor with
+  `__ts.killAt(0)`, which calls `killEnemy` directly and never touches
+  `playerFire` — so the whole suite could be green with the game's own weapon
+  broken inside the lesson that teaches it. `shatter.js` fires the actual
+  weapon at the actual bodies and follows it through: three shatters, the
+  barrier down, the door open, `GO TO THE NEXT ROOM`.
+
+A harness note that cost an hour on the way: `playerFire` aims with
+`camera.getWorldDirection`, and the camera takes its yaw from the player in the
+frame loop — so setting `player.yaw` and firing on the same tick sends the
+round wherever you were looking *before* the turn. The third man looked
+unkillable. Let a frame pass after any scripted turn.
+
 ## Five things you could not see
 
 The critics' visual pass found five, and four of them were the same mistake:

@@ -3186,7 +3186,6 @@ function killEnemy(i, impulseDir) {
         * condTax(legCondition(), 'timeGain'));
   }
   if (game.state !== 'menu') vibrate(15);   // every kill lands in the thumb
-  if (tutorStep !== null) tutorEmit('kill');   // a cue may be waiting on it
   spawnShatter(e.pos, impulseDir);
   const drop = ENEMY_TYPES[e.type].drop;
   const kind = TYPE_DROP[e.type];
@@ -3222,6 +3221,10 @@ function killEnemy(i, impulseDir) {
   killWord();
   sfx.shatter();
   vibrate(30);
+  // LAST, not first. A cue is a caption on something that has happened; run it
+  // half way through the kill and anything it throws takes the kill with it —
+  // which is exactly what happened, and the body stayed standing.
+  if (tutorStep !== null) tutorEmit('kill');
 }
 
 // The last moment ANY enemy pulled a trigger. Two of them resolving their
@@ -3694,7 +3697,15 @@ function playerFire() {
   }
   gunKick = spec.kick;
   muzzle.material.opacity = 1;
-  tutorFired = true;
+  // (`tutorFired = true` used to be here. It was a leftover boolean — "the
+  //  player has pulled the trigger during the onboarding" — from a version of
+  //  the shoot step that no longer exists, and when the cue system took the
+  //  same name for its Set of fired events, this line quietly replaced that
+  //  Set with `true` on the first shot. Every tutorEmit after it threw
+  //  `tutorFired.add is not a function`, and because the first one to run was
+  //  the `kill` emit inside killEnemy, the kill was aborted half way: no
+  //  shatter, no body removed, no barrier. Shooting did nothing. Nothing reads
+  //  it any more, so it is gone rather than renamed.)
   // your own shot lights the room too — the flash sits a little ahead of the
   // camera rather than at the viewmodel, so it throws light down the corridor
   // instead of blowing out the gun in your hands
