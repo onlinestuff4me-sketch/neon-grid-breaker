@@ -2219,7 +2219,11 @@ function updatePickups(dt, sdt) {
   for (let i = pickups.length - 1; i >= 0; i--) {
     const p = pickups[i];
     p.t += dt;
-    p.life -= sdt;               // world clock: frozen time doesn't eat the timer
+    // ...BUT NOT DURING THE LESSON. A clip that sinks into the floor while a
+    // first-time player is working out that it is a clip teaches that loot is
+    // a reflex test, on the one run where nothing should be. Training drops
+    // stay where they fell until they are walked over.
+    if (tutorStep === null) p.life -= sdt;   // world clock: frozen time doesn't eat it
     p.spin.rotation.y += dt * 2; // but it keeps spinning so you can spot it
     p.spin.position.y = 0.85 + Math.sin(p.t * 2.2) * 0.07;
     if (p.life <= 0) { removePickup(i); continue; }
@@ -3204,7 +3208,12 @@ function killEnemy(i, impulseDir) {
   // at door 6 pays the door-6 rate AND the fog rate.
   const door = game.mode === 'hall' ? game.wave : 1;
   const cond = legCondition();
-  if (typeof drop === 'string') spawnPickup(e.pos, drop);           // named loot
+  // EVERY TRAINING BODY LEAVES A CLIP. Scarcity is the lever the whole game
+  // hangs off, and it is not a lever a player can feel before they know what
+  // it is costing them — so the lesson hands the ammo back every time and the
+  // curve starts at the first real door.
+  if (tutorStep !== null && armed) spawnPickup(e.pos, CLIP);
+  else if (typeof drop === 'string') spawnPickup(e.pos, drop);      // named loot
   else if (kind && r < drop * scarcity('weaponDrop', door) * condTax(cond, 'weaponDrop')) {
     spawnPickup(e.pos, kind);
   } else if (armed && r < DROPS.clipRate * scarcity('ammoDrop', door) * condTax(cond, 'ammoDrop')) {
@@ -3697,6 +3706,7 @@ function playerFire() {
   }
   gunKick = spec.kick;
   muzzle.material.opacity = 1;
+  if (tutorStep !== null) tutorEmit('shot');   // a cue may be waiting on it
   // (`tutorFired = true` used to be here. It was a leftover boolean — "the
   //  player has pulled the trigger during the onboarding" — from a version of
   //  the shoot step that no longer exists, and when the cue system took the
@@ -5744,6 +5754,11 @@ let tutorEverHeld = false;     // ...and it has actually happened at least once
 // against. A wave starts with `base` against a bar drawn to `cap`, so the
 // meter is already at 50% when it appears: half the BAR is not half the tank.
 let tutorLockWas = false, tutorSlowFrom = 0;
+// WHAT THE PLAYER HAS ALREADY SHOWN THEY CAN DO IN THIS AREA. Cleared with the
+// step, and a training area IS a step — so the reminders start again in the
+// next room and nowhere else.
+let tutorSpent = new Set();
+let tutorSlowedHere = false, tutorResumedHere = false;
 let tutorWorldHeld = false;    // ...and right now the world is actually held
 let tutorLegIx = 0;          // which entry of TUTOR_LEGS the current leg is
 let tutorVolleyT = 0;        // beat between rounds in the three-round lesson
@@ -5856,6 +5871,10 @@ let tutorFired = new Set();
 //
 // Written out rather than derived from an order, because the two beats share
 // `freeze` and the rules for what it clears are not the same in both.
+// `ready` and `shot` are in nobody's list: they are facts about the AREA, not
+// beats in a loop. Once the player has slowed time and let it run again in
+// this room they have shown they can, and once they have pulled the trigger
+// they have shown that too — neither un-happens until the next room.
 const CUE_CLEARS = {
   threat: ['held', 'freeze', 'dodge', 'low', 'resume'],
   held: ['freeze', 'dodge', 'low', 'resume'],
@@ -5873,9 +5892,20 @@ function tutorEmit(ev) {
 function tutorRenderCues() {
   const sp = tutorSpecOf(tutorStep);
   if (!sp) { tutorHideMsg(); tutorHand(null); tutorLine(false); return; }
-  const live = (c) => tutorFired.has(c.on) && !tutorFired.has(c.off);
+  // A `once` CUE IS SPENT BY THE ACTION IT ASKED FOR, for the rest of this
+  // area. The training rooms' reminders are a loop by default — the same
+  // gunner raising his arm again is the same reminder — but a player who has
+  // already slowed time in THIS room has answered that reminder, and being
+  // told again is being nagged. So every room after the first marks its cues
+  // `once`: shown until the player does the thing, then gone until the next
+  // room. `tutorSpent` is cleared with the step, and a step IS an area.
+  const live = (c, i) => tutorFired.has(c.on) && !tutorFired.has(c.off)
+    && !(c.once && tutorSpent.has(i));
   const bySlot = {};
-  for (const c of sp.cues || []) if (live(c)) bySlot[c.slot || 'mid'] = c;
+  (sp.cues || []).forEach((c, i) => {
+    if (c.once && tutorFired.has(c.off)) tutorSpent.add(i);
+    if (live(c, i)) bySlot[c.slot || 'mid'] = c;
+  });
   for (const k of Object.keys(el.tslot || {})) {
     const c = bySlot[k];
     tutorSlot(k, c ? c.text : null, c && c.pulse);
@@ -6372,10 +6402,11 @@ function endTutorial(taught = true) {
   // one frame — score line, meter, ammo, gun, button — and without a word for
   // it the only thing that tells the player the training wheels are off is the
   // next room being harder.
-  if (taught) {
-    setTimeout(() => showBanner("TRAINING OVER \u00B7 YOU'RE ON YOUR OWN", 2400), 60);
-    setTimeout(() => showBanner('REACH THE RED DOOR', 2200), 2600);
-  }
+  // ONE LINE. It used to be two banners and then the new leg's own headline —
+  // three instructions in five seconds, on the frame everything the lesson had
+  // been withholding arrived at once. What the player needs to know is that
+  // the training is over and where to walk.
+  if (taught) setTimeout(() => showBanner('TRAINING COMPLETE \u00B7 GO TO THE NEXT DOOR', 2600), 60);
 }
 const tutorAfter = (id) => {
   const i = TUTOR_ORDER.indexOf(id);
@@ -6388,6 +6419,8 @@ const tutorAfter = (id) => {
 function tutorNext(step) {
   tutorStep = step; tutorT = 0; tutorSub = 0;
   tutorFired = new Set();
+  tutorSpent = new Set();
+  tutorSlowedHere = false; tutorResumedHere = false;
   tutorHardFreeze = false;
   const sp = tutorSpecOf(step);
   if (sp) {
@@ -6693,9 +6726,16 @@ function updateTutorial(dtReal, movedM, yawDelta) {
     tutorLockWas = timeLocked;
     // what the tank held when they reached for it, so "half gone" means half
     // of what they actually spent rather than half of the bar's full scale
-    if (timeLocked) tutorSlowFrom = slowBank;
+    if (timeLocked) { tutorSlowFrom = slowBank; tutorSlowedHere = true; }
+    else if (tutorSlowedHere) tutorResumedHere = true;
     tutorEmit(timeLocked ? 'freeze' : 'resume');
   }
+  // BOTH HALVES OF THE CONTROL, DEMONSTRATED. Only then is there room for a
+  // third instruction — and only if they are not already shooting. The order
+  // is the point: slowing and resuming are the thing they have just been
+  // taught, and a prompt about the trigger arriving on top of one about the
+  // clock is two instructions competing for the same beat.
+  if (tutorSlowedHere && tutorResumedHere && !tutorFired.has('ready')) tutorEmit('ready');
   if (timeLocked && tutorMay('bank') && !tutorFired.has('low')
       && slowBank <= Math.max(SLOWMO.low, tutorSlowFrom * TUTOR.warnAt)) {
     tutorEmit('low');
@@ -7205,7 +7245,6 @@ const LEG_HEADLINES = {
   turretDrop: 'TURRET · IT DOES NOT RELOAD',
   vault: 'PILLARS ARE YOUR ONLY COVER',
   gauntlet: 'NO COVER · DO NOT STOP',
-  atrium: 'IT OPENS UP',
   serviceRun: 'TIGHT TURNS',
   gallery: 'THEY CAN SEE THE WHOLE RUN',
   stairwell: 'MIND THE LEVEL ABOVE',
@@ -7293,6 +7332,8 @@ function maxAlive() {
     // A condition thins the crowd as well as the loot: two bodies met
     // separately are two searches, where a clump is one problem solved once.
     if (game.wave <= EARLY.soloDoors) return 1;
+    // ...and the first door that lets a pair be up together lets exactly two.
+    if (game.wave <= EARLY.twoAliveDoors) return 2;
     return Math.max(1, Math.round(
       Math.min(PACING.hallAliveBase + Math.floor(game.wave / 2), PACING.hallAliveCap)
       * scarcity('groupSize', game.wave) * condTax(legCondition(), 'groupSize')));
@@ -7997,16 +8038,25 @@ function hallAllowance() {
 }
 
 function hallWave(n) {
-  // The opening doors are a metronome: one body in the whole leg, so the
-  // four-beat rhythm — see him, watch the round leave, step out of it,
-  // shatter him — can be learned once before it is asked for twice.
-  if (game.mode === 'hall' && n <= EARLY.oneBodyDoors) {
+  // The opening doors are a metronome: one body in the whole leg, then two,
+  // so the four-beat rhythm — see him, watch the round leave, step out of it,
+  // shatter him — is learned once before it is asked for twice. See EARLY.
+  const early = game.mode !== 'hall' ? 0
+    : n <= EARLY.oneBodyDoors ? 1
+      : n <= EARLY.twoBodyDoors ? 2 : 0;
+  if (early) {
     const leg = hall && hall.legs[hall.cur];
-    if (leg && leg.stretches) {
-      leg.quota = leg.stretches.map((_, i) => (i === leg.stretches.length - 1 ? 1 : 0));
+    if (leg && leg.stretches && leg.stretches.length) {
+      // ONE EACH IN THE LAST `early` STRETCHES, so the fight travels with the
+      // player rather than waiting in a heap at the door — and if the leg is
+      // shorter than that, whatever is left over joins the approach.
+      const k = leg.stretches.length;
+      leg.quota = leg.stretches.map((_, i) => (i >= k - early ? 1 : 0));
+      const placed = leg.quota.reduce((a, b) => a + b, 0);
+      if (placed < early) leg.quota[k - 1] += early - placed;
       leg.released = 0; leg.markK = undefined; leg.budget = 0;
     }
-    return ['gunner'];
+    return Array.from({ length: early }, () => 'gunner');
   }
   const sub = { laser: 'rusher', sniper: 'gunner', rocketeer: 'heavy', bomber: 'shotgunner' };
   // Only types this player has actually unlocked may appear — the same two

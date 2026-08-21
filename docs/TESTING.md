@@ -156,6 +156,8 @@ existing state and costs nothing — but nothing in `src/` may depend on it.
 | `signwalk.js` / `four.js` | STAND HERE as an object — hidden round the corners, and width × distance constant down the straight |
 | `pastbar.js` | the men past the barrier stand where they are put, and a death rebuilds the fight behind a shut door |
 | `coachcue.js` | the words and the arrow that name the time button, sampled on the frame the world stops |
+| `tips.js` | the per-area reminder rules: the first room nags, the rest are spent by the action they asked for, and the trigger prompt waits for both halves of the clock |
+| `handover.js` | one banner at the end, door 1 with somebody in it, and the 1/1/2/2 opening ramp |
 | `ramp.js` | the training rooms: the reminder loop, the half-price drain, the TRAINING line, and the pause button surviving a retry |
 | `shatter.js` | the shooting lesson driven with the REAL weapon: three shatters, the barrier down, the door open |
 | `beat.js` | the dodge beat — fires, freezes on the round, tap, readable flight, sideways coach, and the loop repeating for all three |

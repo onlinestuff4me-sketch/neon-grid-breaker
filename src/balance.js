@@ -79,9 +79,18 @@ export const RAMP = {
 // -- is the whole game in four beats, and it cannot be learned while three
 // people are shooting at you. So the opening doors deal it out one beat at a
 // time and then get out of the way.
+// THE FIRST FOUR DOORS ARE A RAMP, and it is a ramp in two separate dials:
+// how many bodies the leg holds at all, and how many of them may be on you at
+// once. Doors 1-2 are one man in the whole corridor. Door 3 is two men, but
+// strictly one at a time — the same beat twice, not a new problem. Door 4 is
+// the first time two can be up together, which is where the game proper
+// starts. Both dials moving separately is what stops "more enemies" and
+// "harder fight" arriving on the same door.
 export const EARLY = {
-  oneBodyDoors: 4,     // doors 1-4 hold exactly ONE enemy, whole leg
-  soloDoors: 4,        // ...and never more than one alive at a time
+  oneBodyDoors: 2,     // doors 1-2 hold exactly ONE enemy, whole leg
+  twoBodyDoors: 4,     // doors 3-4 hold exactly TWO
+  soloDoors: 3,        // ...and up to door 3, never more than one alive
+  twoAliveDoors: 4,    // door 4 is the first pair you meet together
   gunnerOnlyDoors: 5,  // no other type may debut before this door
   oneRoundDoors: 5,    // and only one enemy round may be in the air at once
 };

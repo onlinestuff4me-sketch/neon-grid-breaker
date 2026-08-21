@@ -192,6 +192,12 @@ const FORK_LANE = [
   [4, 20],
 ];
 
+// EVERY TRAINING AREA WITH MORE THAN ONE BODY IN IT TAKES TURNS. Two rounds
+// resolving on the same frame is one loud event a first-time player cannot
+// parse; the same two a beat apart is a room reacting to them. `fireOrder`
+// says so per leg, and after the first hallway every leg that holds a pair or
+// a trio says 'turns'.
+//
 // A room is the spine plus width. Three cells across and four deep reads as a
 // room on a portrait phone without becoming a space you can get lost in.
 export const TEACH_MARKS = marksFromPlan({ moves: TEACH_MOVES, extra: FORK_LANE });
@@ -232,16 +238,16 @@ export const LEGS = [
     fireOrder: 'turns' },
   // OFF THE CENTRE LINE. Three bodies at x = 0 are one silhouette: the front
   // one occludes the others perfectly and the HUD count contradicts the screen.
-  { id: 'hall2', form: 'corridor', kind: 'hall', note: '13. Two in a hallway.',
+  { id: 'hall2', form: 'corridor', kind: 'hall', note: '13. Two in a hallway, taking turns.',
     plan: { moves: [['f', 10]], approach: 3 },
     // x is in CELLS, so a quarter is a metre — enough to break the silhouette
     // in a corridor that only has 3.4 m of floor to play with.
     enemies: [{ x: -0.22, z: 5, type: 'gunner' }, { x: 0.22, z: 8, type: 'gunner' }],
-    fireOrder: 'free' },
-  { id: 'room3', form: 'vault', kind: 'room', note: '14. Three in a room.',
+    fireOrder: 'turns' },
+  { id: 'room3', form: 'vault', kind: 'room', note: '14. Three in a room, taking turns.',
     plan: { moves: [['f', 10]], extra: room(1, 1, 8), approach: 3 },
     enemies: [{ x: -1, z: 5, type: 'gunner' }, { x: 1, z: 5, type: 'gunner' },
-      { x: 0, z: 8, type: 'gunner' }], fireOrder: 'free' },
+      { x: 0, z: 8, type: 'gunner' }], fireOrder: 'turns' },
   { id: 'hall3', form: 'corridor', kind: 'hall', note: '15. Three: one, then two close behind.',
     plan: { moves: [['f', 11]], approach: 3 },
     // NONE OF THEM ON THE CENTRE LINE. The leading man stood at x 0 and the
@@ -287,6 +293,8 @@ export const CUE_EVENTS = [
   ['kill',    'they drop one'],
   ['threat',  'somebody starts to aim at them'],
   ['low',     'the meter falls past the warning mark'],
+  ['ready',   'they have slowed AND resumed time in this area'],
+  ['shot',    'they pull the trigger'],
   ['meter',   'the meter warning lands'],
   ['resume',  'the player lets time run again'],
   ['advance', 'the step ends'],
@@ -331,16 +339,30 @@ export const ADVANCE_KINDS = [
   ['none',     'never (the last step)'],
 ];
 
-// The training rooms' reminder loop, shared by all six of them. A LOOP, not a
-// sequence: somebody starts to aim and the button is named; they use it and
-// the words go; the bar falls past the warning mark and it is named again with
-// the way out; they let time run and everything clears, ready for the next man
-// to raise his arm. See CUE_CLEARS in main.js for what makes that repeat.
+// --- the training rooms' reminders -----------------------------------------
 //
-// This is the only teaching left in the ramp, and it is a reminder rather than
-// a lesson: the control has been taught, and what these rooms are for is the
-// habit of reaching for it.
-const RAMP_CUES = [
+// THE FIRST ROOM NAGS; THE REST DO NOT.
+//
+// Room 1 (`ramp1`) runs the reminders as a LOOP: somebody starts to aim and
+// the button is named; they use it and the words go; the bar falls past the
+// warning mark and it is named again with the way out; they let time run and
+// everything clears, ready for the next man to raise his arm. It repeats for
+// as long as the room lasts, because the first time somebody is asked to use
+// the control unprompted is the time they need it in front of them.
+//
+// Every room after that marks the same cues `once`. A cue with `once` is SPENT
+// by the action it asked for, for the rest of that area: a player who has
+// already slowed time in this room has answered the reminder, and showing it
+// again is nagging. The state is per-area — `tutorSpent` is cleared with the
+// step, and an area IS a step — so room 3 starts fresh regardless of what
+// happened in room 2.
+//
+// And once they have shown BOTH halves of the control in an area (`ready`),
+// there is room for the third instruction: the trigger. It waits behind the
+// clock deliberately — a prompt about shooting landing on top of one about
+// slowing time is two instructions competing for the same beat — and it goes
+// the moment they fire.
+const REMIND = [
   { text: 'TAP TO SLOW TIME', slot: 'atbtn', arrow: 'down', hand: 'none',
     pulse: true, on: 'threat', off: 'freeze' },
   { text: 'YOUR METER IS RUNNING OUT', slot: 'top', arrow: 'up', hand: 'none',
@@ -348,6 +370,16 @@ const RAMP_CUES = [
   { text: 'TAP AGAIN TO RESUME', slot: 'atbtn', arrow: 'down', hand: 'none',
     pulse: true, on: 'low', off: 'resume' },
 ];
+const SHOOT_CUE = { text: 'TAP ANYWHERE TO SHOOT', slot: 'mid', arrow: 'none',
+  hand: 'none', pulse: true, on: 'ready', off: 'shot' };
+// the loop, for the first room only
+const RAMP_CUES = REMIND.map((c) => ({ ...c }));
+// ...and the once-per-area version every room after it uses
+const rem = (withShoot) => {
+  const out = REMIND.map((c) => ({ ...c, once: true }));
+  if (withShoot) out.push({ ...SHOOT_CUE, once: true });
+  return out;
+};
 
 export const STEPS = [
   // --- 1. MOVE -------------------------------------------------------------
@@ -542,23 +574,32 @@ export const STEPS = [
   { id: 'ramp1', label: '10 · Room · 1', advance: { kind: 'crossed' },
     grants: { ...PLAYING }, checkpoint: true, hud: 'CLEAR THE ROOM',
     cues: RAMP_CUES.map((c) => ({ ...c })) },
+  // ...and from here on the reminders are once each, per area. The trigger
+  // prompt starts after the first hallway with anybody in it, which is where
+  // a player who has been shooting without being told has proved they do not
+  // need it and one who has not is overdue.
   { id: 'ramp2', label: '11 · Hall · 1', advance: { kind: 'crossed' },
     grants: { ...PLAYING }, checkpoint: true, hud: 'CLEAR THE HALLWAY',
-    cues: RAMP_CUES.map((c) => ({ ...c })) },
+    cues: rem(false) },
   { id: 'ramp3', label: '12 · Room · 2', advance: { kind: 'crossed' },
     grants: { ...PLAYING }, checkpoint: true, hud: 'CLEAR THE ROOM',
-    cues: RAMP_CUES.map((c) => ({ ...c })) },
+    cues: rem(true) },
   { id: 'ramp4', label: '13 · Hall · 2', advance: { kind: 'crossed' },
     grants: { ...PLAYING }, checkpoint: true, hud: 'CLEAR THE HALLWAY',
-    cues: RAMP_CUES.map((c) => ({ ...c })) },
+    cues: rem(true) },
   { id: 'ramp5', label: '14 · Room · 3', advance: { kind: 'crossed' },
     grants: { ...PLAYING }, checkpoint: true, hud: 'CLEAR THE ROOM',
-    cues: RAMP_CUES.map((c) => ({ ...c })) },
+    cues: rem(true) },
   { id: 'ramp6', label: '15 · Hall · 3', advance: { kind: 'crossed' },
     grants: { ...PLAYING }, checkpoint: true, hud: 'CLEAR THE HALLWAY',
-    cues: RAMP_CUES.map((c) => ({ ...c })) },
+    cues: rem(true) },
+  // ...AND IT LETS THE GAME SPAWN. `PLAYING` holds the spawn queue, because
+  // a training area's bodies come from the LEG rather than the queue — but
+  // `done` is entered on crossing into the FIRST REAL LEG, whose wave has
+  // just been composed and queued. Holding it there emptied that queue every
+  // frame until the onboarding finished ending, and door 1 had nobody in it.
   { id: 'done', label: 'Done', advance: { kind: 'none' },
-    grants: { ...PLAYING }, cues: [] },
+    grants: { ...PLAYING, spawns: true }, cues: [] },
 ];
 
 export const DEFAULT_SPEC = { TUTOR, LEGS, STEPS };
@@ -673,6 +714,8 @@ function normalise(steps) {
       arrow: c.arrow || 'none',
       hand: c.hand || 'none',
       pulse: !!c.pulse,
+      // ...shown at most once per area, spent by the action it asked for
+      once: !!c.once,
       on: c.on || 'enter',
       off: c.off || 'advance',
     })),

@@ -84,9 +84,9 @@ function validate() {
     froze: ['held', 'freeze'],
     dodged: ['held', 'freeze', 'dodge'],
     resumed: ['meter', 'resume'],
-    cleared: ['kill', 'threat', 'freeze', 'low', 'resume'],
+    cleared: ['kill', 'threat', 'freeze', 'low', 'resume', 'ready', 'shot'],
     // a training room: a real fight, so the whole reminder loop is live in it
-    crossed: ['threat', 'freeze', 'low', 'resume', 'kill'],
+    crossed: ['threat', 'freeze', 'low', 'resume', 'ready', 'shot', 'kill'],
   };
   for (const st of S) {
     const can = new Set(['enter', 'advance', ...(KIND_EVENTS[st.advance.kind] || [])]);

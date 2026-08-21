@@ -294,6 +294,52 @@ loop**, declared like any other cues:
 | the bar falls to half the tank (`low`) | `YOUR METER IS RUNNING OUT` under the meter, `TAP AGAIN TO RESUME` over the button |
 | they let time run (`resume`) | both go — and `resume` clears `threat`, so the next man to raise his arm starts it over |
 
+### The first room nags; the rest do not
+
+Room 1 (`ramp1`) runs the loop above for as long as the room lasts. The first
+time somebody is asked to use the control unprompted is the time they need it
+in front of them.
+
+**Every room after that marks the same cues `once`.** A cue with `once` is
+*spent by the action it asked for*, for the rest of that area:
+
+| the player… | …and the tip |
+|---|---|
+| slows time in this room | `TAP TO SLOW TIME` is spent — including if they slowed *before* anyone aimed |
+| lets time run again | `YOUR METER IS RUNNING OUT` and `TAP AGAIN TO RESUME` are spent |
+| pulls the trigger | `TAP ANYWHERE TO SHOOT` is spent |
+
+The state is per-area: `tutorSpent` is cleared by `tutorNext`, and a training
+area **is** a step. Room 3 starts fresh no matter what happened in room 2. Room
+1 is deliberately outside the rule.
+
+### …and the trigger waits its turn
+
+`TAP ANYWHERE TO SHOOT` appears on `ready` — which fires only once the player
+has **both** slowed time and let it run again in this area — and goes on
+`shot`. Neither event is cleared by anything: they are facts about the area,
+not beats in a loop.
+
+That ordering is the point. Slowing and resuming are what the player has just
+been taught, and a prompt about the trigger landing on top of one about the
+clock is two instructions competing for the same beat. Because the meter tips
+are `once` and are spent by the same resume that fires `ready`, the two can
+never be on screen together. It starts at `ramp3` — after the first hallway
+with anybody in it, which is where a player who has been shooting unprompted
+has proved they do not need it and one who has not is overdue.
+
+### Two other things the training rooms do differently
+
+* **every body leaves a clip**, and **drops do not sink**. Scarcity is the
+  lever the whole game hangs off, and it is not a lever anyone can feel before
+  they know what it is costing them — so the lesson hands the ammo back every
+  time and the curve starts at the first real door. A clip sinking into the
+  floor while a first-time player works out that it *is* a clip teaches that
+  loot is a reflex test.
+* **every area with more than one body in it takes turns** (`fireOrder`). Two
+  rounds resolving on the same frame is one loud event a first-time player
+  cannot parse; the same two a beat apart is a room reacting to them.
+
 **Half the tank, not half the bar.** A wave starts with `SLOWMO.base` seconds
 against a bar drawn to `SLOWMO.cap`, so the meter is *already* at 50% on the
 frame it appears — a warning at half the bar fired the instant the button was
@@ -317,6 +363,37 @@ that reads like a score in a place with no score. During the lesson it reads
 The instruction is a field on the step (`hud`), so the tool edits it and the
 words follow the lesson rather than the geometry. An open door overrides it
 with `GO TO THE NEXT DOOR`, because that is a state rather than a step.
+
+## The handover, and the first four doors
+
+**One banner.** It used to be two — `TRAINING OVER · YOU'RE ON YOUR OWN` then
+`REACH THE RED DOOR` — followed by the new leg's own headline: three
+instructions in five seconds, on the exact frame that everything the lesson had
+been withholding arrived at once. It says `TRAINING COMPLETE · GO TO THE NEXT
+DOOR` and nothing else. (`IT OPENS UP`, the atrium form's headline, is gone
+too; it described nothing a player could act on.)
+
+**Door 1 was empty.** `PLAYING` grants `spawns: false`, because a training
+area's bodies come from the LEG rather than the spawn queue. But `done` is
+entered on crossing into the **first real leg**, whose wave has just been
+composed and queued — so `tutorHoldsSpawns()` emptied that queue every frame
+until the onboarding finished ending, and the first door of the actual game had
+nobody behind it. `done` grants `spawns: true`.
+
+**And the opening ramp is two dials, not one.** `EARLY` now separates how many
+bodies a leg holds from how many may be on you at once:
+
+| door | bodies in the leg | alive at once |
+|---|---|---|
+| 1 | 1 | 1 |
+| 2 | 1 | 1 |
+| 3 | **2** | 1 |
+| 4 | 2 | **2** |
+
+Door 3 is the same beat twice rather than a new problem; door 4 is the first
+time two can meet you together, which is where the game proper starts. Moving
+the two dials on different doors is what stops "more enemies" and "harder
+fight" arriving on the same one.
 
 ## The pause button was gone for eight lessons
 
