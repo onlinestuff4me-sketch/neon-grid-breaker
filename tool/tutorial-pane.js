@@ -84,7 +84,9 @@ function validate() {
     froze: ['held', 'freeze'],
     dodged: ['held', 'freeze', 'dodge'],
     resumed: ['meter', 'resume'],
-    cleared: ['kill'],
+    cleared: ['kill', 'threat', 'freeze', 'low', 'resume'],
+    // a training room: a real fight, so the whole reminder loop is live in it
+    crossed: ['threat', 'freeze', 'low', 'resume', 'kill'],
   };
   for (const st of S) {
     const can = new Set(['enter', 'advance', ...(KIND_EVENTS[st.advance.kind] || [])]);
@@ -428,7 +430,17 @@ function stepCard(st, i) {
   }
   advRow.append(field('ends when', kindSel), field('threshold', needIn));
   bd.appendChild(advRow);
-  bodyRow.append(field('gunners standing here', bodIn), document.createElement('div'));
+  // WHAT THE LINE AT THE TOP OF THE SCREEN SAYS. During the onboarding it
+  // reads TRAINING and then this — a door count and an enemy tally are two
+  // systems talking to somebody who has been introduced to neither.
+  const hudIn = document.createElement('input');
+  hudIn.type = 'text';
+  hudIn.value = st.hud || '';
+  hudIn.placeholder = 'enemies left / go to the next door';
+  hudIn.title = 'Shown after "TRAINING" at the top of the screen, unless the '
+    + 'area\'s door is already open — in which case it says GO TO THE NEXT DOOR.';
+  hudIn.oninput = () => { st.hud = hudIn.value; markDirty(false); };
+  bodyRow.append(field('gunners standing here', bodIn), field('top line', hudIn));
   bd.appendChild(bodyRow);
 
   // --- 2. mechanics

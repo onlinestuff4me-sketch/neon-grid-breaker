@@ -79,6 +79,19 @@ export const TUTOR = {
   resumeDelay: 1.6,     // beat between the warning and what to do about it
   gunRise: 0.6,         // seconds for the weapon to swing up into frame
   rampFireDelay: 0.9,   // beat after entering a ramp room before anyone fires
+  // HALF PRICE WHILE THEY ARE STILL LEARNING. The ordinary drain empties a
+  // full bank in ten seconds of frozen world, which in a training room is
+  // about one fight — so a player using the button the way they have just been
+  // taught to ran dry in the first room and spent the other five without it.
+  rampDrain: 0.5,       // multiplier on the bank's drain, for the whole lesson
+  // ...and where "it is running out" is worth saying out loud. HALF OF WHAT
+  // THEY HAD WHEN THEY SLOWED TIME, not half of the bar: a wave starts with
+  // `base` seconds against a bar drawn to `cap`, so the meter is ALREADY at
+  // 50% on the frame it appears and a warning at half the bar would fire the
+  // instant the button was pressed. Half the tank is what a player means by
+  // half gone. The game's own `low` mark is the floor under it, so a tap on a
+  // nearly-empty tank still gets warned.
+  warnAt: 0.5,          // fraction of the tank left that trips the reminder
   // NOTHING DEAD IN HERE. `dodgeRounds`, `faceRate` and `finalEnemies` used to
   // sit in this list, complete with sliders and help text in the tool, and not
   // one line of main.js read any of them: dragging "how many rounds must be
@@ -272,6 +285,8 @@ export const CUE_EVENTS = [
   ['freeze',  'the player stops time'],
   ['dodge',   'a round goes past them'],
   ['kill',    'they drop one'],
+  ['threat',  'somebody starts to aim at them'],
+  ['low',     'the meter falls past the warning mark'],
   ['meter',   'the meter warning lands'],
   ['resume',  'the player lets time run again'],
   ['advance', 'the step ends'],
@@ -316,6 +331,24 @@ export const ADVANCE_KINDS = [
   ['none',     'never (the last step)'],
 ];
 
+// The training rooms' reminder loop, shared by all six of them. A LOOP, not a
+// sequence: somebody starts to aim and the button is named; they use it and
+// the words go; the bar falls past the warning mark and it is named again with
+// the way out; they let time run and everything clears, ready for the next man
+// to raise his arm. See CUE_CLEARS in main.js for what makes that repeat.
+//
+// This is the only teaching left in the ramp, and it is a reminder rather than
+// a lesson: the control has been taught, and what these rooms are for is the
+// habit of reaching for it.
+const RAMP_CUES = [
+  { text: 'TAP TO SLOW TIME', slot: 'atbtn', arrow: 'down', hand: 'none',
+    pulse: true, on: 'threat', off: 'freeze' },
+  { text: 'YOUR METER IS RUNNING OUT', slot: 'top', arrow: 'up', hand: 'none',
+    pulse: false, on: 'low', off: 'resume' },
+  { text: 'TAP AGAIN TO RESUME', slot: 'atbtn', arrow: 'down', hand: 'none',
+    pulse: true, on: 'low', off: 'resume' },
+];
+
 export const STEPS = [
   // --- 1. MOVE -------------------------------------------------------------
   // Ends at the corner, not after n metres. Goal 2: the words stay the whole
@@ -323,6 +356,7 @@ export const STEPS = [
   // that leaves while somebody is still working out what it meant.
   {
     id: 'move', label: '1 · Move',
+    hud: 'PROCEED DOWN THE HALLWAY',
     advance: { kind: 'reached', need: 'firstCorner' },
     // THE BARRIER IS A FIXTURE, not something lesson 4 conjures. It stands
     // from the first frame of the run, so turning the last corner shows you a
@@ -336,6 +370,7 @@ export const STEPS = [
   // action that happens at the same time as moving, not a mode you enter.
   {
     id: 'look', label: '2 · Look',
+    hud: 'PROCEED DOWN THE HALLWAY',
     advance: { kind: 'reached', need: 'secondRun' },
     grants: {}, divider: true,
     cues: [
@@ -348,6 +383,7 @@ export const STEPS = [
   // --- 3. CORNERS AND A FORK ----------------------------------------------
   {
     id: 'corners', label: '3 · Corners + fork',
+    hud: 'PROCEED DOWN THE HALLWAY',
     // ...and ends AT THE LAST CORNER, not eight cells past it. The walking
     // lesson is over the moment there is something ahead to walk to, and that
     // moment is the turn: STAND HERE is on screen from the frame the barrier
@@ -366,6 +402,7 @@ export const STEPS = [
   // The prompts go. The first thing they are asked to AIM at rather than do.
   {
     id: 'stand', label: '4 · Stand here',
+    hud: 'GO TO THE BARRIER',
     advance: { kind: 'atBarrier' },
     grants: {},
     cues: [{ text: 'STAND HERE', slot: 'world', arrow: 'none', hand: 'none',
@@ -383,6 +420,7 @@ export const STEPS = [
   // DODGE THE BULLET arrived with no bullet on the screen.
   {
     id: 'dodge1', label: '5 · Slow time',
+    hud: 'DODGE THE ROUNDS',
     advance: { kind: 'froze' },
     // `bodies` is how many should be STANDING THERE, not how many to add.
     // Declaring it per beat is what lets a retry rebuild the world: the steps
@@ -406,6 +444,7 @@ export const STEPS = [
   // stick reads as "forward", which is into the round.
   {
     id: 'dodgeMove', label: '5b · Move out of the way',
+    hud: 'DODGE THE ROUNDS',
     advance: { kind: 'dodged', need: 1 },
     grants: { timebtn: true }, bodies: 1,
     cues: [{ text: 'DRAG TO MOVE', slot: 'left', arrow: 'none', hand: 'sway',
@@ -417,6 +456,7 @@ export const STEPS = [
   // motion costs nothing and the only thing being practised is the beat.
   {
     id: 'dodge3', label: '6 · Dodge three',
+    hud: 'DODGE THE ROUNDS',
     advance: { kind: 'dodged', need: 3 },
     grants: { timebtn: true }, bodies: 3, hardFreeze: true,
     // The pair below is a LOOP, not a sequence: `held` clears `freeze` and
@@ -435,20 +475,21 @@ export const STEPS = [
   // two lessons at once.
   {
     id: 'meter', label: '7 · The meter',
+    hud: 'WATCH THE METER',
     advance: { kind: 'resumed' },
     grants: { timebtn: true, meter: true }, bodies: 3, startMeter: true,
     cues: [
-      { text: 'SLOW TIME METER<span>IT DRAINS WHILE TIME IS SLOW</span>',
+      // ONE SENTENCE, BROKEN WHERE IT READS BEST. It used to be a heading and
+      // a subtitle — a label for the bar and then a fact about it — which is
+      // two things to read on a beat that has one thing to say.
+      { text: 'YOUR METER DRAINS<br>WHILE TIME IS SLOW',
         slot: 'top', arrow: 'up', hand: 'none',
         pulse: false, on: 'enter', off: 'advance' },
       // ...and what refills it, which is the fact that makes the meter make
       // sense and was never stated anywhere.
-      // "IT REFILLS WHEN TIME RUNS" was simply false — the bank refills on
-      // KILLS (killEnemy, main.js), and at this point in the lesson there is
-      // no gun. What is true is that it is finite, which is the whole reason
-      // the bar is on the screen. The refill is taught by the shooting lesson,
-      // where it is both true and demonstrable.
-      { text: 'TAP AGAIN TO LET TIME RUN<span>SLOW TIME IS LIMITED</span>',
+      // Four words. That it is limited is the bar draining in front of them,
+      // which teaches it better than a second line of text.
+      { text: 'TAP AGAIN TO RESUME',
         slot: 'atbtn', arrow: 'down', hand: 'none',
         pulse: true, on: 'meter', off: 'advance' },
     ],
@@ -456,6 +497,7 @@ export const STEPS = [
   // --- 8. SHOOT ------------------------------------------------------------
   {
     id: 'gunup', label: '8a · Weapon up',
+    hud: 'ARM YOURSELF',
     advance: { kind: 'gunUp' },
     // gun: true so the rise is SEEN. Without it this step was 0.6 s of an
     // empty corridor and the weapon then popped into frame on the next one.
@@ -464,6 +506,7 @@ export const STEPS = [
   },
   {
     id: 'shoot', label: '8b · Shoot',
+    hud: 'CLEAR THE HALLWAY',
     advance: { kind: 'cleared' },
     grants: { gun: true, fire: true, timebtn: true, meter: true, bank: true, ammo: true },
     bodies: 3,
@@ -483,8 +526,12 @@ export const STEPS = [
   {
     id: 'exit', label: '9 · The door',
     advance: { kind: 'crossed' },
-    grants: { gun: true, fire: true, timebtn: true, meter: true, bank: true, ammo: true },
-    dropBarrier: true, openDoor: true,
+    // The score line comes on here — the first beat of the onboarding where
+    // there is a door count worth having — and reads TRAINING · GO TO THE NEXT
+    // DOOR rather than DOOR 1 · OPEN — GO.
+    grants: { gun: true, fire: true, timebtn: true, meter: true, bank: true,
+      ammo: true, score: true },
+    dropBarrier: true, openDoor: true, hud: 'GO TO THE NEXT DOOR',
     cues: [{ text: 'GO TO THE NEXT ROOM', slot: 'mid', arrow: 'none',
       hand: 'none', pulse: false, on: 'enter', off: 'advance' }],
   },
@@ -493,17 +540,23 @@ export const STEPS = [
   // enemies come from the LEG rather than the step, and dying puts the player
   // back at the start of this area and nowhere further.
   { id: 'ramp1', label: '10 · Room · 1', advance: { kind: 'crossed' },
-    grants: { ...PLAYING }, checkpoint: true, cues: [] },
+    grants: { ...PLAYING }, checkpoint: true, hud: 'CLEAR THE ROOM',
+    cues: RAMP_CUES.map((c) => ({ ...c })) },
   { id: 'ramp2', label: '11 · Hall · 1', advance: { kind: 'crossed' },
-    grants: { ...PLAYING }, checkpoint: true, cues: [] },
+    grants: { ...PLAYING }, checkpoint: true, hud: 'CLEAR THE HALLWAY',
+    cues: RAMP_CUES.map((c) => ({ ...c })) },
   { id: 'ramp3', label: '12 · Room · 2', advance: { kind: 'crossed' },
-    grants: { ...PLAYING }, checkpoint: true, cues: [] },
+    grants: { ...PLAYING }, checkpoint: true, hud: 'CLEAR THE ROOM',
+    cues: RAMP_CUES.map((c) => ({ ...c })) },
   { id: 'ramp4', label: '13 · Hall · 2', advance: { kind: 'crossed' },
-    grants: { ...PLAYING }, checkpoint: true, cues: [] },
+    grants: { ...PLAYING }, checkpoint: true, hud: 'CLEAR THE HALLWAY',
+    cues: RAMP_CUES.map((c) => ({ ...c })) },
   { id: 'ramp5', label: '14 · Room · 3', advance: { kind: 'crossed' },
-    grants: { ...PLAYING }, checkpoint: true, cues: [] },
+    grants: { ...PLAYING }, checkpoint: true, hud: 'CLEAR THE ROOM',
+    cues: RAMP_CUES.map((c) => ({ ...c })) },
   { id: 'ramp6', label: '15 · Hall · 3', advance: { kind: 'crossed' },
-    grants: { ...PLAYING }, checkpoint: true, cues: [] },
+    grants: { ...PLAYING }, checkpoint: true, hud: 'CLEAR THE HALLWAY',
+    cues: RAMP_CUES.map((c) => ({ ...c })) },
   { id: 'done', label: 'Done', advance: { kind: 'none' },
     grants: { ...PLAYING }, cues: [] },
 ];
@@ -603,6 +656,9 @@ function normalise(steps) {
       need: s.advance && s.advance.need },
     grants: { ...NO_GRANTS, ...(s.grants || {}) },
     bodies: s.bodies | 0,
+    // What the line at the top of the screen says after "TRAINING". Optional:
+    // a step without one falls back to the ordinary door-and-enemies readout.
+    hud: s.hud == null ? '' : String(s.hud),
     buildBarrier: !!s.buildBarrier,
     dropBarrier: !!s.dropBarrier,
     openDoor: !!s.openDoor,

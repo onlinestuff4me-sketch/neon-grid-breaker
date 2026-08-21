@@ -156,6 +156,7 @@ existing state and costs nothing — but nothing in `src/` may depend on it.
 | `signwalk.js` / `four.js` | STAND HERE as an object — hidden round the corners, and width × distance constant down the straight |
 | `pastbar.js` | the men past the barrier stand where they are put, and a death rebuilds the fight behind a shut door |
 | `coachcue.js` | the words and the arrow that name the time button, sampled on the frame the world stops |
+| `ramp.js` | the training rooms: the reminder loop, the half-price drain, the TRAINING line, and the pause button surviving a retry |
 | `shatter.js` | the shooting lesson driven with the REAL weapon: three shatters, the barrier down, the door open |
 | `beat.js` | the dodge beat — fires, freezes on the round, tap, readable flight, sideways coach, and the loop repeating for all three |
 | `corner.js` | the barrier is up from frame one and its sign is on from the last corner |
@@ -201,6 +202,23 @@ Related trap, an hour of it: `playerFire` aims with
 frame loop. Set `player.yaw` and fire on the same tick and the round goes
 wherever you were looking *before* the turn — which looks exactly like one
 particular enemy being unkillable. Let a frame pass after a scripted turn.
+
+## Rates are per FRAME, never per wall-clock second
+
+Measuring the tutorial's half-price meter drain took three goes, and the first
+two both looked like a bug in the game:
+
+* **amount spent in a fixed window** empties the tank in the ordinary run,
+  which unlocks the clock and stops the drain — so the ordinary rate reads
+  lower than it is, and the ratio comes out around 0.6.
+* **wall-clock seconds are not the game's seconds.** The frame loop clamps
+  `dt` at 0.05 and headless runs below 20 fps, at *different* frame rates in
+  the two halves being compared — so the clamp throws away a different
+  fraction of each. The ratio wandered between 0.53 and 0.63 for a multiplier
+  that is exactly 0.5 in the source.
+
+Below 20 fps every frame contributes exactly 0.05 s of game time, so **drain
+per frame is the rate, exactly**. Measured that way: 0.500×, run after run.
 
 ## The dodge simulator that never worked
 

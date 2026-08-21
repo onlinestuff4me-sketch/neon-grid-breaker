@@ -279,6 +279,58 @@ grows one. Which meant three other things had to move:
   A `reached` step now lands at the start of its walk and an `atBarrier` step
   short of the barrier, and the beat counters reset with the jump.
 
+## The training rooms
+
+The six ramp areas used to carry no words at all — the teaching was over, and
+the point of them was the habit rather than the lesson. That left the one
+control a new player forgets under pressure, the time button, unmentioned for
+the whole back half of the onboarding. They now carry a **three-cue reminder
+loop**, declared like any other cues:
+
+| beat | what appears |
+|---|---|
+| somebody starts to aim (`threat`) | `TAP TO SLOW TIME` over the button |
+| they use it (`freeze`) | the words go |
+| the bar falls to half the tank (`low`) | `YOUR METER IS RUNNING OUT` under the meter, `TAP AGAIN TO RESUME` over the button |
+| they let time run (`resume`) | both go — and `resume` clears `threat`, so the next man to raise his arm starts it over |
+
+**Half the tank, not half the bar.** A wave starts with `SLOWMO.base` seconds
+against a bar drawn to `SLOWMO.cap`, so the meter is *already* at 50% on the
+frame it appears — a warning at half the bar fired the instant the button was
+pressed. `warnAt` is a fraction of what the tank held when they reached for it,
+floored at the game's own `SLOWMO.low` so a tap on a nearly-empty tank is still
+warned.
+
+**And the drain is half price for the whole lesson** (`TUTOR.rampDrain`). The
+ordinary rate empties a full bank in about one training-room fight, so a player
+using the button the way they have just been taught to ran dry in the first
+room and spent the other five without it.
+
+## The line at the top of the screen
+
+`DOOR 1 · 1 ENEMY LEFT` is two systems talking at once to somebody introduced
+to neither: a door count from a progression they have not started, and a tally
+that reads like a score in a place with no score. During the lesson it reads
+**`TRAINING`** and then what to do — `PROCEED DOWN THE HALLWAY`,
+`CLEAR THE ROOM`, `GO TO THE NEXT DOOR`.
+
+The instruction is a field on the step (`hud`), so the tool edits it and the
+words follow the lesson rather than the geometry. An open door overrides it
+with `GO TO THE NEXT DOOR`, because that is a state rather than a step.
+
+## The pause button was gone for eight lessons
+
+`body.tutoring:not(.armed) #pausebtn { opacity: 0 }` — the onboarding owning
+the screen. But the death screen of a *failed* lesson deliberately has no
+`MAIN MENU` (writing `timeshard_taught` on the first frame means quitting there
+would lose the onboarding for good), so the pause menu's END RUN is the only
+way out of the tutorial at all. A player who wanted to stop was trapped in it.
+Two characters in a corner are not an instruction competing with the lesson.
+
+And `tutorRetry` handed the button back with `style.display = ''` — the base
+rule is `display: none`, so the empty string handed it back to the stylesheet
+and a single death removed it for the rest of the run.
+
 ## The shot that did nothing
 
 Shooting at the three men in lesson 8b did nothing at all: no shatter, no

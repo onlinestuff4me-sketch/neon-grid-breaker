@@ -5738,6 +5738,12 @@ let tutorAnchorStep = null, tutorButtonShown = false;
 // before a round is in the air, and it costs nothing after that.
 let tutorHardFreeze = false;   // this STEP wants the freeze
 let tutorEverHeld = false;     // ...and it has actually happened at least once
+// The clock's last known state, so the script can tell a change from a state
+// and emit `freeze` / `resume` on the frame the player's thumb causes one —
+// and what the tank held at that moment, which is what "half gone" is measured
+// against. A wave starts with `base` against a bar drawn to `cap`, so the
+// meter is already at 50% when it appears: half the BAR is not half the tank.
+let tutorLockWas = false, tutorSlowFrom = 0;
 let tutorWorldHeld = false;    // ...and right now the world is actually held
 let tutorLegIx = 0;          // which entry of TUTOR_LEGS the current leg is
 let tutorVolleyT = 0;        // beat between rounds in the three-round lesson
@@ -5836,17 +5842,31 @@ function tutorHideMsg() {
 // GOAL 2: a cue with off:'advance' stays until the LESSON is over. Nothing
 // here is on a timer, and nothing here can be.
 let tutorFired = new Set();
-// THE DODGE BEAT IS A LOOP, and a Set of things that have happened cannot
-// describe a loop on its own. These three are one round's worth of beat — the
-// world stops, the player lets it go, the round goes past — and emitting any
-// of them un-happens the ones after it. So a step can hang two cues on the
-// pair and have them play again for the second round and the third, with no
-// machinery in the step and nothing on a timer.
-const BEAT_CYCLE = ['held', 'freeze', 'dodge'];
+// A BEAT IS A LOOP, and a Set of things that have happened cannot describe a
+// loop on its own. Emitting one of these un-fires the others listed with it,
+// which is what lets a step hang two or three declarative cues on a beat and
+// have them play again for the next round, and the next.
+//
+// Two beats use it. The DODGE beat: the world stops on the round (`held`), the
+// player lets it go (`freeze`), the round goes past (`dodge`). And the TRAINING
+// ROOM beat: somebody starts to aim (`threat`), the player slows time
+// (`freeze`), the bar falls past the warning mark (`low`), they let time run
+// (`resume`) — and `resume` clears the head of it, so the next man to raise
+// his arm starts the whole thing over.
+//
+// Written out rather than derived from an order, because the two beats share
+// `freeze` and the rules for what it clears are not the same in both.
+const CUE_CLEARS = {
+  threat: ['held', 'freeze', 'dodge', 'low', 'resume'],
+  held: ['freeze', 'dodge', 'low', 'resume'],
+  freeze: ['dodge', 'low', 'resume'],
+  dodge: ['low', 'resume'],
+  low: ['resume'],
+  resume: ['threat', 'held', 'freeze', 'low'],
+};
 function tutorEmit(ev) {
   if (tutorStep === null) return;
-  const i = BEAT_CYCLE.indexOf(ev);
-  for (let j = i + 1; i >= 0 && j < BEAT_CYCLE.length; j++) tutorFired.delete(BEAT_CYCLE[j]);
+  for (const k of CUE_CLEARS[ev] || []) tutorFired.delete(k);
   tutorFired.add(ev);
   tutorRenderCues();
 }
@@ -6540,7 +6560,11 @@ function tutorRetry() {
   tutorMeterAt = 0; tutorMeterSaid = false;
   tutorRound = null; tutorAwaitShot = false;
   tutorShotsFired = 0; tutorDodged = 0;
-  el.pausebtn.style.display = '';
+  // 'block', not ''. The base rule is `display:none` — the button is turned on
+  // by script — so handing it back the empty string handed it back to the
+  // stylesheet, and a single death removed the pause button for the rest of
+  // the run. Which, on the one screen with no other way out, is a trap.
+  el.pausebtn.style.display = 'block';
   el.guide.style.display = 'none';
   const step = tutorAnchorStep && tutorSpecOf(tutorAnchorStep)
     ? tutorAnchorStep : TUTOR_ORDER[0];
@@ -6657,6 +6681,25 @@ function updateTutorial(dtReal, movedM, yawDelta) {
   // AFTER the hold, not before it: placed first, the ring appeared a frame
   // late — which on the frame the world stops is the frame that matters.
   tutorPlaceRoundPin();
+
+  // THE TRAINING ROOMS' REMINDER LOOP. Three events, none of which the dodge
+  // lessons need, all of which are just observations about the world: somebody
+  // has started to aim, the clock has been slowed or let go, the bar has
+  // fallen past the mark. What is DONE with them is in src/tutorial.js.
+  if (enemies.some((e) => e.alive && (e.state === 'aim' || e.state === 'burst'))) {
+    if (!tutorFired.has('threat')) tutorEmit('threat');
+  }
+  if (timeLocked !== tutorLockWas) {
+    tutorLockWas = timeLocked;
+    // what the tank held when they reached for it, so "half gone" means half
+    // of what they actually spent rather than half of the bar's full scale
+    if (timeLocked) tutorSlowFrom = slowBank;
+    tutorEmit(timeLocked ? 'freeze' : 'resume');
+  }
+  if (timeLocked && tutorMay('bank') && !tutorFired.has('low')
+      && slowBank <= Math.max(SLOWMO.low, tutorSlowFrom * TUTOR.warnAt)) {
+    tutorEmit('low');
+  }
 
   // A turn-ordered room hands the trigger on when the round goes past, so the
   // second man is a second problem rather than a simultaneous one.
@@ -8628,9 +8671,14 @@ function frame(now) {
       // on the opening waves, full price once the run heats up. Rush hour is
       // built AROUND frozen time (it's how you see the sleepers), so its
       // tank is cheap for the whole run.
-      slowBank -= dt * SLOWMO.drain * (game.mode === 'rush' ? RAMP.rushDrain
-        : (RAMP.drainFloor + RAMP.drainRange * diffT())
-          * scarcity('timeDrain', game.mode === 'hall' ? game.wave : 1));
+      // ...at half price while the onboarding is still running. The ordinary
+      // rate empties a full bank in about one training-room fight, so a player
+      // using the button the way they have just been taught to ran dry in the
+      // first room and spent the other five without it.
+      slowBank -= dt * SLOWMO.drain * (tutorStep !== null ? TUTOR.rampDrain : 1)
+        * (game.mode === 'rush' ? RAMP.rushDrain
+          : (RAMP.drainFloor + RAMP.drainRange * diffT())
+            * scarcity('timeDrain', game.mode === 'hall' ? game.wave : 1));
       if (slowBank <= 0) {
         slowBank = 0;
         setTimeLocked(false);   // time rushes back — resume SFX fires as usual
@@ -9003,7 +9051,19 @@ function frame(now) {
   // taught neither, and DOOR 1 — OPEN — GO reads as an instruction that
   // contradicts the one they are actually being given.
   el.score.style.visibility = tutorMay('score') ? '' : 'hidden';
-  el.score.textContent = game.mode === 'rush'
+  // ...AND DURING THE LESSON IT IS NOT A DOOR COUNT. "DOOR 1" is a number from
+  // a system the player has not been introduced to, and a tally of enemies is
+  // a score in a place with no score. It reads TRAINING, and then the thing
+  // the step says to do — which the step itself carries (`hud`), so the tool
+  // can edit it and the words follow the lesson rather than the geometry.
+  const tutorHud = tutorStep !== null && hall
+    ? (hall.legs[hall.cur].door.open ? 'GO TO THE NEXT DOOR'
+      : ((tutorSpecOf(tutorStep) || {}).hud
+        || (left ? `${left} ${left === 1 ? 'ENEMY' : 'ENEMIES'} LEFT` : 'GO TO THE NEXT DOOR')))
+    : null;
+  el.score.textContent = tutorHud !== null
+    ? `TRAINING${SEP}${tutorHud}`
+    : game.mode === 'rush'
     ? `RUSH${SEP}${markPips} ${markPips === 1 ? 'MARK' : 'MARKS'}`
     : game.mode === 'hall' && hall
       ? (hall.legs[hall.cur].door.open

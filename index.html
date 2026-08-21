@@ -55,7 +55,13 @@
      STAND HERE and under TAP HERE TO SLOW TIME. Goal 3: it arrives with the
      thing it aims. `body.armed` is set the moment the gun is granted. */
   body.tutoring:not(.armed) #crosshair { display:none; }
-  body.tutoring:not(.armed) #pausebtn { opacity:0; pointer-events:none; }
+  /* (`body.tutoring:not(.armed) #pausebtn { opacity:0 }` used to be here, on
+     the principle that the onboarding owns the screen. It hid the pause button
+     for the first eight lessons — and the death screen of a FAILED lesson has
+     deliberately got no MAIN MENU, so the pause menu's END RUN is the only way
+     out of the onboarding at all. A player who wanted to stop was trapped in
+     it. Two characters in a corner are not an instruction competing with the
+     lesson; being unable to leave is a worse problem than either.) */
   #crosshair::before, #crosshair::after { content:""; position:absolute; }
   #crosshair::before { left:50%; top:0; width:3px; height:100%; transform:translateX(-50%);
                        background:linear-gradient(180deg,#111 0 35%,transparent 35% 65%,#111 65% 100%); }
