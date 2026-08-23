@@ -4545,10 +4545,12 @@ function onPointerDown(ev) {
         openSettings();
         return;
       }
-      // The saves screen lives on the same row as SETTINGS, so its taps have
-      // to be handled HERE — the overlay block below returns on anything that
-      // is not the PLAY button, which swallowed them entirely.
-      if (ev.target.closest('#saveslink')) { openSaves(); return; }
+      // The saves screen's taps are handled HERE — the overlay block below
+      // returns on anything that is not the PLAY button, which swallowed them
+      // entirely. (The screen used to have its own link on the SETTINGS row;
+      // LOAD GAME is the door now, and two doors to one screen is one too
+      // many. The handler stays because the screen is still reached — from
+      // that button, which the overlay block routes.)
       if (ev.target.closest('#savesclose')) { closeSaves(); return; }
       const cont = ev.target.closest('#slotlist .cont');
       if (cont) {
@@ -4558,6 +4560,9 @@ function onPointerDown(ev) {
       }
       if (ev.target.closest('#newsave.off')) return;   // the list is full
       if (ev.target.closest('#newsave')) { startNewRun(); return; }
+      const inf = ev.target.closest('#slotlist .info');
+      if (inf) { openSaveInfo(parseInt(inf.dataset.i, 10) || 0); return; }
+      if (ev.target.closest('#saveinfoclose')) { closeSaveInfo(); return; }
       const del = ev.target.closest('#slotlist .del');
       if (del) { askDelete(parseInt(del.dataset.i, 10) || 0); return; }
       if (ev.target.closest('#slotlist .delno')) { pendingDelete = -1; renderSlots(); return; }
@@ -4605,13 +4610,15 @@ function onPointerDown(ev) {
     }
     // on the main menu only TAP TO BEGIN starts a run — a stray tap right
     // after closing settings must not launch you into a wave
-    // NEW RUN: the deliberate second choice under the primary button. It makes
-    // a save to put the run in — a run the player cannot come back to is the
-    // thing the saves screen exists to prevent.
+    // LOAD GAME: the second choice under the primary button, and it opens the
+    // page rather than doing anything itself. CONTINUE already answers "carry
+    // on with the obvious one", so everything else — a DIFFERENT save, a new
+    // one, deleting one, looking at what a save actually is — is one screen
+    // with the list on it, reached by one button.
     if (game.state === 'menu' && ev.target && ev.target.closest
         && ev.target.closest('#newrun')) {
       game.mode = 'hall';
-      startNewRun();
+      openSaves();
       return;
     }
     if (game.state === 'menu' &&
@@ -5883,8 +5890,21 @@ function makeSave(name) {
   if (i >= MAX_SAVES) return null;
   const entry = { i, name: String(name || '').slice(0, 24) };
   slotClear(i);                 // whatever a deleted save left behind, gone
+  stampSave(i);
   writeSaveIndex([...list, entry]);
   return entry;
+}
+// Stamped at creation and never touched again — see saveIdFor. It has to be
+// re-applied after any slotClear, because `slotClear` is the low-level wipe
+// (it removes identity too, which is right when an index is being RECYCLED
+// for a different save) and `beginNewGame` clears the slot it was just handed.
+// Without this, a save made seconds ago reported its creation date as unknown.
+function stampSave(i) {
+  const born = Date.now();
+  try {
+    persist(slotKey(i, 'born'), String(born));
+    persist(slotKey(i, 'id'), saveIdFor(i, born));
+  } catch { /* private */ }
 }
 function deleteSave(i) {
   const list = saveIndex().filter((e) => e.i !== i);
@@ -5897,13 +5917,31 @@ function deleteSave(i) {
   }
 }
 
+// A SAVE'S IDENTITY, not its progress. `at` moves every time it is played and
+// is what the list sorts on; these two never move, which is the whole point of
+// showing them — "which one IS this" is a different question from "how far did
+// I get", and it is the one you ask when two saves look alike.
+//
+// Both are backfilled for saves that predate them: `born` from the last-played
+// stamp (the only evidence left of when the save existed) and `id` derived
+// from the slot so it is stable across reads rather than newly random each
+// time somebody opens the panel.
+const saveIdFor = (i, born) => {
+  const n = (born || 0) + i * 2654435761;
+  const a = ((n >>> 16) ^ (n & 0xffff)).toString(36).toUpperCase().padStart(4, '0');
+  const b = ((n >>> 8) & 0xffffff).toString(36).toUpperCase().padStart(4, '0');
+  return `TS-${a.slice(-4)}-${b.slice(-4)}`;
+};
 function slotRead(i) {
   const get = (k, d) => { try { const v = localStorage.getItem(slotKey(i, k)); return v === null ? d : v; } catch { return d; } };
   const doors = parseInt(get('doors', '0'), 10) || 0;
   const at = parseInt(get('at', '0'), 10) || 0;
+  const born = parseInt(get('born', '0'), 10) || 0;
   return {
     i, used: at > 0 || doors > 0,
     doors, at,
+    born, bornKnown: born > 0,
+    id: get('id', '') || saveIdFor(i, born || at),
     best: parseInt(get('best', '1'), 10) || 1,
     resumeDoor: parseInt(get('rdoor', '0'), 10) || 0,
     filed: (JSON.parse(get('archive', '[]')) || []).length,
@@ -5928,7 +5966,8 @@ function slotClear(i) {
   // `timeshard_timeuses`, so both halves of the per-slot design were talking
   // past each other and this clear had never removed anything. It is a real
   // slot key now (see slotTimeUses).
-  for (const k of ['doors', 'archive', 'best', 'runs', 'rdoor', 'at', 'timeuses']) {
+  for (const k of ['doors', 'archive', 'best', 'runs', 'rdoor', 'at', 'timeuses',
+    'born', 'id']) {
     try { localStorage.removeItem(slotKey(i, k)); } catch { /* private */ }
   }
 }
@@ -6140,7 +6179,7 @@ function openSaves() {
   renderSlots();
   el.saves.style.display = 'flex';
 }
-function closeSaves() { el.saves.style.display = 'none'; }
+function closeSaves() { el.saves.style.display = 'none'; closeSaveInfo(); }
 function renderSlots() {
   if (!el.slotlist) return;
   const list = savesByRecent();
@@ -6151,26 +6190,54 @@ function renderSlots() {
   for (const e of list) {
     const d = document.createElement('div');
     d.className = 'slot' + (e.i === slotIx ? ' on' : '');
-    const depth = e.resumeDoor > 1 ? `DOOR ${e.resumeDoor}` : 'door 1';
+    const depth = e.resumeDoor > 1 ? `DOOR ${e.resumeDoor}` : 'DOOR 1';
+    // LAST PLAYED, said out loud. The list is ordered by it, so leaving the
+    // date unlabelled invited it to be read as when the save was MADE — which
+    // is a different fact, lives behind the info button, and for most saves is
+    // a different day.
     d.innerHTML = `<div class="sname">${saveName(e)}${e.i === slotIx ? ' · ACTIVE' : ''}</div>`
-      + `<div class="smeta">${fmtSlotWhen(e.at)} · ${depth} · `
-      + `${e.doors} door${e.doors === 1 ? '' : 's'} · ${e.filed} filed</div>`
+      + `<div class="smeta"><b>${depth}</b> · ${e.doors} door${e.doors === 1 ? '' : 's'}`
+      + ` · ${e.filed} filed</div>`
+      + `<div class="swhen">LAST PLAYED ${fmtSlotWhen(e.at)}</div>`
       + '<div class="srow">'
       + `<div class="sbtn cont" data-i="${e.i}">CONTINUE</div>`
+      + `<div class="sbtn info" data-i="${e.i}" title="Details">i</div>`
       + `<div class="sbtn del" data-i="${e.i}">DELETE</div>`
       + '</div>';
     el.slotlist.appendChild(d);
   }
-  // NEW SAVE is an action on this list, not a third state of every row. The
-  // old screen offered NEW GAME on each of three fixed slots, which made
-  // "start again" and "overwrite that one" the same gesture.
+  // NEW GAME lives on this page rather than on the menu, and it is an action on
+  // the LIST rather than a third state of every row. The old screen offered
+  // NEW GAME on each of three fixed slots, which made "start a new one" and
+  // "overwrite that one" the same gesture.
   const add = document.createElement('div');
   add.className = 'sbtn addsave' + (list.length >= MAX_SAVES ? ' off' : '');
   add.id = 'newsave';
   add.textContent = list.length >= MAX_SAVES
-    ? `ALL ${MAX_SAVES} SAVES IN USE — DELETE ONE` : '+ NEW SAVE';
+    ? `ALL ${MAX_SAVES} SAVES IN USE — DELETE ONE` : '+ NEW GAME';
   el.slotlist.appendChild(add);
 }
+// WHICH ONE IS THIS. The list answers "how far did I get"; two saves at
+// similar depth are told apart by when they were started and by an id that
+// nothing about playing them can change.
+function openSaveInfo(i) {
+  const e = savesByRecent().find((x) => x.i === i) || slotRead(i);
+  if (!el.saveinfo) return;
+  const row = (k, v) => `<div class="sirow"><span>${k}</span><b>${v}</b></div>`;
+  el.saveinfo.querySelector('.sibody').innerHTML =
+    row('NAME', saveName(e))
+    + row('IDENTIFIER', e.id)
+    + row('CREATED', e.bornKnown ? fmtSlotWhen(e.born)
+      : `${fmtSlotWhen(e.at)} <i>(or earlier)</i>`)
+    + row('LAST PLAYED', fmtSlotWhen(e.at))
+    + row('RESUMES AT', `DOOR ${Math.max(1, e.resumeDoor)}`)
+    + row('DOORS CLEARED', String(e.doors))
+    + row('FILED TO ARCHIVE', String(e.filed))
+    + row('BEST WAVE', String(e.best))
+    + row('SLOT', `${e.i + 1} of ${MAX_SAVES}`);
+  el.saveinfo.style.display = 'flex';
+}
+function closeSaveInfo() { if (el.saveinfo) el.saveinfo.style.display = 'none'; }
 // Deleting is the one thing on this screen that cannot be undone, so it asks —
 // and it asks INSIDE the row, naming what is about to go, rather than in a
 // dialogue that has lost track of which one you tapped.
@@ -6240,6 +6307,7 @@ function beginNewGame(i, withTutorial) {
   el.askTut.style.display = 'none';
   pendingResumeDoor = 1;   // a new game starts at the first door, always
   slotClear(i);
+  stampSave(i);            // ...and it is a new save, so it is newly born
   slotUse(i);
   setTutorArmed(!!withTutorial);
   if (!withTutorial) {
@@ -7843,6 +7911,7 @@ const el = {
   tutorpin: document.getElementById('tutorpin'),
   saves: document.getElementById('saves'),
   newrun: document.getElementById('newrun'),
+  saveinfo: document.getElementById('saveinfo'),
   slotlist: document.getElementById('slotlist'),
   askTut: document.getElementById('askTut'),
   askNeverBox: document.getElementById('askNeverBox'),

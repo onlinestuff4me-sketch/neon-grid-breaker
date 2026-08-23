@@ -516,18 +516,38 @@
   /* ---- save slots ---- */
   #saves, #askTut { position:fixed; inset:0; z-index:14; display:none;
             align-items:center; justify-content:center; background:rgba(22,24,29,.45); }
+  /* above the list it was opened from, so BACK returns to it rather than to
+     the menu */
+  #saveinfo { position:fixed; inset:0; z-index:15; display:none;
+            align-items:center; justify-content:center; background:rgba(22,24,29,.55); }
+  .sibody { display:flex; flex-direction:column; gap:0; width:246px;
+            margin:6px 0 12px; }
+  .sirow { display:flex; justify-content:space-between; align-items:baseline;
+            gap:12px; padding:7px 2px; border-bottom:1px solid rgba(22,24,29,.10); }
+  .sirow span { font-size:9px; font-weight:900; letter-spacing:.16em;
+            color:#5b616c; white-space:nowrap; }
+  .sirow b { font-size:11px; font-weight:900; letter-spacing:.06em;
+            text-align:right; font-variant-numeric:tabular-nums; }
+  .sirow b i { font-style:normal; font-weight:700; color:#5b616c; }
   #slotlist { display:flex; flex-direction:column; gap:8px; width:246px; margin:4px 0 10px; }
   .slot { border:2px solid rgba(22,24,29,.28); border-radius:12px; padding:10px 12px; text-align:left; }
   .slot.on { border-color:#ff2d1a; }
   .slot .sname { font-size:11px; font-weight:900; letter-spacing:.2em; }
   .slot .smeta { font-size:10px; letter-spacing:.1em; color:#5b616c; margin-top:3px; }
+  .slot .smeta b { color:#16181d; font-weight:900; }
+  .slot .swhen { font-size:9px; letter-spacing:.14em; color:#8b919b; margin-top:2px; }
   .slot .srow { display:flex; gap:6px; margin-top:8px; }
   .slot .sbtn { flex:1; text-align:center; padding:7px 0; border:2px solid rgba(22,24,29,.32);
             border-radius:999px; font-size:10px; font-weight:900; letter-spacing:.14em; }
   .slot .sbtn.red { border-color:#ff2d1a; color:#ff2d1a; }
   /* DELETE is not styled like CONTINUE. It is the one irreversible thing on
      this screen, so it recedes until it is asked for and only then goes red. */
-  .slot .sbtn.del { border-color:rgba(22,24,29,.18); color:#5b616c; flex:0 0 78px; }
+  .slot .sbtn.del { border-color:rgba(22,24,29,.18); color:#5b616c; flex:0 0 66px; }
+  /* the info button is a target, not a label: square, so it reads as a glyph
+     and leaves the row's width to CONTINUE */
+  .slot .sbtn.info { flex:0 0 30px; border-color:rgba(22,24,29,.18); color:#5b616c;
+            font-family:Georgia,'Times New Roman',serif; font-style:italic;
+            font-size:12px; letter-spacing:0; }
   .slot .sbtn.delno { flex:0 0 78px; }
   .snone { font-size:11px; letter-spacing:.1em; color:#5b616c; text-align:center;
             padding:14px 4px; }
@@ -744,7 +764,7 @@
   <h1>TIME<br><em>SHATTER</em></h1>
   <div class="sub">STOP TIME. SHATTER THEM ALL.</div>
   <div class="go btn btn-1">PLAY</div>
-  <div class="btn btn-2" id="newrun">NEW RUN</div>
+  <div class="btn btn-2" id="newrun">LOAD GAME</div>
   <div id="altwrap">
     <span class="mlabel">OTHER MODES</span>
     <div class="mrow" id="altrow"></div>
@@ -756,7 +776,6 @@
   <div id="menurow">
     <div class="btn btn-3" id="howtolink">HOW TO PLAY</div>
     <div class="btn btn-3" id="archlink">ARCHIVE</div>
-    <div class="btn btn-3" id="saveslink">SAVES</div>
     <div class="btn btn-3" id="setlink">SETTINGS</div>
     <div id="sndbtn"></div>
   </div>
@@ -816,6 +835,11 @@
   <h3>SAVES</h3>
   <div id="slotlist"></div>
   <div class="pbtn" id="savesclose">CLOSE</div>
+</div></div>
+<div id="saveinfo"><div class="htpcard">
+  <h3>SAVE DETAILS</h3>
+  <div class="sibody"></div>
+  <div class="pbtn" id="saveinfoclose">BACK</div>
 </div></div>
 <div id="askTut"><div class="htpcard">
   <h3>NEW GAME</h3>

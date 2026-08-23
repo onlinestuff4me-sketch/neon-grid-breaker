@@ -7,7 +7,7 @@ borrowed from cartridges. What a player actually wants is a list of the runs
 they have going: make one when you want one, come back to the one you were on,
 delete the ones you are done with.
 
-## The primary action is "carry on"
+## Two buttons on the menu, one page behind the second
 
 A menu whose big button always starts from door 1 quietly tells the player
 their last run did not count. So:
@@ -15,16 +15,53 @@ their last run did not count. So:
 | what is on the disk | the big button | underneath it |
 |---|---|---|
 | nothing | **PLAY** — makes a save, starts at door 1 | *(nothing)* |
-| a save that has only ever seen door 1 | **PLAY** | *(nothing)* |
-| a save with depth | **CONTINUE** · *save name* · **DOOR n** | **NEW RUN** |
+| any save | **CONTINUE** · *save name* · **DOOR n** | **LOAD GAME** |
 
 "The most recent one" is the save with the latest `at`, which every completed
-door touches. `NEW RUN` only appears once continuing is possible — before that
-the big button *is* new run, and a second button saying the same thing is noise.
+door touches. A first launch therefore has **one** action and no list, and the
+run it starts still gets a save to live in — a run the player cannot come back
+to is the thing this whole system exists to prevent.
 
-A first launch therefore has **one** action and no list, and the run it starts
-still gets a save to live in. A run the player cannot come back to is the thing
-this whole screen exists to prevent.
+`LOAD GAME` **opens the page and starts nothing**. CONTINUE already answers
+"carry on with the obvious one", so everything else — a *different* save, a new
+one, deleting one, looking at what a save actually is — is one screen with the
+list on it, reached by one button. `NEW GAME` lives on that page rather than on
+the menu, because "start again" belongs next to the runs it is an alternative
+to.
+
+There is no separate SAVES link on the menu row any more. Two doors to one
+screen is one too many.
+
+Keying the second button on "the most recent save has *depth*" was wrong and
+briefly shipped: starting a second run and stopping on door 1 hid it, with a
+door-13 save one row down and no way to reach the list. The question is whether
+there is a run to go back to, and a run on its first door is still a run.
+
+## The list
+
+Ordered by **last played**, newest first — which is the order you think about
+your own saves in. Each row carries the door it resumes at, its doors cleared
+and archive count, and the last-played date **labelled as such**: on a list
+sorted by recency an unlabelled date reads as "created", which is a different
+fact and usually a different day.
+
+`ⓘ` opens **SAVE DETAILS**: name, a unique identifier, when it was created,
+when it was last played, where it resumes, doors cleared, filed, best wave, and
+which slot of `MAX_SAVES` it occupies. That panel answers *which one is this*,
+which the list cannot — two saves at similar depth look identical until you can
+see when each was started.
+
+`born` and `id` are stamped once at creation and never touched again. Saves
+that predate them backfill: `born` from the last-played stamp (the only
+evidence left that the save existed) shown as "*or earlier*", and `id` derived
+from the slot and that date so it is stable across reads rather than newly
+random every time the panel opens.
+
+> `slotClear` is the low-level wipe and removes identity too, which is right
+> when an index is being **recycled** for a different save. `beginNewGame`
+> clears the slot it was just handed, so both it and `makeSave` re-stamp —
+> without that, a save made seconds earlier reported its creation date as
+> unknown.
 
 ## The door is the resume point, and it is honest about that
 
@@ -88,4 +125,6 @@ leaves a menu that still works: the button goes back to `PLAY`.
 | what the big button says | `refreshMenuPrimary` |
 | the door a run starts on | `initHall(from)` |
 | the list, and its confirm-in-row delete | `renderSlots` / `askDelete` |
+| the details panel | `openSaveInfo` |
+| a save's identity | `stampSave` / `saveIdFor` |
 | the whole surface, tested | `saves.js` in the harness |
