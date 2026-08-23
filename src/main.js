@@ -6598,7 +6598,6 @@ function selectMenuMode(id) {
   renderAltRow();
   refreshMenuPrimary();
   renderScores();
-  el.overlay.querySelector('.sub').textContent = taglineFor();
   // ...and so does the world behind it. Two of the five are city games and
   // three are corridors; showing the wrong one behind the CTA for the other is
   // a small lie the menu does not need to tell.
@@ -6648,18 +6647,16 @@ function openSettings() {
   el.modelink.classList.toggle('on', timeMode === 'toggle');
   el.settings.style.display = 'flex';
 }
-// THE SELECTED MODE'S OWN LINE. The registry already carries one sentence per
-// mode saying what you DO in it (src/modes.js), and the menu was showing the
-// same slogan whichever game you were about to start.
-function taglineFor() {
-  const m = MODES.find((x) => x.id === menuMode);
-  return (m && m.line) || 'STOP TIME. SHATTER THEM ALL.';
-}
+// ONE LINE UNDER THE TITLE, AND IT IS THE GAME'S. This briefly swapped in the
+// selected mode's own sentence from the registry, on the reasoning that the
+// menu should describe what you are about to start. It reads as a caption
+// that keeps changing under the title — two lines of prose where the title
+// wants one steady line beneath it. Each mode's sentence is on its row in the
+// picker, which is where somebody is actually choosing between them.
 
 function updateModeUI() {
   el.modelink.textContent = timeMode === 'toggle' ? 'BUTTON' : 'CLASSIC';
   el.modelink.classList.toggle('on', timeMode === 'toggle');
-  if (game.state === 'menu') el.overlay.querySelector('.sub').textContent = taglineFor();
   const inRun = game.state === 'play' || game.state === 'intro' || game.state === 'clear';
   // The onboarding hides the button and the meter until it has taught the
   // rest of the controls, and updateModeUI runs from several places that
@@ -8314,10 +8311,6 @@ refreshMenuPrimary();
 // touching it at module-init time is a temporal dead zone. The first paint
 // gets it from the boot path instead.
 renderAltRow();
-// ...and so does the line under the title: MENU_HTML captured the generic
-// slogan a few lines up, so overwriting it now is safe and a returning player
-// sees the game they left in, not the boilerplate.
-el.overlay.querySelector('.sub').textContent = taglineFor();
 // ...which is this, one turn later: by the time a timeout fires every
 // top-level binding in the module exists, so setEnvironment is safe to call.
 setTimeout(() => { if (game.state === 'menu') menuBackdrop(); }, 0);
@@ -8383,7 +8376,7 @@ function showMenu() {
   el.guide.style.opacity = 0;
   el.guide.style.display = 'none';
   el.overlay.querySelector('h1').innerHTML = MENU_HTML.h1;
-  el.overlay.querySelector('.sub').textContent = taglineFor();
+  el.overlay.querySelector('.sub').innerHTML = MENU_HTML.sub;
   el.overlay.querySelector('.rules').innerHTML = MENU_HTML.rules;
   el.overlay.querySelector('.go').innerHTML = MENU_HTML.go;
   el.overlay.querySelector('.go').classList.remove('long');

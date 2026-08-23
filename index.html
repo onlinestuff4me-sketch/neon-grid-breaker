@@ -662,6 +662,11 @@
             flex-direction:column; white-space:normal; }
   .btn-1 .gosub { margin-top:6px; font-size:9.5px;
             font-weight:800; letter-spacing:.16em; opacity:.75; }
+  /* ONE WIDTH FOR THE TWO SECOND CHOICES. Stacked under the primary they were
+     131 px and 166 px, and the MODE button's width moved every time the mode
+     did — CORRIDOR DUEL is a lot wider than THE TUNNEL — so the column
+     re-ragged itself as you chose. */
+  #newrun, #modebtn { width:200px; }
   #newrun { display:none; margin-top:9px; }
   /* ONE BUTTON, NAMING THE GAME. Five chips laid out on the start screen were
      five things to read before the one thing to do, and at their full names
@@ -685,11 +690,19 @@
   #altwrap { display:flex; flex-direction:column; align-items:center; gap:11px; }
   /* the picker's rows are the settings catalogue's rows — one look for one
      list, wherever it is opened from */
+  /* ONE COLUMN. `.htpcard` is a flex column with no `align-items`, so a child
+     with an explicit width sits at flex-start — LEFT — while `.pbtn` centres
+     itself with `align-self`. That put every list in every card eight pixels
+     left of the button under it. These three are the fixed-width lists. */
+  #picklist, #slotlist, .sibody { align-self:center; }
+  /* ...and the button matches the list it belongs to, so the card is one
+     column and not a wide thing above a narrower thing. */
+  #modepick .pbtn, #saves .pbtn { width:246px; }
   #picklist { width:246px; margin:6px 0 12px; }
   /* `.moderow2` carries a -10px side margin so it can bleed past the SETTINGS
      card's text column. Here the list IS the column, and that bleed pulled
      every row ten pixels left of centre inside a centred card. */
-  #picklist .moderow2 { width:100%; margin:0; padding:10px 12px;
+  #picklist .moderow2 { width:100%; margin:0; padding:11px 14px;
             background:rgba(22,24,29,.05); }
   #picklist .moderow2 + .moderow2 { margin-top:6px; }
   #picklist .moderow2.cur { box-shadow:inset 0 0 0 2px #ff2d1a; }
@@ -861,7 +874,7 @@
 </div>
 
 <div id="modepick"><div class="htpcard">
-  <h3>CHOOSE A GAME</h3>
+  <h3>CHOOSE A MODE</h3>
   <div id="picklist"></div>
   <div class="pbtn" id="modepickclose">CLOSE</div>
 </div></div>

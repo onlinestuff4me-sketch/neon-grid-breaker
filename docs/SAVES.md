@@ -19,7 +19,6 @@ changes it:
 
 | what selecting a game changes |
 |---|
-| the line under the title (the mode's own one-liner) |
 | what the big button says and starts |
 | whether `LOAD GAME` is offered at all |
 | the list behind `LOAD GAME`, and its title |
@@ -49,7 +48,15 @@ menu for a game that is gone.
 >
 > Each row in the list carries the mode's **one line**, not just its name.
 > Nothing about "STAND STILL" tells you what it is, which is what made the
-> chips a worse list and not merely a busier one.
+> chips a worse list and not merely a busier one. That sentence briefly went
+> under the title instead, as a caption for the selected mode — where it read
+> as prose changing under the title every time you chose. The title keeps its
+> own single line; the mode's sentence belongs on the row you choose it from.
+>
+> The card is **one column**: `.htpcard` is a flex column with no
+> `align-items`, so a child with an explicit width sits at flex-start while
+> `.pbtn` centres itself with `align-self` — which put every fixed-width list
+> in every card eight pixels left of the button beneath it.
 >
 > The picker cannot be opened over a live run. Switching games under one would
 > throw it away without saying so, and the pause menu's `END RUN` is where
