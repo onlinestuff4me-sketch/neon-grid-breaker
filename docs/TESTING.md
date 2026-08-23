@@ -156,6 +156,8 @@ existing state and costs nothing — but nothing in `src/` may depend on it.
 | `fixbatch.js` | the wedges: the meter beat's early tap, the long press on the freeze, the retry's clock, the barrier after END RUN, six bodies in six places |
 | `signwalk.js` / `four.js` | STAND HERE as an object — hidden round the corners, and width × distance constant down the straight |
 | `pastbar.js` | the men past the barrier stand where they are put, and a death rebuilds the fight behind a shut door |
+| `slowlesson.js` | the DEFERRED slow-time lessons, played through — the button-released freeze, the meter demo that cannot wedge, and the per-area reminders. This is what stops "kept" turning into "rotted" |
+| `ramppane.js` | the tool's RAMP pane: every dial has a slider, the forty-door table matches the code, moving a dial recomputes it, and the export carries it |
 | `newflow.js` | the opening as it is now: no slow-motion control anywhere in it, the round dodged by MOVING, the gun and the squad together, and a magazine that never runs down |
 | `handover.js` | one banner at the end, door 1 with somebody in it, and the opening ramp against the table in balance.js |
 | `ramp.js` | the TRAINING line at the top of the screen, and the pause button surviving a retry |

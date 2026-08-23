@@ -17,6 +17,7 @@ import { HALL, genHallLeg } from '../src/genleg.js';
 import { composeProtocol, newRunMemory, ELEMENTS } from '../src/protocols.js';
 import * as B from '../src/balance.js';
 import { initTutorialPane, tutorialSpec, reload as reloadPreview, fitMap } from './tutorial-pane.js';
+import { initRampPane } from './ramp-pane.js';
 
 const $ = (id) => document.getElementById(id);
 const C = HALL.cell;
@@ -388,6 +389,10 @@ $('export').onclick = () => {
   const payload = {
     generatedAt: new Date().toISOString(),
     balanceOverrides: overrides,
+    // ...and the opening ramp, if the RAMP pane has been opened. Shaped like
+    // the balance module's own keys, so this is a patch to paste rather than
+    // a format somebody has to translate.
+    ramp: rampOverride,
     tutorial: tutorialSpec(),
     layouts: doors.map((d) => ({
       door: d.n,
@@ -415,13 +420,29 @@ $('etype').onchange = (e) => { etype = e.target.value; };
 // and the real game running all of it in the pane on the right.
 let mode = 'levels';
 let tutorBooted = false;
+// The opening ramp's dials, once somebody has opened that pane. Held here
+// rather than inside it so the export picks them up like any other override.
+let rampBooted = false, rampOverride = null;
+function markRampDirty() {
+  const b = document.getElementById('rampRevert');
+  if (b) b.classList.add('on');
+}
 function setMode(m) {
   mode = m;
   document.body.classList.toggle('tutmode', m === 'tutor');
+  document.body.classList.toggle('rampmode', m === 'ramp');
   $('mLevels').classList.toggle('on', m === 'levels');
   $('mTutor').classList.toggle('on', m === 'tutor');
+  $('mRamp').classList.toggle('on', m === 'ramp');
   for (const n of document.querySelectorAll('.tutonly')) n.hidden = m !== 'tutor';
   for (const n of document.querySelectorAll('.lvlonly')) n.hidden = m !== 'levels';
+  for (const n of document.querySelectorAll('.ramponly')) n.hidden = m !== 'ramp';
+  if (m === 'ramp' && !rampBooted) {
+    rampBooted = true;
+    // The ramp's numbers go into the same override the balance sliders write,
+    // so the preview and the export carry them like any other tuning.
+    initRampPane((v) => { rampOverride = v; markRampDirty(); });
+  }
   if (m === 'tutor') {
     if (!tutorBooted) {
       tutorBooted = true;
@@ -435,6 +456,7 @@ function setMode(m) {
 }
 $('mLevels').onclick = () => setMode('levels');
 $('mTutor').onclick = () => setMode('tutor');
+$('mRamp').onclick = () => setMode('ramp');
 
 // --- boot -----------------------------------------------------------------
 try {

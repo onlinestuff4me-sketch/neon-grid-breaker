@@ -66,6 +66,25 @@ export const TUTOR = {
   // is released by MOVING, not by a button — the slow-time control does not
   // exist yet — so this is the whole answer to "have they done it".
   dodgeStepM: 0.85,
+
+  // --- THE DEFERRED SLOW-TIME LESSONS --------------------------------------
+  // Nothing in the shipped sequence reads anything below this line. It is the
+  // machinery for teaching the time button and the meter, kept whole and kept
+  // WIRED because that lesson is coming back — it is deferred past the
+  // onboarding for now (docs/TUTORIAL-GOALS.md §5) and unlocks at a door
+  // instead. When it returns it should be a data change, not an excavation.
+  //
+  // `DEFERRED` below holds the steps themselves, off the running order but in
+  // the spec, so the tool lists them and `slowlesson.js` exercises them. That
+  // is the difference between machinery that is kept and machinery that rots.
+  dodgeScale: 0.18,     // floor on world speed while a taught round is in flight
+  meterSecs: 7,         // meter: full to the knee, in seconds
+  meterCrawlSecs: 70,   // ...and the rate below the knee
+  meterKnee: 0.5,       // where the drain slows
+  meterFloor: 0.25,     // how low the demo is ever allowed to take it
+  resumeDelay: 1.6,     // beat between the meter appearing and the way out
+  warnAt: 0.5,          // fraction of the TANK left that trips the reminder
+  rampDrain: 0.5,       // multiplier on the bank's drain while a lesson runs
   volleyGap: 2.6,       // seconds between rounds in the three-round lesson
   reshoot: 3.2,         // ...and the gap before a missed shot is retried
   // THE METER LESSON HAS A FLOOR. It empties at a readable rate to half, then
@@ -292,6 +311,11 @@ export const CUE_EVENTS = [
   ['dodge',   'a round goes past them'],
   ['kill',    'they drop one'],
   ['threat',  'somebody starts to aim at them'],
+  // deferred with the slow-time lessons — see DEFERRED at the end of this file
+  ['meter',   'the meter warning lands'],
+  ['low',     'the meter falls past the warning mark'],
+  ['resume',  'the player lets time run again'],
+  ['ready',   'they have slowed AND resumed time in this area'],
   ['shot',    'they pull the trigger'],
   ['advance', 'the step ends'],
 ];
@@ -330,6 +354,7 @@ export const ADVANCE_KINDS = [
   ['dodged',   'dodged N rounds'],
   ['gunUp',    'the weapon has finished rising'],
   ['cleared',  'every enemy is down'],
+  ['resumed',  'let time run again (the meter lesson)'],
   ['crossed',  'walked through the door'],
   ['none',     'never (the last step)'],
 ];
@@ -497,7 +522,84 @@ export const STEPS = [
     grants: { ...PLAYING, spawns: true }, cues: [] },
 ];
 
-export const DEFAULT_SPEC = { TUTOR, LEGS, STEPS };
+// ---------------------------------------------------------------------------
+// DEFERRED — the slow-time lessons, kept whole and kept OFF
+//
+// These four steps taught the time button and the meter, and they worked. They
+// are not in the running order because the onboarding no longer introduces
+// slow motion at all: a first-time player wants to shoot something, not to
+// learn a resource, so the control is unlocked several doors into the real run
+// instead (docs/TUTORIAL-GOALS.md §5, `TIME.unlockDoor`).
+//
+// They live HERE rather than in git history because the plan is to bring them
+// back — as the coached moment at the unlock door, or as a second onboarding
+// once the player has the button. Kept in the spec means:
+//
+//   * the machinery that drives them (`hardFreeze` released by the button,
+//     `startMeter`, the `resumed` advance, the `meter`/`low`/`resume`/`ready`
+//     cue events, `tutorRefusesResume`) has a live consumer, so it cannot be
+//     quietly broken by a change to something else;
+//   * `slowlesson.js` plays them through, every run of the suite;
+//   * the tool lists them, so they can be read and edited;
+//   * and turning them on is `deferred: false`, not an excavation.
+//
+// `loadTutorial` filters `deferred` steps out of the sequence the game walks.
+// Everything else — normalise, the tool, the override channel — sees them.
+export const DEFERRED = [
+  {
+    id: 'slowIntro', label: 'A · Slow time', deferred: true,
+    advance: { kind: 'froze' },
+    grants: { timebtn: true }, bodies: 1, hardFreeze: true,
+    hud: 'SLOW TIME',
+    // Released by the BUTTON, not by stepping aside: that is the whole point
+    // of this lesson and the reason `tutorRefusesResume` exists.
+    cues: [{ text: 'DODGE THE BULLET<span>TAP HERE TO SLOW TIME</span>',
+      slot: 'atbtn', arrow: 'down', hand: 'none', pulse: true,
+      on: 'held', off: 'freeze' }],
+  },
+  {
+    id: 'slowMove', label: 'B · Move out of the way', deferred: true,
+    advance: { kind: 'dodged', need: 1 },
+    grants: { timebtn: true }, bodies: 1,
+    hud: 'DODGE THE ROUND',
+    cues: [{ text: 'DRAG TO MOVE', slot: 'left', arrow: 'none', hand: 'sway',
+      pulse: false, on: 'enter', off: 'advance' }],
+  },
+  {
+    id: 'meter', label: 'C · The meter', deferred: true,
+    advance: { kind: 'resumed' },
+    grants: { timebtn: true, meter: true }, bodies: 3, startMeter: true,
+    hud: 'WATCH THE METER',
+    cues: [
+      { text: 'YOUR METER DRAINS<br>WHILE TIME IS SLOW',
+        slot: 'top', arrow: 'up', hand: 'none',
+        pulse: false, on: 'enter', off: 'advance' },
+      { text: 'TAP AGAIN TO RESUME',
+        slot: 'atbtn', arrow: 'down', hand: 'none',
+        pulse: true, on: 'meter', off: 'advance' },
+    ],
+  },
+  // ...and the per-area reminder loop the training rooms used to carry. A cue
+  // with `once` is SPENT by the action it asked for, for the rest of that area.
+  {
+    id: 'slowPractice', label: 'D · Practice · reminders', deferred: true,
+    advance: { kind: 'crossed' },
+    grants: { ...PLAYING, timebtn: true, meter: true, bank: true },
+    checkpoint: true, hud: 'CLEAR THE ROOM',
+    cues: [
+      { text: 'TAP TO SLOW TIME', slot: 'atbtn', arrow: 'down', hand: 'none',
+        pulse: true, on: 'threat', off: 'freeze', once: true },
+      { text: 'YOUR METER IS RUNNING OUT', slot: 'top', arrow: 'up', hand: 'none',
+        pulse: false, on: 'low', off: 'resume', once: true },
+      { text: 'TAP AGAIN TO RESUME', slot: 'atbtn', arrow: 'down', hand: 'none',
+        pulse: true, on: 'low', off: 'resume', once: true },
+      { text: 'TAP ANYWHERE TO SHOOT', slot: 'mid', arrow: 'none', hand: 'none',
+        pulse: true, on: 'ready', off: 'shot', once: true },
+    ],
+  },
+];
+
+export const DEFAULT_SPEC = { TUTOR, LEGS, STEPS: [...STEPS, ...DEFERRED] };
 
 // --- the tool's channel ----------------------------------------------------
 // The level tool writes an edited spec here and opens the game in an iframe.
@@ -516,7 +618,8 @@ export function previewing(search) {
 // Merged rather than replaced, so a spec written by an older build of the tool
 // still boots: anything it does not mention keeps the shipped value.
 export function loadTutorial(search) {
-  const spec = { TUTOR: { ...TUTOR }, LEGS: normaliseLegs(LEGS), STEPS: normalise(STEPS) };
+  const spec = { TUTOR: { ...TUTOR }, LEGS: normaliseLegs(LEGS),
+    STEPS: normalise([...STEPS, ...DEFERRED]) };
   if (!previewing(search)) return spec;
   let raw = null;
   try { raw = localStorage.getItem(OVERRIDE_KEY); } catch { /* private */ }
@@ -592,6 +695,9 @@ function normalise(steps) {
       need: s.advance && s.advance.need },
     grants: { ...NO_GRANTS, ...(s.grants || {}) },
     bodies: s.bodies | 0,
+    startMeter: !!s.startMeter,
+    // OFF THE RUNNING ORDER, still in the spec. See DEFERRED above.
+    deferred: !!s.deferred,
     // What the line at the top of the screen says after "TRAINING". Optional:
     // a step without one falls back to the ordinary door-and-enemies readout.
     hud: s.hud == null ? '' : String(s.hud),

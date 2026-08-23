@@ -2,65 +2,154 @@
 
 ## The opening ramp
 
-Every dial in the first thirty doors moves on the same shape, and it is the
-shape a person actually learns on: **hold a value for a while, step up by one,
-then hold the next value for LONGER.** The bands widen, so each new number gets
-more room than the one before it — the opposite of a curve that compounds.
+Four dials decide what the first forty doors feel like. There is a published
+reference for this — the shape, the staggering, and the whole table — at the
+artifact linked from the README; this is the source of truth it is generated
+from, and `/tool` → **RAMP** is where the numbers are actually moved.
+
+### The shape every dial moves on
+
+**Hold a value. Step up by one. Then hold the next one for LONGER.**
 
 ```js
 ramp(d, first)   // value 1 covers doors 1..first,
-                 // value 2 the next first+1, value 3 the next first+2, …
+                 // value 2 the next first+1,
+                 // value 3 the next first+2, …
 ```
 
-Four dials, on four different schedules **on purpose**. "More rooms", "more
-bodies", "more of them at once" and "they shoot sooner" must never arrive on
-the same door: one change per step is the whole idea.
+The bands *widen*, so every new number gets more room than the one before it.
+That is the opposite of a curve that compounds, and it is the whole reason this
+exists. Each dial takes one number — how many doors its first band lasts — and
+the rest follows.
 
-| door | legs | bodies | split | alive at once | bullet m/s | shot gap |
-|---|---|---|---|---|---|---|
-| 1 | 1 | 1 | 1 | 1 | 5.4 | 3.00 s |
-| 2 | 1 | 1 | 1 | 1 | 5.8 | 3.00 s |
-| 3 | 1 | **2** | 2 | 1 | 6.2 | 3.00 s |
-| 4 | 1 | 2 | 2 | **2** | 6.6 | 3.00 s |
-| 5 | **2** | 2 | 1+1 | 2 | 7.0 | 3.00 s |
-| 6 | 2 | **3** | 1+2 | 2 | 7.4 | 3.00 s |
-| 8 | 2 | 3 | 1+2 | **3** | 8.2 | 3.00 s |
-| 10 | **3** | **4** | 1+1+2 | 3 | 9.0 | 3.00 s |
-| 15 | 3 | 5 | 1+2+2 | 4 | 11.0 | 2.09 s |
-| 20 | 4 | 5 | 1+1+1+2 | 5 | 12.6 | 1.19 s |
-| 30 | 5 | 7 | 1+1+1+2+2 | 6 | 12.6 | 0.28 s |
-| 50 | 5 | 9 | 1+2+2+2+2 | 8 | 12.6 | 0.28 s |
+### Why there are four of them, on four schedules
 
-**A door is made of legs.** One for the opening doors, more as the ramp widens
-— so "deeper" is a longer walk before the next door as well as a busier one.
-Only the last leg of a door counts as the door; the ones before it are more
-corridor behind the same number.
+Because **one change per step** is the idea, and the only way to enforce it is
+to make the dials land on different doors:
 
-**There is no separate "bodies per leg" dial.** A door's budget is split evenly
-across its legs, remainder to the last of them, so the per-leg count is a
-*result*: 1 while a door holds one, 2 when a single-leg door holds two, and
-back to 1 the moment the door grows a second leg. A dial on top of that could
-only ever clip the budget — an early version capped door 3 at one body per leg,
-which turned it back into door 1.
+* door 3 is the first with two bodies in it — but still one alive at a time.
+  The same beat twice, not a new problem.
+* door 4 is the first time two can meet you together.
+* door 5 is the first door made of two legs — more corridor, not more men.
 
-**The first three doors are corridors.** A vault or an atrium is a second thing
-to read on a door whose whole job is the four-beat rhythm — see him, watch the
-round leave, step out of it, shatter him.
+"More rooms", "more bodies", "more of them at once" and "they shoot sooner"
+must never arrive on the same door.
 
-**The shot floor is three seconds** for the first ten doors: long enough that
-every round is its own event, rather than a room going off at once. It closes
-to the deep game's 0.28 s by door 25.
+### The dials, one at a time
 
-**What this replaced.** The old rule sized a leg from its own geometry — every
-stretch worth a few bodies, the approach worth one last group — with a hard
-table for doors 1–4 on top. Which is why door 4 held one body and door 5's leg
-wanted **twenty-four**. That cliff is the single thing this ramp exists to
-remove.
+**`legsEvery` — legs per door** (first band 4 doors, capped at 5)
 
-**What it costs.** The deep game is much less dense than it was: door 50 is
-nine bodies across five legs rather than a capped thirty in one. Depth is now
-long before it is crowded. If that is the wrong trade, `OPENING` in
-`src/balance.js` is four numbers and a cap.
+How many corridors and rooms stand behind one door. **Only the last leg of a
+door counts as the door**; the ones before it are more corridor behind the same
+number, and `hall.legInDoor` is which of them you are standing in. This is what
+lets "how far to the next door" grow independently of "how hard the door is" —
+depth becomes a longer walk as well as a busier one.
+
+**`bodiesEvery` — bodies per door** (first band 2 doors)
+
+How many enemies the whole door holds, across all its legs. **This is the
+primary dial**, and the only one that decides a count.
+
+There is deliberately **no separate "bodies per leg" dial**. A door's budget is
+split evenly across its legs, remainder to the last of them (`legShare`), so the
+per-leg count is a *result*: 1 while a door holds one, 2 when a single-leg door
+holds two, and back to 1 the moment the door grows a second leg. A dial on top
+of that could only ever clip the budget — an early version capped door 3 at one
+body per leg, which turned door 3 straight back into door 1.
+
+**`aliveEvery` — alive at once** (first band 3 doors)
+
+How many may be on you at the same time, never more than the door holds. This
+is the dial that decides whether a door is a queue or a swarm, so it is the one
+that moves least. A condition thins it further (`condTax`): two bodies met
+separately are two searches, where a clump is one problem solved once.
+
+**shot gap** (`gapFrom` 3s, held flat until door 10, reaching `gapTo` 0.28s at door 25)
+
+World seconds between one enemy firing and the next — the room's shot floor.
+Three seconds means every round is its own event rather than a room going off at
+once, which is exactly what the opening doors are teaching. Measured in *world*
+seconds, not real ones, so it stretches with everything else in bullet time.
+
+### Two things that are not bands
+
+**Bullet speed** ramps linearly, not in steps: `RAMP.bulletFloor` (0.34) of
+the reference 16 m/s on door 1, reaching full at door 19. That opening
+speed is about 5.4 m/s, which crosses a 16 m room in three seconds:
+a round you can watch coming and walk out of, before anybody has been given a
+way to slow it down. Steps would be wrong here — the player is learning a
+*timing*, and a timing that jumps is a timing relearned.
+
+**Corridors only, until door 4.** A vault, an atrium or a gallery is a
+second thing to read on a door whose whole job is the four beats — see him,
+watch the round leave, step out of it, shatter him. `forced()` pins the form.
+
+### The whole curve
+
+| door | legs | bodies | split | alive | bullet m/s | shot gap | notes |
+|---|---|---|---|---|---|---|---|
+| **1** | 1 | 1 | `1` | 1 | 5.4 | 3.00 | corridors only |
+| 2 | 1 | 1 | `1` | 1 | 5.8 | 3.00 | corridors only |
+| **3** | 1 | 2 | `2` | 1 | 6.2 | 3.00 | corridors only |
+| **4** | 1 | 2 | `2` | 2 | 6.6 | 3.00 | **slow motion unlocks** |
+| **5** | 2 | 2 | `1+1` | 2 | 7 | 3.00 |  |
+| **6** | 2 | 3 | `1+2` | 2 | 7.4 | 3.00 |  |
+| 7 | 2 | 3 | `1+2` | 2 | 7.8 | 3.00 |  |
+| **8** | 2 | 3 | `1+2` | 3 | 8.2 | 3.00 |  |
+| 9 | 2 | 3 | `1+2` | 3 | 8.6 | 3.00 |  |
+| **10** | 3 | 4 | `1+1+2` | 3 | 9 | 3.00 |  |
+| 11 | 3 | 4 | `1+1+2` | 3 | 9.4 | 2.82 |  |
+| 12 | 3 | 4 | `1+1+2` | 3 | 9.8 | 2.64 |  |
+| **13** | 3 | 4 | `1+1+2` | 4 | 10.2 | 2.46 |  |
+| 14 | 3 | 4 | `1+1+2` | 4 | 10.6 | 2.27 |  |
+| **15** | 3 | 5 | `1+2+2` | 4 | 11 | 2.09 |  |
+| **16** | 4 | 5 | `1+1+1+2` | 4 | 11.4 | 1.91 |  |
+| 17 | 4 | 5 | `1+1+1+2` | 4 | 11.8 | 1.73 |  |
+| 18 | 4 | 5 | `1+1+1+2` | 4 | 12.2 | 1.55 |  |
+| **19** | 4 | 5 | `1+1+1+2` | 5 | 12.6 | 1.37 |  |
+| 20 | 4 | 5 | `1+1+1+2` | 5 | 12.6 | 1.19 |  |
+| **21** | 4 | 6 | `1+1+2+2` | 5 | 12.6 | 1.01 |  |
+| 22 | 4 | 6 | `1+1+2+2` | 5 | 12.6 | 0.82 |  |
+| **23** | 5 | 6 | `1+1+1+1+2` | 5 | 12.6 | 0.64 |  |
+| 24 | 5 | 6 | `1+1+1+1+2` | 5 | 12.6 | 0.46 |  |
+| 25 | 5 | 6 | `1+1+1+1+2` | 5 | 12.6 | 0.28 |  |
+| **26** | 5 | 6 | `1+1+1+1+2` | 6 | 12.6 | 0.28 |  |
+| 27 | 5 | 6 | `1+1+1+1+2` | 6 | 12.6 | 0.28 |  |
+| **28** | 5 | 7 | `1+1+1+2+2` | 6 | 12.6 | 0.28 |  |
+| 29 | 5 | 7 | `1+1+1+2+2` | 6 | 12.6 | 0.28 |  |
+| 30 | 5 | 7 | `1+1+1+2+2` | 6 | 12.6 | 0.28 |  |
+| **35** | 5 | 7 | `1+1+1+2+2` | 7 | 12.6 | 0.28 |  |
+| **40** | 5 | 8 | `1+1+2+2+2` | 7 | 12.6 | 0.28 |  |
+
+Bold doors are the ones where a dial moved. (Every door 1–30 is listed; past 30
+it is every fifth, because nothing but the bands changes.)
+
+### What it replaced, and what it costs
+
+The old rule sized a leg from its own geometry — every stretch worth a few
+bodies, the approach worth one last group — with a hard-coded table for doors
+1–4 bolted on top. The table ran out at door 4, so **door 4 held one body and
+door 5's leg wanted twenty-four**, with charging rushers. That cliff is the one
+thing this ramp exists to remove.
+
+What it costs: the deep game is much less dense than it was. Door 40 is nine
+bodies across five legs where the old curve capped at thirty in one. Depth is
+now long before it is crowded. If that is the wrong trade, `OPENING` in
+`src/balance.js` is four numbers and a cap — and `/tool` → RAMP shows what any
+change to them does to all forty doors before you play one.
+
+### Where to change it
+
+| what | where |
+|---|---|
+| the numbers, with sliders and a live forty-door table | `/tool` → **RAMP** |
+| the numbers, in source | `OPENING` and `RAMP` in `src/balance.js` |
+| the reading of them | `doorLegs` / `doorBodies` / `doorAlive` / `legShare` / `shotGap` in `src/main.js` — all thin reads, none of them decides anything |
+| a published reference to send somebody | the artifact linked from `README.md` |
+
+The tool's RAMP pane writes into the same override channel the balance sliders
+use, so an export carries it as a `ramp` block shaped like the balance module's
+own keys — a patch to paste, not a format to translate.
 
 ## Slow motion is unlocked, not taught
 

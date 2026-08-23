@@ -116,7 +116,12 @@ function validate() {
         + 'to fire one.');
     }
   }
-  if (S.length && S[S.length - 1].advance.kind !== 'none') {
+  // THE LAST STEP OF THE RUNNING ORDER, not the last in the list. Deferred
+  // steps (the slow-time lessons, kept whole and switched off) live at the end
+  // of the spec and are never walked into, so the one that has to end on
+  // `none` is the last one that is not deferred.
+  const live = S.filter((x) => !x.deferred);
+  if (live.length && live[live.length - 1].advance.kind !== 'none') {
     out.push('<b>The last step ends on a condition.</b> There is nothing after it, so '
       + 'the onboarding will sit on it rather than handing over to the game.');
   }
@@ -387,6 +392,17 @@ function stepCard(st, i) {
   idRow.append(field('id', idIn), field('name', lbIn));
   bd.appendChild(idRow);
 
+  // ...and say so if this step is off the running order. A deferred step is a
+  // complete, editable step that the game never walks into — the slow-time
+  // lessons, kept against the day they come back.
+  if (st.deferred) {
+    const flag = document.createElement('div');
+    flag.className = 'warn';
+    flag.style.margin = '0 0 8px';
+    flag.textContent = 'DEFERRED — kept in the spec, off the running order. '
+      + 'The game never reaches this step; `slowlesson.js` plays it.';
+    bd.appendChild(flag);
+  }
   const bodyRow = document.createElement('div'); bodyRow.className = 'grid2';
   bodyRow.style.marginTop = '6px';
   const bodIn = document.createElement('input');

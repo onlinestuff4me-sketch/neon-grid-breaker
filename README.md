@@ -1,5 +1,9 @@
 # TIME SHATTER
 
+**The opening difficulty curve** — four dials, why they are staggered, and what
+all forty doors add up to: https://claude.ai/code/artifact/b764bbb1-3a09-4146-be55-b02bcb7318b9
+(source of truth: `docs/BALANCE.md`; adjust at `/tool` → RAMP)
+
 A first-person time-manipulation arcade shooter built for **portrait-mode mobile**,
 where **time only moves when you let go of the screen**.
 

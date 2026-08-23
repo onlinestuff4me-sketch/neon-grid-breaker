@@ -63,6 +63,18 @@ The freeze in the dodge lesson is *not* that mechanic being introduced early.
 It is the game buying the player a moment to read three words, and the thing
 that releases it is the only control they have: their thumb.
 
+**The lesson that teaches it is kept, whole, and switched off.** `DEFERRED` in
+`src/tutorial.js` holds four complete steps — the button-released freeze, the
+move that answers it, the meter demo, and the per-area reminder loop — off the
+running order but *in the spec*. That means the machinery they drive
+(`hardFreeze` released by the button, `startMeter`, the `resumed` advance, the
+`meter`/`low`/`resume`/`ready` cue events, `tutorRefusesResume`) has a live
+consumer, `slowlesson.js` plays all four through on every run of the suite, the
+tool lists and edits them, and turning them back on is `deferred: false` rather
+than an excavation. That is the difference between machinery that is kept and
+machinery that rots — and the reason it matters is `tutorFired = true`, a
+leftover name from a deleted lesson that silently broke shooting for months.
+
 ---
 
 ## The lessons

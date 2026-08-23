@@ -4345,7 +4345,7 @@ function onPointerMove(ev) {
   // caused on the way down. The camera has been tracking it all along.
   if (ev.pointerId === timeBtnPointer &&
       Math.hypot(ev.clientX - timeBtnDownX, ev.clientY - timeBtnDownY) > TIMEBTN_SLIP_PX) {
-    if (!timeBtnWasLocked) setTimeLocked(false);
+    if (!timeBtnWasLocked && !tutorRefusesResume()) setTimeLocked(false);
     timeBtnPointer = null;
   }
   const p = input.pointers.get(ev.pointerId);
@@ -4567,8 +4567,8 @@ function onPointerUp(ev) {
     undoTimeBtnLook();
     if (performance.now() - timeBtnDownAt < TIMEBTN_TAP_MS) {
       // quick tap: toggle (was locked -> off, was off -> stays locked)
-      if (timeBtnWasLocked) setTimeLocked(false);
-    } else {
+      if (timeBtnWasLocked && !tutorRefusesResume()) setTimeLocked(false);
+    } else if (!tutorRefusesResume()) {
       setTimeLocked(false);   // long press: time flows again when you let go
     }
     releasePointer(ev, false);   // clean up its look pointer; never fires
@@ -4580,7 +4580,7 @@ function onPointerCancel(ev) {
   if (ev.pointerId === timeBtnPointer) {
     timeBtnPointer = null;
     undoTimeBtnLook();
-    setTimeLocked(false);
+    if (!tutorRefusesResume()) setTimeLocked(false);
   }
   releasePointer(ev, false);
 }
@@ -5869,7 +5869,12 @@ const TUTOR_SPEC = loadTutorial();
 const TUTOR = TUTOR_SPEC.TUTOR;
 const TUTOR_STEPS = TUTOR_SPEC.STEPS;
 const TUTOR_LEGS = TUTOR_SPEC.LEGS;
-const TUTOR_ORDER = TUTOR_STEPS.map((s) => s.id);
+// THE RUNNING ORDER IS THE STEPS THAT ARE NOT DEFERRED. A deferred step is a
+// real, complete, editable step that is simply not in this lesson — the
+// slow-time teaching, kept whole against the day it comes back. It is still in
+// TUTOR_STEPS, so `tutorSpecOf` finds it, the tool lists it, and a test can
+// jump straight to it; it is just never walked INTO by tutorAfter.
+const TUTOR_ORDER = TUTOR_STEPS.filter((s) => !s.deferred).map((s) => s.id);
 const tutorSpecOf = (id) => TUTOR_STEPS.find((s) => s.id === id) || null;
 // Every capability the onboarding withholds is answered from the CURRENT
 // step's grants, never from where that step sits in the order. Reading it off
@@ -5910,13 +5915,23 @@ let tutorEverHeld = false;     // ...and it has actually happened at least once
 // and what the tank held at that moment, which is what "half gone" is measured
 // against. A wave starts with `base` against a bar drawn to `cap`, so the
 // meter is already at 50% when it appears: half the BAR is not half the tank.
-// Where the player stood on the frame the world stopped: the dodge is measured
-// from there, because the freeze is released by MOVING and by nothing else.
+// Where the player stood on the frame the world stopped: in the shipped lesson
+// the dodge is measured from there, because stepping aside is what releases it.
 const tutorHeldFrom = { x: 0, z: 0 };
+// --- state for the DEFERRED slow-time lessons (src/tutorial.js) ------------
+// Nothing in the shipped sequence sets these. They are live and tested, not
+// commented out, because that lesson is coming back — see DEFERRED.
+let tutorMeterOn = false, tutorMeterAt = 0, tutorMeterSaid = false;
+let tutorMeterEverShown = false;         // once taught, it does not un-teach
+let tutorLockWas = false, tutorSlowFrom = 0;
+let tutorSlowedHere = false, tutorResumedHere = false;
 // WHAT THE PLAYER HAS ALREADY SHOWN THEY CAN DO IN THIS AREA. Cleared with the
 // step, and a training area IS a step — so the reminders start again in the
 // next room and nowhere else.
 let tutorSpent = new Set();
+// ...and which of them have ever actually been on screen, because a cue can
+// only be spent by the action it asked for if it got as far as asking.
+let tutorShown = new Set();
 let tutorWorldHeld = false;    // ...and right now the world is actually held
 let tutorLegIx = 0;          // which entry of TUTOR_LEGS the current leg is
 let tutorVolleyT = 0;        // beat between rounds in the three-round lesson
@@ -6034,8 +6049,17 @@ function tutorRenderCues() {
     && !(c.once && tutorSpent.has(i));
   const bySlot = {};
   (sp.cues || []).forEach((c, i) => {
-    if (c.once && tutorFired.has(c.off)) tutorSpent.add(i);
-    if (live(c, i)) bySlot[c.slot || 'mid'] = c;
+    const on = live(c, i);
+    if (on) tutorShown.add(i);
+    // SPENT BY THE ACTION IT ASKED FOR — which it can only be if it ever
+    // ASKED. A cue was marked spent the moment its `off` event had fired,
+    // whether or not it had ever been on screen: walking into an area with
+    // time already running fires `resume`, which retired the meter reminders
+    // before the player had been shown either of them.
+    if (c.once && on === false && tutorShown.has(i) && tutorFired.has(c.off)) {
+      tutorSpent.add(i);
+    }
+    if (on) bySlot[c.slot || 'mid'] = c;
   });
   for (const k of Object.keys(el.tslot || {})) {
     const c = bySlot[k];
@@ -6472,6 +6496,8 @@ function tutorResetWorld() {
   tutorAwaitShot = false; tutorAnchor = null; tutorDeadPending = false;
   tutorAnchorStep = null; tutorButtonShown = false; tutorFired = new Set();
   tutorHardFreeze = false; tutorWorldHeld = false;
+  tutorMeterOn = false; tutorMeterAt = 0; tutorMeterSaid = false;
+  tutorMeterEverShown = false;
   tutorLegIx = 0; tutorSpineIx = 0; tutorTurn = 0; tutorCrossedDoor = false;
   document.body.classList.remove('tutoring');
   tutorHideMsg(); tutorHand(null); tutorLine(false);
@@ -6540,7 +6566,18 @@ function endTutorial(taught = true) {
 }
 const tutorAfter = (id) => {
   const i = TUTOR_ORDER.indexOf(id);
-  return i >= 0 && i < TUTOR_ORDER.length - 1 ? TUTOR_ORDER[i + 1] : TUTOR_ORDER[TUTOR_ORDER.length - 1];
+  if (i >= 0) {
+    return i < TUTOR_ORDER.length - 1 ? TUTOR_ORDER[i + 1]
+      : TUTOR_ORDER[TUTOR_ORDER.length - 1];
+  }
+  // A DEFERRED STEP FOLLOWS THE ONE AFTER IT IN THE SPEC. Off the running
+  // order does not mean off any order: the slow-time lessons are a sequence of
+  // their own, and jumping into the first of them has to play through the rest
+  // — which is what `slowlesson.js` does, and what turning them back on will
+  // look like. Falls out at the end of the list rather than into the game.
+  const j = TUTOR_STEPS.findIndex((s) => s.id === id);
+  const next = j >= 0 ? TUTOR_STEPS[j + 1] : null;
+  return next ? next.id : id;
 };
 // A step's furniture is declared, not written into the transition that reaches
 // it — so the retry can re-enter a step and get exactly the same world, and so
@@ -6550,6 +6587,8 @@ function tutorNext(step) {
   tutorStep = step; tutorT = 0; tutorSub = 0;
   tutorFired = new Set();
   tutorSpent = new Set();
+  tutorShown = new Set();
+  tutorSlowedHere = false; tutorResumedHere = false;
   tutorHardFreeze = false;
   const sp = tutorSpecOf(step);
   if (sp) {
@@ -6572,6 +6611,14 @@ function tutorNext(step) {
       const added = tutorEnsureBodies(sp.bodies);
       if (added) tutorSub = sp.hardFreeze ? TUTOR.aimBeat : TUTOR.volleyGap;
       tutorHardFreeze = !!sp.hardFreeze;
+    }
+    if (sp.startMeter) {
+      tutorMeterOn = true; tutorMeterEverShown = true; tutorMeterAt = 0;
+      // the lesson is watching it drain, so time is slow whether or not they
+      // arrived that way, and the bar starts full so there is a fall to watch
+      slowBank = SLOWMO.cap;
+      updateSlowMeter();
+      if (!timeLocked) setTimeLocked(true);
     }
     if (sp.raiseGun) { gunRiseT = TUTOR.gunRise; game.noFireBefore = 0; }
     if (sp.dropBarrier) tutorDropBarrier();
@@ -6598,7 +6645,9 @@ function tutorNext(step) {
 // is only ever "does this step build the barrier"), puts the player where that
 // step expects them to be standing, and only then enters it.
 function tutorJumpTo(id) {
-  const target = TUTOR_ORDER.indexOf(id);
+  // Indexed in TUTOR_STEPS, not TUTOR_ORDER: a deferred step is a real step
+  // that is simply not walked into, and a jump has to be able to reach it.
+  const target = TUTOR_STEPS.findIndex((s) => s.id === id);
   if (target < 0) return;
   for (let i = 0; i < target; i++) {
     const sp = TUTOR_STEPS[i];
@@ -6714,6 +6763,7 @@ function tutorRetry() {
   tutorFroze = false;
   tutorRound = null; tutorAwaitShot = false;
   tutorShotsFired = 0;
+  tutorMeterAt = 0; tutorMeterSaid = false;
   // ...BUT NOT THE DODGES. Dying on the third round and being made to dodge
   // all three again is being punished for getting two of them right. The beat
   // you failed is the beat you get back, and the two behind it stay done.
@@ -6758,12 +6808,38 @@ function tutorRetry() {
   // the button's teaching halo is stripped by the death; put it back, because
   // the beat you die on repeatedly is the beat that most needs it
   tutorButtonShown = false;
+  // ...and the meter stays on if this area is past the lesson that introduced
+  // it: turning it off on every retry hid it for the whole rest of the run.
+  tutorMeterOn = !!(sp && sp.grants && sp.grants.meter && tutorMeterEverShown);
   tutorNext(step);
   if (wasLocked && !timeLocked) setTimeLocked(true);
   updateModeUI();
   tutorShowMeter(false);
   tutorSub = TUTOR.aimBeat;
   tutorPrevX = player.pos.x; tutorPrevZ = player.pos.z; tutorPrevYaw = player.yaw;
+}
+// A BEAT WHOSE SUBJECT IS A ROUND IN THE AIR, in a lesson that has the time
+// button. Two things key off it: the world runs again between rounds, and time
+// has a floor while one is in flight so the round is watchable.
+function tutorDodgeBeat() {
+  if (tutorStep === null) return false;
+  const sp = tutorSpecOf(tutorStep);
+  const k = sp && sp.advance && sp.advance.kind;
+  return (k === 'froze' || k === 'dodged') && tutorMay('timebtn');
+}
+// THE METER DEMO WILL NOT LET GO EARLY, and neither will a freeze beat. The
+// lesson is watching the bar fall and the bar only falls while time is slow,
+// so a tap before it has fallen used to stop the drain dead with the step
+// waiting on a knee it could never reach. And the button is a toggle on a
+// quick tap but hold-to-slow on a long press: a first-time player told to tap
+// it presses it slowly, which handed the round back at full speed.
+function tutorRefusesResume() {
+  if (tutorStep === null) return false;
+  const sp = tutorSpecOf(tutorStep);
+  const k = sp && sp.advance && sp.advance.kind;
+  if (!tutorMay('timebtn')) return false;
+  if (k === 'resumed') return !tutorMeterSaid;
+  return k === 'froze' || k === 'dodged';
 }
 function tutorRevealButton() {
   updateModeUI();
@@ -6785,6 +6861,7 @@ function updateTutorial(dtReal, movedM, yawDelta) {
   const sp = tutorSpecOf(tutorStep);
   tutorUpdateBarrier(dtReal);
   tutorUpdateSpineIx();
+  tutorShowMeter(tutorMeterOn);
   if (el.ammo) el.ammo.style.display = tutorMay('ammo') ? '' : 'none';
 
   // THE FREEZE LANDS ON THE ROUND, NOT ON THE ARM.
@@ -6808,6 +6885,11 @@ function updateTutorial(dtReal, movedM, yawDelta) {
       // the way" is measured from the moment they were asked to.
       tutorHeldFrom.x = player.pos.x;
       tutorHeldFrom.z = player.pos.z;
+      // A FRESH HOLD NEEDS A FRESH PRESS. `tutorFroze` is a latch that nothing
+      // else clears, so the second round's freeze was released on the frame it
+      // began — by the tap that answered the first one, two rounds ago.
+      tutorFroze = false;
+      if (tutorMay('timebtn')) tutorRevealButton();
       tutorEmit('held');
     }
   } else if (!tutorHardFreeze || !tutorRound) {
@@ -6820,12 +6902,33 @@ function updateTutorial(dtReal, movedM, yawDelta) {
   // being introduced. What answers it is the thing the words ask for — moving
   // sideways, which is the one control they already have.
   if (tutorWorldHeld) {
+    // A LESSON THAT HAS THE BUTTON IS RELEASED BY THE BUTTON. That is the
+    // deferred slow-time teaching (src/tutorial.js DEFERRED): there, the
+    // freeze IS the mechanic being introduced, so pressing the thing it is
+    // introducing is the only answer that teaches anything.
+    //
+    // `tutorFroze` is set by the time BUTTON. In CLASSIC mode there is no
+    // button and any held finger slows time, so that counts instead — but
+    // ONLY in classic, because `input.holding` is true whenever a finger is
+    // down at all.
+    const byButton = tutorMay('timebtn')
+      && (tutorFroze || (timeMode !== 'toggle' && input.holding));
+    // Otherwise it is released by MOVING, which is the shipped lesson: the
+    // freeze there is the game buying three words' worth of reading time
+    // rather than a mechanic being introduced, and the thing that answers it
+    // is the only control the player has. Sideways, not forward — walking
+    // INTO the round is not dodging it.
     const acrossM = Math.abs(player.pos.x - tutorHeldFrom.x);
     const downM = Math.abs(player.pos.z - tutorHeldFrom.z);
-    // sideways, not forward: walking INTO the round is not dodging it
-    if (acrossM >= TUTOR.dodgeStepM && acrossM > downM) {
+    const byMoving = !tutorMay('timebtn')
+      && acrossM >= TUTOR.dodgeStepM && acrossM > downM;
+    if (byButton || byMoving) {
       tutorWorldHeld = false;
       if (tutorRound) tutorRound.let = true;   // this round has been let go
+      // You come out of a BUTTON beat in slow motion: `tutorFroze` is latched
+      // by any press, so two of them — "did that register?" — used to leave
+      // time running and the round arrived at full speed.
+      if (byButton && !timeLocked) setTimeLocked(true);
       tutorEmit('freeze');
     }
   }
@@ -6833,10 +6936,41 @@ function updateTutorial(dtReal, movedM, yawDelta) {
   // late — which on the frame the world stops is the frame that matters.
   tutorPlaceRoundPin();
 
-  // WHO IS ABOUT TO SHOOT. The one observation the training rooms still make:
-  // the trigger reminder answers it, and the dodge lesson does not need it.
+  // WHO IS ABOUT TO SHOOT. The training rooms' trigger reminder answers it.
   if (enemies.some((e) => e.alive && (e.state === 'aim' || e.state === 'burst'))
       && !tutorFired.has('threat')) tutorEmit('threat');
+  // ...and the clock, for the DEFERRED slow-time lessons. `freeze`/`resume` on
+  // the frame the player's thumb changes it, `low` when the tank is half gone
+  // — half of what they HAD when they reached for it, because a wave starts
+  // with `base` against a bar drawn to `cap` and the meter is already at 50%
+  // when it appears — and `ready` once they have shown both halves in an area.
+  if (timeLocked !== tutorLockWas) {
+    tutorLockWas = timeLocked;
+    if (timeLocked) { tutorSlowFrom = slowBank; tutorSlowedHere = true; }
+    else if (tutorSlowedHere) tutorResumedHere = true;
+    tutorEmit(timeLocked ? 'freeze' : 'resume');
+  }
+  if (timeLocked && tutorMay('bank') && !tutorFired.has('low')
+      && slowBank <= Math.max(SLOWMO.low, tutorSlowFrom * TUTOR.warnAt)) {
+    tutorEmit('low');
+  }
+  if (tutorSlowedHere && tutorResumedHere && !tutorFired.has('ready')) tutorEmit('ready');
+
+  // ...and once the meter lesson is on, the bank drains on the SCRIPT's clock,
+  // so the beat is readable rather than tied to whatever the drain rate is.
+  if (tutorMeterOn && timeLocked) {
+    const frac = slowBank / SLOWMO.cap;
+    if (frac > TUTOR.meterFloor) {
+      // meterSecs is FULL TO THE KNEE, which is what its comment always said
+      // and what the code once did not: `cap / meterSecs` is a full-to-empty
+      // rate, so the first half went in 3.5 s instead of 7.
+      const rate = frac > TUTOR.meterKnee
+        ? SLOWMO.cap * (1 - TUTOR.meterKnee) / TUTOR.meterSecs
+        : SLOWMO.cap * (TUTOR.meterKnee - TUTOR.meterFloor) / TUTOR.meterCrawlSecs;
+      slowBank = Math.max(SLOWMO.cap * TUTOR.meterFloor, slowBank - dtReal * rate);
+      updateSlowMeter();
+    }
+  }
 
   // A turn-ordered room hands the trigger on when the round goes past, so the
   // second man is a second problem rather than a simultaneous one.
@@ -6861,6 +6995,11 @@ function updateTutorial(dtReal, movedM, yawDelta) {
         tutorDodged++;
         tutorEmit('dodge');
         tutorSub = TUTOR.volleyGap;   // a beat, then the next one
+        // AND THE WORLD RUNS AGAIN, in a lesson that has the button: the next
+        // round has to be a fresh beat — arm up, shot away, freeze, tap — and
+        // it cannot be if the button is already down and the prompt telling
+        // them to press it is a lie.
+        if (tutorDodgeBeat()) { setTimeLocked(false); tutorFroze = false; }
         // AND THE WORLD RUNS AGAIN. The next round is a fresh beat — arm up,
         // shot away, freeze, tap — and it cannot be if time never went back to
         // normal in between: the button would already be down and the prompt
@@ -6939,6 +7078,22 @@ function updateTutorial(dtReal, movedM, yawDelta) {
         tutorSub = tutorAimNext() ? TUTOR.reshoot : 1;
       }
       break;
+
+    // THE METER LESSON (deferred). The words wait for the bar to actually
+    // move: "TAP TO LET TIME RUN" used to come up on a 1.6 s timer, five
+    // seconds before the bar reached the knee the step waits for, so a player
+    // who did exactly as they were told stopped the drain and the lesson could
+    // never end. The timeout is a floor under a bar that somehow never falls.
+    case 'resumed': {
+      const kneed = slowBank <= SLOWMO.cap * TUTOR.meterKnee;
+      if (!tutorMeterSaid && tutorT > TUTOR.resumeDelay
+          && (kneed || tutorT > TUTOR.resumeDelay + TUTOR.meterSecs + 8)) {
+        tutorMeterSaid = true;
+        tutorEmit('meter');
+      }
+      if (tutorMeterSaid && !timeLocked) { tutorEmit('resume'); done(); }
+      break;
+    }
 
     case 'gunUp':
       if (gunRiseT <= 0) done();
@@ -9042,6 +9197,11 @@ function frame(now) {
   } else if (playing && slowActive) {
     const speedNorm = Math.min(player.vel.length() / MOVE_SPEED, 1);
     target = TIME_SLOW + (TIME_MOVE_MAX - TIME_SLOW) * speedNorm;
+    // A FLOOR WHILE A TAUGHT ROUND IS IN THE AIR. The ordinary rule is that
+    // time moves when YOU move — 0.05 standing still — and at that rate a
+    // round nine metres out takes three minutes to arrive. It still speeds up
+    // when they move; it just no longer stops.
+    if (tutorDodgeBeat()) target = Math.max(target, TUTOR.dodgeScale);
     // A FLOOR WHILE A ROUND IS IN THE AIR AND BEING TAUGHT. The ordinary rule
     // is that time moves when YOU move — 0.05 standing still — and at that
     // rate a round twelve metres out takes half a minute to arrive. On the one
@@ -9572,11 +9732,15 @@ window.__ts = {
   // The time button, pressed, without a pointer: exactly what a quick tap
   // does, so a harness can answer a beat that is waiting for one.
   timeTap: () => {
-    if (timeLocked) setTimeLocked(false);
+    if (timeLocked) { if (!tutorRefusesResume()) setTimeLocked(false); }
     else setTimeLocked(true);
     return timeLocked;
   },
   tutorSpec: () => JSON.parse(JSON.stringify(TUTOR_SPEC)),
+  tutorOrder: () => [...TUTOR_ORDER],
+  tutorMeter: () => ({ on: tutorMeterOn, said: tutorMeterSaid,
+    everShown: tutorMeterEverShown, slowedHere: tutorSlowedHere,
+    resumedHere: tutorResumedHere, refuses: tutorRefusesResume() }),
   // Stage a named ramp area's bodies in whatever corridor is currently up.
   // Walking to area 12 to check that area 12 takes turns costs minutes of
   // headless wall clock and tests the walking, not the taking of turns.
