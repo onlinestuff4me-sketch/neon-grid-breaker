@@ -10155,8 +10155,9 @@ window.__ts = {
     updateModeUI();   // the button's existence is a function of the door too
     return hall.doorsPassed + 1;
   },
-  // OPEN THE DOOR AND STEP THROUGH IT, without the walk. Clearing door 70 to
-  // find out what door 71 does costs minutes of headless wall clock and tests
+  // OPEN THE DOOR AND STEP THROUGH IT, without the walk. Clearing the door
+  // before the unlock to
+  // find out what the door after it does costs minutes of headless wall clock
   // the walking. This is the same two calls the corridor makes, in the same
   // order, so everything they trigger — the leg beyond being composed, the
   // lesson being armed and then entered — happens exactly as it does in play.

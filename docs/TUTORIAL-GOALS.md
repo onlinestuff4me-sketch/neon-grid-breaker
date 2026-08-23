@@ -89,7 +89,7 @@ lesson, silently broke shooting for months.
 The unlock is not a door number somebody picked. Bullet speed climbs a
 staircase (`SPEED` in `src/balance.js`), and slow time arrives on the door that
 staircase reaches `unlockM` on — **the speed at which walking out of a round
-stops being enough**. On the shipped numbers that is door 71.
+stops being enough**. On the shipped numbers that is door 81.
 
 What happens there is a lesson, not a banner. The corridor on the far side of
 that door is authored: one corner, a barrier, `STAND HERE` — the same furniture

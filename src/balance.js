@@ -74,7 +74,11 @@ export const SPEED = {
   // solves for the door the staircase reaches it on, and the STAND HERE
   // corridor, the time button and the meter all key off that one answer, so
   // dragging any tread above moves the whole lesson with it.
-  unlockM: 12,
+  // 13 m/s: the speed the OLD ramp topped out at (16 x 0.79 = 12.64), which is
+  // the number the power was implicitly balanced against before any of this.
+  // Lands on door 81 — see docs/BALANCE.md on why that is a long way in and
+  // which tread to drag if it should be sooner.
+  unlockM: 13,
   schoolDoors: 10,     // ...and the staircase holds there for this many doors
                        // while slow time is taught. See SCHOOL.
   capM: 21.6,          // hard ceiling. Superhot runs 19-34 m/s while you move;

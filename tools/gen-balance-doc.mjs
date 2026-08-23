@@ -337,6 +337,44 @@ if (existsSync(OUT)) {
   // a file that begins with the marker has no prelude to keep.
   if (at > 0) prelude = cur.slice(0, at).replace(/#\s*TIME SHATTER — balance reference\n*/, '');
 }
+// THE PROSE IS NOT ALLOWED TO NAME THE WRONG DOOR. The prelude explains the
+// unlock in words, which means it states a door number, which means it can go
+// stale the moment a speed tread moves — and it did, within an hour of being
+// written. Every "door N" in the prelude that sits near the words unlock,
+// school or power must be the door `unlockDoor()` actually solves to. This is
+// a build failure, not a warning: a document that confidently names the wrong
+// door is worse than no document.
+if (prelude) {
+  const want = unlockDoor();
+  const ok = new Set([want, want + SPEED.schoolDoors - 1, want + SPEED.schoolDoors]);
+  const bad = [];
+  // A CHARACTER WINDOW, NOT A LINE. The first version of this check tested
+  // each LINE for the words unlock/school/power and then for a door number,
+  // and it sailed straight past the one sentence it existed to catch —
+  // "...that happens on. On the shipped numbers that is **door 81**." — because
+  // the word "unlock" had wrapped onto the line above. Prose does not respect
+  // line boundaries, so neither can the guard.
+  for (const m of prelude.matchAll(/\bdoors?\s+\*{0,2}(\d{1,3})\*{0,2}/gi)) {
+    const around = prelude.slice(Math.max(0, m.index - 160), m.index + 160);
+    if (!/\b(unlock|school|the power)\b/i.test(around)) continue;
+    if (around.includes('<!--door-ok-->')) continue;   // an explicit what-if
+    if (ok.has(+m[1])) continue;
+    const line = prelude.slice(0, m.index).split('\n').length;
+    bad.push([+m[1], line, prelude.slice(Math.max(0, m.index - 70), m.index + 70)
+      .replace(/\n/g, ' ').trim()]);
+  }
+  if (bad.length) {
+    console.error('\ndocs/BALANCE.md names a door the code does not agree with.');
+    console.error(`unlockDoor() solves to ${want}; the school is `
+      + `${want}-${want + SPEED.schoolDoors - 1}.\n`);
+    for (const [n, line, ctx] of bad) {
+      console.error(`  line ~${line}, says door ${n}:  ...${ctx}...`);
+    }
+    console.error('\nFix the prose, or mark a deliberate what-if with '
+      + '<!--door-ok--> nearby, then run this again.');
+    process.exit(1);
+  }
+}
 writeFileSync(OUT, prelude ? `# TIME SHATTER — balance reference\n\n${prelude.trim()}\n\n${md.replace(/^# TIME SHATTER — balance reference\n*/, '')}` : md);
 console.log(prelude
   ? 'docs/BALANCE.md regenerated (hand-written prelude kept)'

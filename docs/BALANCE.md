@@ -96,7 +96,7 @@ learned. It steps now, and each tread is wide enough to stand on.
 Slow time is not unlocked on a door number somebody picked. It is unlocked by
 the **speed reaching `SPEED.unlockM`** — the point at which walking out of a
 round stops being enough — and `unlockDoor()` solves the staircase for the door
-that happens on. On the shipped numbers that is **door 71**. Everything keys off
+that happens on. On the shipped numbers that is **door 81**. Everything keys off
 that one answer: the button, the meter, the STAND HERE corridor that teaches it,
 and the school that follows. Move any tread and the whole lesson moves with it,
 because none of them carries a number of its own.
@@ -104,11 +104,18 @@ because none of them carries a number of its own.
 There used to be a hand-typed `TIME.unlockDoor` here, and it could — and did —
 drift out of step with the speed it was supposed to be answering.
 
-**Door 71 is a long way in.** It is what the shipped treads add up to: 31 steps
-of 0.2 from 5.8, two doors each. If that is further than the power should be
-held back, the dial to move is `stepDoors` (1 instead of 2 puts it at door 41)
-or `stepM` (0.4 does the same). `/tool` → **RAMP** prints the solved door above
-the table and moves it as you drag.
+**Door 81 is a long way in — far enough that this is the one number in here
+worth arguing about.** It is simply what the treads add up to: 36 steps of 0.2
+from 5.8, two doors each. `unlockM` is 13 because that is what the old ramp
+topped out at (16 × 0.79 = 12.64), so it is the speed the power was implicitly
+balanced against before any of this existed.
+
+At roughly a minute a door that is about an hour of play before the core
+mechanic appears, and most players will never see it. Nothing about the speed
+curve has to change to fix that — the treads are twice as wide as they need to
+be. <!--door-ok-->`stepDoors` 2 → 1 puts the unlock on **door 46**; `stepM`
+0.2 → 0.4 does the same while keeping two-door treads. `/tool` → **RAMP** prints the solved door
+above the table and moves it as you drag.
 
 ### The slow-time school — the ten doors after the unlock
 
@@ -191,13 +198,13 @@ him. `forced()` pins the form.
 | **8** | 2 | 3 | `1+2` | 3 | 5.8 | 3.00 |  |
 | 9 | 2 | 3 | `1+2` | 3 | 5.8 | 3.00 |  |
 | **10** | 3 | 4 | `1+1+2` | 3 | 5.8 | 3.00 |  |
-| **11** | 3 | 4 | `1+1+2` | 3 | 6.0 | 2.82 |  |
+| 11 | 3 | 4 | `1+1+2` | 3 | 6.0 | 2.82 |  |
 | 12 | 3 | 4 | `1+1+2` | 3 | 6.0 | 2.64 |  |
 | **13** | 3 | 4 | `1+1+2` | 4 | 6.2 | 2.46 |  |
 | 14 | 3 | 4 | `1+1+2` | 4 | 6.2 | 2.27 |  |
 | **15** | 3 | 5 | `1+2+2` | 4 | 6.4 | 2.09 |  |
 | **16** | 4 | 5 | `1+1+1+2` | 4 | 6.4 | 1.91 |  |
-| **17** | 4 | 5 | `1+1+1+2` | 4 | 6.6 | 1.73 |  |
+| 17 | 4 | 5 | `1+1+1+2` | 4 | 6.6 | 1.73 |  |
 | 18 | 4 | 5 | `1+1+1+2` | 4 | 6.6 | 1.55 |  |
 | **19** | 4 | 5 | `1+1+1+2` | 5 | 6.8 | 1.37 |  |
 | 20 | 4 | 5 | `1+1+1+2` | 5 | 6.8 | 1.19 |  |
@@ -205,29 +212,35 @@ him. `forced()` pins the form.
 | 22 | 4 | 6 | `1+1+2+2` | 5 | 7.0 | 0.82 |  |
 | **23** | 5 | 6 | `1+1+1+1+2` | 5 | 7.2 | 0.64 |  |
 | 24 | 5 | 6 | `1+1+1+1+2` | 5 | 7.2 | 0.46 |  |
-| **25** | 5 | 6 | `1+1+1+1+2` | 5 | 7.4 | 0.28 |  |
+| 25 | 5 | 6 | `1+1+1+1+2` | 5 | 7.4 | 0.28 |  |
 | **26** | 5 | 6 | `1+1+1+1+2` | 6 | 7.4 | 0.28 |  |
-| **27** | 5 | 6 | `1+1+1+1+2` | 6 | 7.6 | 0.28 |  |
+| 27 | 5 | 6 | `1+1+1+1+2` | 6 | 7.6 | 0.28 |  |
 | **28** | 5 | 7 | `1+1+1+2+2` | 6 | 7.6 | 0.28 |  |
-| **29** | 5 | 7 | `1+1+1+2+2` | 6 | 7.8 | 0.28 |  |
+| 29 | 5 | 7 | `1+1+1+2+2` | 6 | 7.8 | 0.28 |  |
 | 30 | 5 | 7 | `1+1+1+2+2` | 6 | 7.8 | 0.28 |  |
 | **35** | 5 | 7 | `1+1+1+2+2` | 7 | 8.4 | 0.28 |  |
 | **40** | 5 | 8 | `1+1+2+2+2` | 7 | 8.8 | 0.28 |  |
 | **50** | 5 | 9 | `1+2+2+2+2` | 8 | 9.8 | 0.28 |  |
 | **60** | 5 | 10 | `2+2+2+2+2` | 9 | 10.8 | 0.28 |  |
 | **70** | 5 | 11 | `2+2+2+2+3` | 10 | 11.8 | 0.28 |  |
-| **71** | 5 | 15 | `3+3+3+3+3` | 10 | 12.0 | 2.40 | 2 |
-| 72 | 5 | 15 | `3+3+3+3+3` | 10 | 12.0 | 2.40 | 2 |
-| **73** | 5 | 20 | `4+4+4+4+4` | 10 | 12.0 | 2.40 | 3 |
-| **80** | 5 | 20 | `4+4+4+4+4` | 11 | 12.0 | 2.40 | 3 |
-| **81** | 5 | 12 | `2+2+2+3+3` | 11 | 12.2 | 0.28 |  |
-| **90** | 5 | 12 | `2+2+2+3+3` | 12 | 13.0 | 0.28 |  |
-| **100** | 5 | 13 | `2+2+3+3+3` | 12 | 14.0 | 0.28 |  |
-| **120** | 5 | 15 | `3+3+3+3+3` | 14 | 16.0 | 0.28 |  |
+| **80** | 5 | 12 | `2+2+2+3+3` | 11 | 12.8 | 0.28 |  |
+| **81** | 5 | 15 | `3+3+3+3+3` | 11 | 13.0 | 2.40 | 2 |
+| 82 | 5 | 15 | `3+3+3+3+3` | 11 | 13.0 | 2.40 | 2 |
+| **83** | 5 | 20 | `4+4+4+4+4` | 11 | 13.0 | 2.40 | 3 |
+| 84 | 5 | 20 | `4+4+4+4+4` | 11 | 13.0 | 2.40 | 3 |
+| 85 | 5 | 20 | `4+4+4+4+4` | 11 | 13.0 | 2.40 | 3 |
+| 86 | 5 | 20 | `4+4+4+4+4` | 11 | 13.0 | 2.40 | 3 |
+| 87 | 5 | 20 | `4+4+4+4+4` | 11 | 13.0 | 2.40 | 3 |
+| 88 | 5 | 20 | `4+4+4+4+4` | 11 | 13.0 | 2.40 | 3 |
+| **89** | 5 | 20 | `4+4+4+4+4` | 12 | 13.0 | 2.40 | 3 |
+| 90 | 5 | 20 | `4+4+4+4+4` | 12 | 13.0 | 2.40 | 3 |
+| **91** | 5 | 13 | `2+2+3+3+3` | 12 | 13.2 | 0.28 |  |
+| 100 | 5 | 13 | `2+2+3+3+3` | 12 | 14.0 | 0.28 |  |
 
-Bold doors are the ones where something moved. (Every door 1–30, then samples.)
-Doors 71–80 are the school: the body counts there are the school's floor
-(a volley plus a spare per leg), not the ramp's own answer.
+<!--door-ok-->Bold doors are the ones where something moved. (Every door 1–30,
+then samples, then every door of the school.) **Doors 81–90 are the school**: the body counts
+there are the school's floor — a volley plus a spare, per leg — not the ramp's
+own answer, which is why door 91 drops back.
 
 ### What it replaced, and what it costs
 
@@ -242,8 +255,8 @@ What it costs, and it is worth saying plainly:
 * **The deep game is much less dense than it was.** Door 40 is eight bodies
   across five legs where the old curve capped at thirty in one. Depth is now
   long before it is crowded.
-* **Door 81 is a drop.** The school holds twenty bodies a door; the ramp resumes
-  at twelve. That is deliberate — it reads as relief on the far side of the
+* **Door 91 is a drop.** The school holds twenty bodies a door; the ramp resumes
+  at thirteen. That is deliberate — it reads as relief on the far side of the
   hardest stretch in the game, with a new power in hand — but it is a step
   down, not up.
 * **The telegraph ramp and the speed staircase no longer finish together, and
@@ -262,7 +275,7 @@ every door before you play one.
 
 | what | where |
 |---|---|
-| the numbers, with sliders and a live table to door 96 | `/tool` → **RAMP** |
+| the numbers, with sliders and a live table to door 96 <!--door-ok--> | `/tool` → **RAMP** |
 | the numbers, in source | `OPENING`, `SPEED`, `SCHOOL`, `RAMP` in `src/balance.js` |
 | the reading of them | `doorLegs` / `doorBodies` / `doorAlive` / `legShare` / `shotGap` / `enemyBulletSpeed` / `schoolVolley` / `schoolGap` in `src/main.js` — all thin reads, none of them decides anything |
 | a published reference to send somebody | the artifact linked from `README.md` |
@@ -428,10 +441,10 @@ by `1 + rushT / 25`, so everything ramps on the run clock instead.
 | door 6 | 5.8 | 0.975× | 0.675× |
 | door 10 | 5.8 | 0.835× | 0.775× |
 | door 19 | 6.8 | 0.52× | 1× |
-| door 71 | 12 | 0.52× | 1× |
+| door 81 | 13 | 0.52× | 1× |
 
-Slow time unlocks on **door 71**, where the staircase reaches
-12 m/s; it holds there for the 10-door
+Slow time unlocks on **door 81**, where the staircase reaches
+13 m/s; it holds there for the 10-door
 school and then climbs again to a ceiling of 21.6 m/s. Rush Hour
 drains the bank at a flat 0.4×. An enemy must be in view for
 **0.45 s** before its telegraph may begin.
