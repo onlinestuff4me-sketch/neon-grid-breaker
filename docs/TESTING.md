@@ -158,6 +158,11 @@ existing state and costs nothing — but nothing in `src/` may depend on it.
 | `pastbar.js` | the men past the barrier stand where they are put, and a death rebuilds the fight behind a shut door |
 | `slowlesson.js` | the slow-time course, played beat by beat — the button-released freeze, the meter demo that cannot wedge, and the per-area reminders |
 | `schoolflow.js` | the numbers: each tread of the speed staircase holds for the doors it claims, the unlock door is where it reaches 12 m/s, the button is not on screen a door earlier, volleys build, and the mercy rule is hysteretic |
+| `trigger.js` | the REAL weapon — every round a genuine pointer gesture, never `__ts.fire`. A tap kills; a 112 px drag does not; a 700 ms press does not; a tap on the time button stops time and fires nothing |
+| `schoolbody.js` | the school as behaviour rather than arithmetic: the composed corridor's body budget, the unlock as a functional gate, and the mercy rule counted in rounds actually in the air — full bank 5 up at once, dry 2, the same six rounds taking 13.2 s of world time instead of 4.7 |
+| `crossparity.js` | that `__ts.crossDoor()` really is a door crossing (checked against one walked on foot), and that the slow course arms on the unlock door and neither neighbour |
+| `mutdemo.js` | drives the game into the state each important assertion's mutation would produce and requires that assertion to go RED, and the weak version of it to stay green. The suite's own smoke alarm |
+| `modes.js` | the two one-thumb modes share the opening ramp and must NOT get the school, its volley gap, its body floor, its coach, the button or the meter — with the tunnel at the same door as a control |
 | `shotrhythm.js` | what the rounds actually DO, measured in world seconds off `lastEnemyShotAt`: door 8 is a metronome with no double-taps, and a school door repeats spread-spread-quiet. Every other test asks what the code *says* the gap is — for a long time those were different things |
 | `schoolentry.js` | the door: standing on the last leg before the unlock, opening it and stepping through has to produce the lesson's own corridor, its barrier, `STAND HERE`, and the button taken away until `slowIntro` hands it over |
 | `ramppane.js` | the tool's RAMP pane: every dial has a slider, the table matches the code out to door 96, moving a dial recomputes it, and the export carries the speed and school blocks |
@@ -190,6 +195,37 @@ And repairing a stale test can find a real bug. `seal.js` asserted
 metres short of the seal, on a leg that might not have been given one. Walked
 past the seal, the property it was written to check holds. It had never once
 been checked.
+
+## ...and the RUNNER could not fail either
+
+The worst instance of the above was not a test. `runall.sh` decided pass/fail
+by grepping stdout for the word `FAIL`, which is a hope rather than a
+criterion, and it was wrong in five ways at once:
+
+* a file that **crashed** printed a stack trace, no `FAIL` line, and was
+  reported `ok`. `timebtn.js` had been doing exactly that since the time button
+  moved behind the unlock door — `boundingBox()` on a `display:none` element
+  returns null — executing **zero** assertions for weeks while counted green;
+* so was a file killed by the **timeout**;
+* so was an **empty** file. `modes.js` was zero bytes and sat in the list;
+* four files printed `console.log('   PASS name :', cond)`, where PASS is a
+  **literal**. A red assertion read `PASS the slab rose : false`, and the
+  runner was grepping for `FAIL`. Forty assertions across `tool.js`,
+  `seal.js`, `slots.js` and `timebtn.js` could not fail the suite whatever they
+  measured;
+* and five files print `ERRORS:` in capitals while the runner matched
+  `^errors:`, so their `pageerror` wiring was decorative.
+
+It reported "1 file with failures". The true number was ten.
+
+It now requires **positive evidence of success**: exit code 0, an errors line
+in either spelling, at least one assertion line, no `FAIL`, and no
+`PASS <name> : false`. The `[^:]*` in that last pattern earns its place —
+`.*: *false` also matches a payload like `{"grantsFire":false}` on a green
+line, which turned two passing files red the first time it ran.
+
+**If you add a test:** print `PASS`/`FAIL` per assertion, print an errors line,
+exit non-zero on failure. A file that cannot report a red is not a test.
 
 ## Nothing in the suite had ever pulled the trigger
 
