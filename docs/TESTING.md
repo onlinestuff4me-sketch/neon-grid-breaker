@@ -46,7 +46,8 @@ a player who has not started yet:
 * `seal.js` — "it shut when crossed", "nobody was left trapped", "their release
   was refunded"
 * `physics.js` — "bullet → player" did not kill
-* `meterfloor.js` — watched a 28 s window for a drain that settles at ~24.5 s
+* `meterfloor.js` (since deleted with the lesson it tested) — watched a 28 s
+  window for a drain that settles at ~24.5 s
   and called the descent a failure
 
 **Wait for the state, never for a clock:**
@@ -161,7 +162,7 @@ existing state and costs nothing — but nothing in `src/` may depend on it.
 | `shatter.js` | the shooting lesson driven with the REAL weapon: three shatters, the barrier down, the door open |
 | `corner.js` | the barrier is up from frame one and its sign is on from the last corner |
 | `tutool.js` | the tutorial pane: a clean spec warns about nothing, a duplicate id is named, the revert leaves the map on the live object, and a new leg is editable |
-| `physics.js`, `halldoor3.js`, `timebtn.js`, `slots.js`, `meterfloor.js` | the rest of the game, so a tutorial change that breaks it is caught |
+| `physics.js`, `halldoor3.js`, `timebtn.js`, `slots.js` | the rest of the game, so a tutorial change that breaks it is caught |
 
 ## A test that cannot fail is worse than no test
 
