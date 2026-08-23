@@ -4552,14 +4552,23 @@ function onPointerDown(ev) {
       if (ev.target.closest('#savesclose')) { closeSaves(); return; }
       const cont = ev.target.closest('#slotlist .cont');
       if (cont) {
-        slotUse(parseInt(cont.dataset.i, 10) || 0);
         setTutorArmed(false);
-        closeSaves();
-        startRunFromMenu();
+        continueSave(parseInt(cont.dataset.i, 10) || 0);
         return;
       }
-      const neu = ev.target.closest('#slotlist .neu');
-      if (neu) { askTutorial(parseInt(neu.dataset.i, 10) || 0); return; }
+      if (ev.target.closest('#newsave.off')) return;   // the list is full
+      if (ev.target.closest('#newsave')) { startNewRun(); return; }
+      const del = ev.target.closest('#slotlist .del');
+      if (del) { askDelete(parseInt(del.dataset.i, 10) || 0); return; }
+      if (ev.target.closest('#slotlist .delno')) { pendingDelete = -1; renderSlots(); return; }
+      const dy = ev.target.closest('#slotlist .delyes');
+      if (dy) {
+        deleteSave(parseInt(dy.dataset.i, 10) || 0);
+        pendingDelete = -1;
+        renderSlots();
+        refreshMenuPrimary();
+        return;
+      }
       if (ev.target.closest('#askNever')) return;   // the checkbox takes it
       if (ev.target.closest('#askYes') || ev.target.closest('#askNo')) {
         const yes = !!ev.target.closest('#askYes');
@@ -4596,9 +4605,27 @@ function onPointerDown(ev) {
     }
     // on the main menu only TAP TO BEGIN starts a run — a stray tap right
     // after closing settings must not launch you into a wave
+    // NEW RUN: the deliberate second choice under the primary button. It makes
+    // a save to put the run in — a run the player cannot come back to is the
+    // thing the saves screen exists to prevent.
+    if (game.state === 'menu' && ev.target && ev.target.closest
+        && ev.target.closest('#newrun')) {
+      game.mode = 'hall';
+      startNewRun();
+      return;
+    }
     if (game.state === 'menu' &&
         !(ev.target && ev.target.closest && ev.target.closest('.go'))) return;
-    if (game.state === 'menu') game.mode = 'hall';   // TAP TO BEGIN = the tunnel
+    if (game.state === 'menu') {
+      game.mode = 'hall';   // the big button is the tunnel, either way
+      const last = latestSave();
+      if (last) { continueSave(last.i); return; }
+      // Nothing to continue: this IS a new run, and it still needs a save to
+      // live in — but without the second button's ceremony, because on a first
+      // launch there is no list and no choice to make.
+      startNewRun(false);
+      return;
+    }
     advanceFromOverlay();
     return;   // this pointer is never registered, so its release is inert
   }
@@ -5771,22 +5798,104 @@ const game = {
 };
 
 // ---------------------------------------------------------------------------
-// SAVE SLOTS
+// SAVES — see docs/SAVES.md
 //
-// Three of them, each holding everything a player accumulates — lifetime
-// doors, the archive, the best wave, the run board — plus a RESUME POINT: the
-// door they reached. Continuing drops you at that door with the loadout you
-// had, which is the honest version of "carry on where I was": a leg is
-// procedurally generated and a fight is live, so the door is the finest grain
-// that can be restored truthfully rather than approximately.
+// Each holds everything a player accumulates — lifetime doors, the archive,
+// the best wave, the run board — plus a RESUME POINT: the door they reached.
+// Continuing starts the run ON that door, which is the honest version of
+// "carry on where I was": a leg is procedurally generated and a fight is live,
+// so the door is the finest grain that can be restored truthfully rather than
+// approximately.
 //
-// The active slot is the one every existing progress key now reads and writes
-// through, so nothing else in the game had to learn about slots.
+// THAT SENTENCE USED TO BE A LIE. `rdoor` was written on every completed door
+// and shown on the saves screen, and nothing read it — CONTINUE switched the
+// active slot and started at door 1. The claim sat above the code for as long
+// as the code did. `initHall(from)` is what makes it true, and `saves.js` §3
+// is what keeps it true.
+//
+// The active save is the one every existing progress key reads and writes
+// through, so nothing else in the game had to learn about saves.
 // ---------------------------------------------------------------------------
-const SLOTS = 3;
+// A SAVE IS MADE, NOT ALLOCATED. There used to be exactly three slots, always
+// present, most of them empty — a shape borrowed from cartridges. What a player
+// actually wants is a list of the runs they have going: make one when you want
+// one, come back to the one you were on, delete the ones you are done with.
+//
+// The storage keys are unchanged (`ts_s{i}_*`), so every existing save
+// survives untouched; `ts_saves` is simply an index over them — which indices
+// exist, in what order, under what name. Anything not in that index is not a
+// save, which is also how deleting works.
+const MAX_SAVES = 8;        // enough for a shared phone; few enough to scan
+const SAVES_KEY = 'ts_saves';
 const slotKey = (i, k) => `ts_s${i}_${k}`;
 let slotIx = 0;
-try { slotIx = Math.min(SLOTS - 1, Math.max(0, parseInt(localStorage.getItem('ts_slot') || '0', 10) || 0)); } catch { /* private */ }
+try { slotIx = Math.max(0, parseInt(localStorage.getItem('ts_slot') || '0', 10) || 0); } catch { /* private */ }
+
+// The index, repaired on every read: an entry whose slot holds nothing is not
+// a save, and a slot holding something that nobody indexed is. Neither can
+// happen through the UI, but a half-finished write or a hand-edited profile
+// should not cost somebody a run.
+function saveIndex() {
+  let raw = null;
+  try { raw = localStorage.getItem(SAVES_KEY); } catch { /* private */ }
+  let list = [];
+  if (raw) {
+    try {
+      list = (JSON.parse(raw) || [])
+        .filter((e) => e && Number.isInteger(e.i) && e.i >= 0)
+        .map((e) => ({ i: e.i, name: String(e.name || '').slice(0, 24) }));
+    } catch { list = []; }
+  }
+  const seen = new Set(list.map((e) => e.i));
+  // MIGRATION, and the recovery path in one. Before this index existed there
+  // were three fixed slots; any of them that was played is a save now. The
+  // same sweep re-adopts an orphaned slot.
+  for (let i = 0; i < MAX_SAVES; i++) {
+    if (seen.has(i)) continue;
+    if (slotRead(i).used) { list.push({ i, name: '' }); seen.add(i); }
+  }
+  // ...and an indexed slot that is empty is dropped, EXCEPT the active one:
+  // a save made seconds ago has nothing in it yet and must not vanish.
+  return list.filter((e) => slotRead(e.i).used || e.i === slotIx);
+}
+function writeSaveIndex(list) {
+  try { persist(SAVES_KEY, JSON.stringify(list.map((e) => ({ i: e.i, name: e.name || '' })))); }
+  catch { /* private */ }
+}
+// Every save, newest first — which is what "continue where I left off" means.
+function savesByRecent() {
+  return saveIndex()
+    .map((e) => ({ ...e, ...slotRead(e.i) }))
+    .sort((a, b) => b.at - a.at);
+}
+const saveName = (e) => e.name || `SAVE ${e.i + 1}`;
+// The one CONTINUE resumes: most recently played, or null if there are none.
+function latestSave() {
+  const all = savesByRecent();
+  return all.length ? all[0] : null;
+}
+function makeSave(name) {
+  const list = saveIndex();
+  if (list.length >= MAX_SAVES) return null;
+  const used = new Set(list.map((e) => e.i));
+  let i = 0;
+  while (used.has(i) && i < MAX_SAVES) i++;
+  if (i >= MAX_SAVES) return null;
+  const entry = { i, name: String(name || '').slice(0, 24) };
+  slotClear(i);                 // whatever a deleted save left behind, gone
+  writeSaveIndex([...list, entry]);
+  return entry;
+}
+function deleteSave(i) {
+  const list = saveIndex().filter((e) => e.i !== i);
+  writeSaveIndex(list);
+  slotClear(i);
+  // The active save cannot be one that no longer exists.
+  if (slotIx === i) {
+    const next = list.length ? list[0].i : 0;
+    slotUse(next);
+  }
+}
 
 function slotRead(i) {
   const get = (k, d) => { try { const v = localStorage.getItem(slotKey(i, k)); return v === null ? d : v; } catch { return d; } };
@@ -6034,26 +6143,92 @@ function openSaves() {
 function closeSaves() { el.saves.style.display = 'none'; }
 function renderSlots() {
   if (!el.slotlist) return;
+  const list = savesByRecent();
   el.slotlist.innerHTML = '';
-  for (let i = 0; i < SLOTS; i++) {
-    const st = slotRead(i);
+  if (!list.length) {
+    el.slotlist.innerHTML = '<div class="snone">No saves yet. Starting a run makes one.</div>';
+  }
+  for (const e of list) {
     const d = document.createElement('div');
-    d.className = 'slot' + (i === slotIx ? ' on' : '');
-    const depth = st.resumeDoor > 1 ? `DOOR ${st.resumeDoor}` : 'not started';
-    d.innerHTML = `<div class="sname">SLOT ${i + 1}${i === slotIx ? ' · ACTIVE' : ''}</div>`
-      + `<div class="smeta">${fmtSlotWhen(st.at)} · ${depth} · ${st.doors} doors · ${st.filed} filed</div>`
+    d.className = 'slot' + (e.i === slotIx ? ' on' : '');
+    const depth = e.resumeDoor > 1 ? `DOOR ${e.resumeDoor}` : 'door 1';
+    d.innerHTML = `<div class="sname">${saveName(e)}${e.i === slotIx ? ' · ACTIVE' : ''}</div>`
+      + `<div class="smeta">${fmtSlotWhen(e.at)} · ${depth} · `
+      + `${e.doors} door${e.doors === 1 ? '' : 's'} · ${e.filed} filed</div>`
       + '<div class="srow">'
-      + `<div class="sbtn cont" data-i="${i}">${st.used ? 'CONTINUE' : 'PLAY'}</div>`
-      + `<div class="sbtn red neu" data-i="${i}">NEW GAME</div>`
+      + `<div class="sbtn cont" data-i="${e.i}">CONTINUE</div>`
+      + `<div class="sbtn del" data-i="${e.i}">DELETE</div>`
       + '</div>';
     el.slotlist.appendChild(d);
   }
+  // NEW SAVE is an action on this list, not a third state of every row. The
+  // old screen offered NEW GAME on each of three fixed slots, which made
+  // "start again" and "overwrite that one" the same gesture.
+  const add = document.createElement('div');
+  add.className = 'sbtn addsave' + (list.length >= MAX_SAVES ? ' off' : '');
+  add.id = 'newsave';
+  add.textContent = list.length >= MAX_SAVES
+    ? `ALL ${MAX_SAVES} SAVES IN USE — DELETE ONE` : '+ NEW SAVE';
+  el.slotlist.appendChild(add);
+}
+// Deleting is the one thing on this screen that cannot be undone, so it asks —
+// and it asks INSIDE the row, naming what is about to go, rather than in a
+// dialogue that has lost track of which one you tapped.
+let pendingDelete = -1;
+function askDelete(i) {
+  pendingDelete = i;
+  const row = [...el.slotlist.querySelectorAll('.slot')]
+    .find((n) => n.querySelector('.del') && +n.querySelector('.del').dataset.i === i);
+  if (!row) return;
+  const e = savesByRecent().find((x) => x.i === i) || { i };
+  row.querySelector('.srow').innerHTML =
+    `<div class="sbtn red delyes" data-i="${i}">DELETE ${saveName(e)}</div>`
+    + '<div class="sbtn delno">KEEP</div>';
 }
 function askTutorial(i) {
   pendingNewSlot = i;
   if (askNever) { beginNewGame(i, false); return; }
   el.askNeverBox.checked = false;
   el.askTut.style.display = 'flex';
+}
+// CONTINUE, from anywhere: the menu's primary button and every row of the
+// saves list come through here. `pendingResumeDoor` is read by
+// advanceFromOverlay, which is the one place that starts a run.
+let pendingResumeDoor = 1;
+function continueSave(i) {
+  slotUse(i);
+  const st = slotRead(i);
+  pendingResumeDoor = Math.max(1, st.resumeDoor || 1);
+  closeSaves();
+  startRunFromMenu();
+}
+// ...and starting a fresh run makes a save to put it in. A run the player
+// cannot come back to is the thing this whole screen exists to prevent.
+//
+// `ask` is the difference between the two ways of getting here. Tapping the
+// big button on a first launch is not a decision about the tutorial — the
+// onboarding already decides for itself whether it has been played — so it
+// must not open a dialogue in front of somebody who has asked for one thing:
+// the game. Deliberately choosing NEW RUN or + NEW SAVE, with saves already on
+// the list, IS that decision, and gets the question.
+function startNewRun(ask = true) {
+  const entry = makeSave('') || latestSave();
+  if (!entry) return;
+  if (!ask) {
+    // NO DIALOGUE AND NO ARMING. Going through beginNewGame here would call
+    // setTutorArmed(true) on a first launch, and `tutorArmed` is a sticky
+    // one-shot ("replay the lesson") that nothing clears until a lesson ENDS —
+    // so a first-launch PLAY left every later restart in training. The rule
+    // that has always applied still applies: `tutorSeen` is false, so
+    // initHall's own check runs the onboarding. All this has to do is make the
+    // save and start.
+    slotUse(entry.i);
+    pendingResumeDoor = 1;
+    closeSaves();
+    startRunFromMenu();
+    return;
+  }
+  askTutorial(entry.i);
 }
 // The menu's own PLAY path, so a slot button starts a run the same way the
 // big button does rather than by simulating a tap on it.
@@ -6063,6 +6238,7 @@ function startRunFromMenu() {
 }
 function beginNewGame(i, withTutorial) {
   el.askTut.style.display = 'none';
+  pendingResumeDoor = 1;   // a new game starts at the first door, always
   slotClear(i);
   slotUse(i);
   setTutorArmed(!!withTutorial);
@@ -7666,6 +7842,7 @@ const el = {
   tutlink: document.getElementById('tutlink'),
   tutorpin: document.getElementById('tutorpin'),
   saves: document.getElementById('saves'),
+  newrun: document.getElementById('newrun'),
   slotlist: document.getElementById('slotlist'),
   askTut: document.getElementById('askTut'),
   askNeverBox: document.getElementById('askNeverBox'),
@@ -7787,6 +7964,38 @@ const MENU_HTML = {
   rules: el.overlay.querySelector('.rules').innerHTML,
   go: el.overlay.querySelector('.go').innerHTML,
 };
+// The FIRST menu is not drawn by showMenu — the overlay is already up when the
+// page loads — so the primary button has to be decided here too, or a returning
+// player's first sight of the game is a button offering to start over.
+refreshMenuPrimary();
+
+// THE PRIMARY ACTION IS "CARRY ON", when there is anything to carry on from.
+//
+// A menu whose big button always starts from door 1 quietly tells the player
+// their last run did not count. So the button reads CONTINUE and names the
+// door, the run it belongs to is the most recently played one, and NEW RUN is
+// the deliberate second choice underneath it. With no saves at all there is
+// nothing to continue and the button is simply PLAY — one action, no list, no
+// decision to make before the first game.
+function refreshMenuPrimary() {
+  const go = el.overlay.querySelector('.go');
+  if (!go) return;
+  const last = latestSave();
+  // ANY save, not just a deep one. Keying this on `resumeDoor > 1` meant that
+  // starting a second run and stopping on door 1 hid NEW RUN — with a save
+  // sitting at door 13 one row down in the list and no way to make another
+  // from the menu. "Is there a run to go back to" is the question, and a run
+  // on its first door is still a run.
+  go.innerHTML = last
+    ? `CONTINUE<span class="gosub">${saveName(last)} · DOOR ${Math.max(1, last.resumeDoor)}</span>`
+    : MENU_HTML.go;
+  go.classList.toggle('two', !!last);
+  if (el.newrun) {
+    // NEW RUN only exists once continuing is possible; before that the big
+    // button IS new run and a second one saying the same thing is noise.
+    el.newrun.style.display = last ? 'block' : 'none';
+  }
+}
 
 function showMenu() {
   sfx.fadeAll(1, 0.35);
@@ -7816,6 +8025,7 @@ function showMenu() {
   el.overlay.querySelector('.rules').innerHTML = MENU_HTML.rules;
   el.overlay.querySelector('.go').innerHTML = MENU_HTML.go;
   el.overlay.querySelector('.go').classList.remove('long');
+  refreshMenuPrimary();
   el.overlay.querySelector('.rules').style.display = 'none';
   el.menurow.style.display = 'flex';
   el.moderow.style.display = 'flex';
@@ -8210,8 +8420,9 @@ function advanceFromOverlay() {
     setWeapon('pistol');
     sfx.flush();   // a fresh run starts silent, whatever the last one was doing
     if (game.mode === 'rush') initRush();
-    else if (inHall()) initHall();
+    else if (inHall()) initHall(pendingResumeDoor);
     else { startWave(1); showGuide(); }
+    pendingResumeDoor = 1;   // consumed: the next menu start is its own decision
   } else {   // retry current wave
     clearField();
     sfx.flush();   // drain the dead run's echo tail and re-seat the music
@@ -8828,13 +9039,23 @@ function hallWave(n) {
   return q;
 }
 
-function initHall() {
+// `from` is the door to START ON — 1 for a new run, or a save's recorded
+// resume door. A leg is procedurally generated and a fight is live, so the
+// DOOR is the finest grain that can be restored truthfully rather than
+// approximately: you get the corridor that door composes, at that door's place
+// on every ramp, with the opening loadout. See docs/SAVES.md.
+function initHall(from = 1) {
+  const door = Math.max(1, from | 0);
   // Decided BEFORE the first leg is composed, because the onboarding shapes
   // its own two legs (a straight hallway, then a room) and `forced` runs
   // during construction.
   // NEVER IN A SIMPLIFIED MODE. The onboarding teaches a left thumb, a right
   // thumb and a time button, and these modes have none of the three.
-  tutorShaping = (!tutorSeen || tutorArmed) && timeMode === 'toggle' && !simple();
+  // ...AND NEVER WHEN RESUMING. Somebody dropping back in at door 40 has been
+  // taught; replaying the first lesson because the flag happened to be clear
+  // would be the rudest possible welcome back.
+  tutorShaping = door === 1
+    && (!tutorSeen || tutorArmed) && timeMode === 'toggle' && !simple();
   // ...and the slow lesson's flag comes back off the disk with it, so a run
   // abandoned halfway through that lesson is taught it again rather than
   // silently skipped for the rest of the browser session.
@@ -8843,7 +9064,7 @@ function initHall() {
   resetSimpleState();
   tutorLegsBuilt = 0;
   tutorResetWorld();   // whatever the last run left, gone — teaching or not
-  game.wave = 1;
+  game.wave = door;
   game.state = 'intro';
   game.stateT = 0;
   game.introLen = 1.6;
@@ -8853,14 +9074,15 @@ function initHall() {
   // widens — so "deeper" is a longer walk before the next door as well as a
   // busier one, and the two grow on different schedules. `legInDoor` is which
   // of them you are standing in; only the last one counts as the door.
-  hall = { legs: [], grid: new Set(), cur: 0, doorsPassed: 0, checkpoint: { x: 0, z: 0 },
-    legInDoor: 0, legsThisDoor: doorLegs(1), mem: newRunMemory(archive) };
-  hall.legs.push(buildHallLeg(0, 0, forced(composeProtocol(1, lifetimeDoors, hall.mem))));
+  hall = { legs: [], grid: new Set(), cur: 0, doorsPassed: door - 1,
+    checkpoint: { x: 0, z: 0 },
+    legInDoor: 0, legsThisDoor: doorLegs(door), mem: newRunMemory(archive) };
+  hall.legs.push(buildHallLeg(0, 0, forced(composeProtocol(door, lifetimeDoors, hall.mem))));
   recordMetProto(hall.legs[0].proto);   // leg 1 counts too; only 2+ used to
   applyLegVisibility(true);             // leg 1 starts in its own weather
   recordMet(['pistol']);                // it is already in your hand
   rebuildHallObstacles();
-  game.spawnQueue = hallWave(1);
+  game.spawnQueue = hallWave(door);
   game.spawnTimer = 0.5;
   player.pos.set(0, 0, 0);
   player.vel.set(0, 0, 0);

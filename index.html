@@ -525,6 +525,16 @@
   .slot .sbtn { flex:1; text-align:center; padding:7px 0; border:2px solid rgba(22,24,29,.32);
             border-radius:999px; font-size:10px; font-weight:900; letter-spacing:.14em; }
   .slot .sbtn.red { border-color:#ff2d1a; color:#ff2d1a; }
+  /* DELETE is not styled like CONTINUE. It is the one irreversible thing on
+     this screen, so it recedes until it is asked for and only then goes red. */
+  .slot .sbtn.del { border-color:rgba(22,24,29,.18); color:#5b616c; flex:0 0 78px; }
+  .slot .sbtn.delno { flex:0 0 78px; }
+  .snone { font-size:11px; letter-spacing:.1em; color:#5b616c; text-align:center;
+            padding:14px 4px; }
+  .sbtn.addsave { display:block; text-align:center; padding:9px 0;
+            border:2px dashed rgba(22,24,29,.28); border-radius:999px;
+            font-size:10px; font-weight:900; letter-spacing:.14em; }
+  .sbtn.addsave.off { color:#9aa0aa; border-style:solid; }
   .askq { font-size:12px; letter-spacing:.08em; margin:2px 0 10px; color:#3d434c; }
   #askNever { display:flex; align-items:center; gap:8px; margin-top:10px;
             font-size:10px; letter-spacing:.14em; color:#5b616c; }
@@ -612,6 +622,17 @@
            max-width:min(340px, 86vw); }
   /* long labels (the retry copy) shrink rather than bursting the pill */
   .btn-1.long { font-size:12px; letter-spacing:.16em; padding:15px 26px; }
+  /* CONTINUE carries a second line naming the save and the door it resumes,
+     so the player knows what they are about to walk back into before they
+     tap it rather than after. */
+  /* COLUMN, because .btn is an inline-FLEX row: a `display:block` child of a
+     flex container is still a flex item and sat on the same line, so the two
+     lines read as one run-on label. */
+  .btn-1.two { padding:13px 30px; line-height:1.05;
+            flex-direction:column; white-space:normal; }
+  .btn-1 .gosub { margin-top:6px; font-size:9.5px;
+            font-weight:800; letter-spacing:.16em; opacity:.75; }
+  #newrun { display:none; margin-top:9px; }
   .btn-2 { padding:12px 20px; font-size:11px; letter-spacing:.2em;
            color:#16181d; border:2px solid #16181d; background:rgba(238,240,243,.62); }
   .btn-3 { padding:9px 16px; font-size:9.5px; letter-spacing:.22em;
@@ -723,6 +744,7 @@
   <h1>TIME<br><em>SHATTER</em></h1>
   <div class="sub">STOP TIME. SHATTER THEM ALL.</div>
   <div class="go btn btn-1">PLAY</div>
+  <div class="btn btn-2" id="newrun">NEW RUN</div>
   <div id="altwrap">
     <span class="mlabel">OTHER MODES</span>
     <div class="mrow" id="altrow"></div>
@@ -791,7 +813,7 @@
 </div>
 
 <div id="saves"><div class="htpcard">
-  <h3>SAVE SLOTS</h3>
+  <h3>SAVES</h3>
   <div id="slotlist"></div>
   <div class="pbtn" id="savesclose">CLOSE</div>
 </div></div>
