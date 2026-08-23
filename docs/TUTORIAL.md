@@ -60,7 +60,7 @@ control is deferred past the whole onboarding — see `docs/TUTORIAL-GOALS.md`
 ## The second course — slow time
 
 Entered mid-run, on the door the speed staircase unlocks the power on
-(`unlockDoor()` in `src/balance.js`; door 81 on the shipped numbers). Six steps,
+(`unlockDoor()` in `src/balance.js`; door 46 on the shipped numbers). Six steps,
 in `DEFERRED` in `src/tutorial.js`:
 
 | step | what the player sees | ends when |

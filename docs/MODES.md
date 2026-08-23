@@ -1,15 +1,18 @@
 # Modes
 
-Five. The list lives in `src/modes.js` — the menu's OTHER MODES row and the
-MODES section in Settings are both rendered from it, so a mode cannot exist
-in one place and not the other, and its one-line description cannot say two
-different things (`docs/PILLARS.md` §7).
+Five. The list lives in `src/modes.js` — the menu's `CHOOSE A GAME` picker
+and the MODES section in Settings are both rendered from it, so a mode cannot
+exist in one place and not the other, and its one-line description cannot say
+two different things (`docs/PILLARS.md` §7).
+
+The menu shows **one game at a time**, named on a single button; the picker
+behind it is where the others live. See `docs/SAVES.md`.
 
 **The main game first, then the rest in the order they were built.**
 
 | Mode | Built | What you do |
 |---|---|---|
-| **THE TUNNEL** | 3rd | Door to door, deeper each time. The main game; PLAY starts it. |
+| **THE TUNNEL** | 3rd | Door to door, deeper each time. The main game; a first launch opens on it. |
 | **CITY STREETS** | 1st | Endless waves in the white city — the original arena. |
 | **RUSH HOUR** | 2nd | Freeze the crowd, find the one face that matters, walk out. |
 | **CORRIDOR DUEL** | 4th | They come to you. Drag to sidestep, tap them to shatter. |
@@ -24,9 +27,9 @@ and newest-first would reshuffle the list every time we prototype. So it
 reads as *here is the game, and here is everything else we have tried,
 oldest first*, which is what it is.
 
-`main: true` is what puts a mode at the top, and it is also what PLAY starts
-and what the OTHER MODES row leaves out — one flag, so those three cannot
-disagree.
+`main: true` is what puts a mode at the top of both lists, and it is also the
+game a first launch opens on — `DEFAULT_MODE` in `main.js` reads it rather
+than naming a mode itself, so those two cannot disagree.
 
 ---
 

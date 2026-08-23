@@ -123,7 +123,7 @@ have a staircase, a school or an unlock:
 Slow time is not unlocked on a door number somebody picked. It is unlocked by
 the **speed reaching `SPEED.unlockM`** — the point at which walking out of a
 round stops being enough — and `unlockDoor()` solves the staircase for the door
-that happens on. On the shipped numbers that is **door 81**. Everything keys off
+that happens on. On the shipped numbers that is **door 46**. Everything keys off
 that one answer: the button, the meter, the STAND HERE corridor that teaches it,
 and the school that follows. Move any tread and the whole lesson moves with it,
 because none of them carries a number of its own.
@@ -131,11 +131,16 @@ because none of them carries a number of its own.
 There used to be a hand-typed `TIME.unlockDoor` here, and it could — and did —
 drift out of step with the speed it was supposed to be answering.
 
-**Door 81 is a long way in — far enough that this is the one number in here
-worth arguing about.** It is simply what the treads add up to: 36 steps of 0.2
-from 5.8, two doors each. `unlockM` is 13 because that is what the old ramp
-topped out at (16 × 0.79 = 12.64), so it is the speed the power was implicitly
-balanced against before any of this existed.
+**It is simply what the treads add up to**: 36 steps of 0.2 from 5.8, one door
+each. `unlockM` is 13 because that is what the old ramp topped out at
+(16 × 0.79 = 12.64), so it is the speed the power was implicitly balanced
+against before any of this existed.
+
+<!--door-ok-->`stepDoors` was **2**, which put the unlock on door 81 — at roughly a minute a
+door, about an hour of play before the core mechanic of the game appears at
+all. Halving the tread WIDTH rather than doubling its HEIGHT was the fix worth
+making: every step is the same size underfoot as it was, the staircase just
+stops spending two doors on each.
 
 At roughly a minute a door that is about an hour of play before the core
 mechanic appears, and most players will never see it. Nothing about the speed
@@ -265,9 +270,9 @@ him. `forced()` pins the form.
 | 100 | 5 | 13 | `2+2+3+3+3` | 12 | 14.0 | 0.28 |  |
 
 <!--door-ok-->Bold doors are the ones where something moved. (Every door 1–30,
-then samples, then every door of the school.) **Doors 81–90 are the school**: the body counts
+then samples, then every door of the school.) **Doors 46–55 are the school**: the body counts
 there are the school's floor — a volley plus a spare, per leg — not the ramp's
-own answer, which is why door 91 drops back.
+own answer, which is why the door after it drops back.
 
 ### What it replaced, and what it costs
 
@@ -279,11 +284,11 @@ thing this ramp exists to remove.
 
 What it costs, and it is worth saying plainly:
 
-* **The deep game is much less dense than it was.** Door 40 is eight bodies
+* <!--door-ok-->**The deep game is much less dense than it was.** Door 40 is eight bodies
   across five legs where the old curve capped at thirty in one. Depth is now
   long before it is crowded.
-* **Door 91 is a drop.** The school holds twenty bodies a door; the ramp resumes
-  at thirteen. That is deliberate — it reads as relief on the far side of the
+* **The door after the school is a drop.** The school holds twenty bodies a
+  door; the ramp resumes at thirteen. That is deliberate — it reads as relief on the far side of the
   hardest stretch in the game, with a new power in hand — but it is a step
   down, not up.
 * **The telegraph ramp and the speed staircase no longer finish together, and
@@ -467,10 +472,10 @@ by `1 + rushT / 25`, so everything ramps on the run clock instead.
 | door 1 | 5.4 | 1.15× | 0.55× |
 | door 6 | 5.8 | 0.975× | 0.675× |
 | door 10 | 5.8 | 0.835× | 0.775× |
-| door 19 | 6.8 | 0.52× | 1× |
-| door 81 | 13 | 0.52× | 1× |
+| door 19 | 7.6 | 0.52× | 1× |
+| door 46 | 13 | 0.52× | 1× |
 
-Slow time unlocks on **door 81**, where the staircase reaches
+Slow time unlocks on **door 46**, where the staircase reaches
 13 m/s; it holds there for the 10-door
 school and then climbs again to a ceiling of 21.6 m/s. Rush Hour
 drains the bank at a flat 0.4×. An enemy must be in view for

@@ -69,15 +69,20 @@ export const SPEED = {
   holdM: 5.8,          // ...one tread up, held just as long
   holdDoors: 5,
   stepM: 0.2,          // ...then a tread this tall
-  stepDoors: 2,        // ...every this many doors
+  stepDoors: 1,        // ...every this many doors. ONE, not two: at two the
+                       // staircase took 81 doors to reach `unlockM`, which is
+                       // about an hour of play before slow time — the game's
+                       // whole identity — appears at all. Halving the tread
+                       // WIDTH rather than doubling its HEIGHT keeps every
+                       // step the same size underfoot and just stops spending
+                       // two doors on each.
   // WHERE THE POWER LANDS. Not a door number — a speed. `unlockDoor()` below
   // solves for the door the staircase reaches it on, and the STAND HERE
   // corridor, the time button and the meter all key off that one answer, so
   // dragging any tread above moves the whole lesson with it.
   // 13 m/s: the speed the OLD ramp topped out at (16 x 0.79 = 12.64), which is
   // the number the power was implicitly balanced against before any of this.
-  // Lands on door 81 — see docs/BALANCE.md on why that is a long way in and
-  // which tread to drag if it should be sooner.
+  // Lands on door 46 — see docs/BALANCE.md for the solve.
   unlockM: 13,
   schoolDoors: 10,     // ...and the staircase holds there for this many doors
                        // while slow time is taught. See SCHOOL.

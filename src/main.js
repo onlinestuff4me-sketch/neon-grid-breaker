@@ -4611,17 +4611,35 @@ function onPointerDown(ev) {
       }
       if (ev.target.closest('#scores') || ev.target.closest('.rules')) return;   // reading
     }
-    // OTHER MODES: one handler for the whole row, whatever is in it, because
-    // the row is rendered from the registry rather than written out in the
+    // CHOOSE A GAME: the button says which one, and opens the list.
+    if (game.state === 'menu' && ev.target && ev.target.closest
+        && ev.target.closest('#modebtn')) {
+      openModePick();
+      return;
+    }
+    // ...and one handler for the whole list, whatever is in it, because the
+    // list is rendered from the registry rather than written out in the
     // markup. A mode is added in src/modes.js and nowhere else.
     const mbtn = game.state === 'menu' && ev.target && ev.target.closest
-      && ev.target.closest('#altrow [data-mode]');
+      && ev.target.closest('#picklist [data-mode]');
     if (mbtn) {
       // SELECT, do not launch. This used to start a run on the tapped mode
       // immediately, which meant the only way into City Streets was a button
       // that skipped past its own saves — the mode with the leaderboard on it
       // could not be continued at all.
       selectMenuMode(mbtn.dataset.mode);
+      closeModePick();
+      return;
+    }
+    if (game.state === 'menu' && ev.target && ev.target.closest
+        && ev.target.closest('#modepickclose')) {
+      closeModePick();
+      return;
+    }
+    // a tap on the picker's backdrop closes it rather than falling through to
+    // the menu underneath, which would read as "I meant to start a run"
+    if (el.modepick && el.modepick.style.display === 'flex') {
+      closeModePick();
       return;
     }
     // on the main menu only TAP TO BEGIN starts a run — a stray tap right
@@ -5860,7 +5878,13 @@ const game = {
 const MAX_SAVES = 6;       // per mode: enough for a shared phone, few to scan
 const MAX_SLOTS = 40;      // ...and a ceiling on the pool they are drawn from
 const SAVES_KEY = 'ts_saves';
-const DEFAULT_MODE = 'hall';
+// THE GAME A FIRST LAUNCH SHOWS, read off the registry rather than typed here.
+// `main: true` had stopped meaning anything at all: it used to be what the
+// OTHER MODES row left out and what Settings marked as current, and both of
+// those now key off the SELECTED mode instead. A flag nothing reads is a lie
+// waiting to happen, so it has the one job left that is genuinely registry
+// business — which of the five is the game.
+const DEFAULT_MODE = (MODES.find((m) => m.main) || MODES[0]).id;
 const slotKey = (i, k) => `ts_s${i}_${k}`;
 // A SAVE'S NAME IS TYPED BY A PERSON and is interpolated into four different
 // pieces of innerHTML. Unescaped, a name of `<div style="display:none">` hid
@@ -6529,24 +6553,36 @@ function beginNewGame(i, withTutorial) {
 }
 
 // ---------------------------------------------------------------------------
-// THE MODE LISTS. Both of them, from one registry.
-//
-// The menu's OTHER MODES row is the shortcut; the MODES section in Settings
-// is the catalogue that says what each one actually is. Neither knows what
-// modes exist — src/modes.js does.
+// THE MODE LISTS, from one registry. Neither knows what modes exist —
+// src/modes.js does.
 // ---------------------------------------------------------------------------
-// EVERY MODE, INCLUDING THE MAIN ONE, because this row is a SELECTOR now
-// rather than a launcher. It used to leave the tunnel out on the grounds that
-// PLAY already started it — true when tapping a row started a run, and wrong
-// the moment the row decides what the page is about: with the tunnel missing
-// there was no way back to it once you had selected something else.
+// ONE BUTTON, NAMING ITS OWN ANSWER. The menu used to lay all five games out
+// as chips. That is five things to READ before the one thing to DO, on a
+// screen whose job is to start the game — and at their full names the chips
+// were about 760 px wide in a 402 px viewport, so the row had to wrap into
+// three lines of alternatives stacked above the leaderboard. Choosing a game
+// is a rare act with a short answer, so the control collapses to that answer
+// and the alternatives live one tap behind it.
 function renderAltRow() {
-  if (!el.altrow) return;
-  el.altrow.innerHTML = MODES
-    .map((m) => `<div class="btn btn-2${m.id === menuMode ? ' on' : ''}" `
-      + `data-mode="${m.id}">${m.name}</div>`).join('');
-  if (el.altlabel) el.altlabel.textContent = 'CHOOSE A GAME';
+  if (!el.modebtn) return;
+  // NBSP: `.btn` is an inline-flex row, so the label and the name are separate
+  // flex items and the trailing space of "MODE: " is trimmed away.
+  el.modebtn.innerHTML = `MODE:&nbsp;<b>${escHtml(modeName(menuMode))}</b>`;
 }
+// EVERY MODE, INCLUDING THE MAIN ONE. The old row left the tunnel out on the
+// grounds that PLAY already started it — true when tapping a row started a
+// run, and wrong the moment the list decides what the page is about: with the
+// tunnel missing there was no way back to it once you had chosen something
+// else. Each row carries the mode's one line, because a name alone does not
+// tell anybody what STAND STILL is.
+function renderModePick() {
+  if (!el.picklist) return;
+  el.picklist.innerHTML = MODES.map((m) =>
+    `<div class="moderow2${m.id === menuMode ? ' cur' : ''}" data-mode="${m.id}">`
+    + `<b>${m.name}</b><span>${m.line}</span></div>`).join('');
+}
+function openModePick() { renderModePick(); el.modepick.style.display = 'flex'; }
+function closeModePick() { if (el.modepick) el.modepick.style.display = 'none'; }
 // SELECTING A MODE CHANGES THE PAGE, and starts nothing. Its name, its one
 // line, its CONTINUE, its saves, the world behind the menu and the board all
 // belong to the mode you are looking at — which is the whole point of a menu
@@ -8149,7 +8185,9 @@ const el = {
   saves: document.getElementById('saves'),
   newrun: document.getElementById('newrun'),
   saveinfo: document.getElementById('saveinfo'),
-  altlabel: document.getElementById('altlabel'),
+  modebtn: document.getElementById('modebtn'),
+  modepick: document.getElementById('modepick'),
+  picklist: document.getElementById('picklist'),
   slotlist: document.getElementById('slotlist'),
   askTut: document.getElementById('askTut'),
   askNeverBox: document.getElementById('askNeverBox'),
@@ -8174,7 +8212,6 @@ const el = {
   archmeta: document.getElementById('archmeta'),
   menurow: document.getElementById('menurow'),
   moderow: document.getElementById('moderow'),
-  altrow: document.getElementById('altrow'),
   modelist: document.getElementById('modelist'),
   modenote: document.getElementById('modenote'),
   altwrap: document.getElementById('altwrap'),
@@ -8356,6 +8393,7 @@ function showMenu() {
   el.moderow.style.display = 'flex';
   el.altwrap.style.display = '';
   renderAltRow();
+  closeModePick();   // never carried back from wherever it was left open
   for (const d of document.querySelectorAll('.mdiv')) d.style.display = '';
   menuBackdrop();
   renderScores();

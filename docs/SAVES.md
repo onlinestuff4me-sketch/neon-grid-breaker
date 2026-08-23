@@ -13,8 +13,9 @@ A save belongs to **one mode**. The tunnel's runs are not in the city's list,
 `CONTINUE` in the city never offers a tunnel run, and starting a city game does
 not disturb the tunnel save you were on. `MAX_SAVES` is per mode.
 
-The menu is therefore a **page about one game at a time**. `CHOOSE A GAME`
-selects which:
+The menu is therefore a **page about one game at a time**. One button —
+`MODE: THE TUNNEL` — names the game it is showing, and opens the list that
+changes it:
 
 | what selecting a game changes |
 |---|
@@ -38,10 +39,21 @@ menu for a game that is gone.
 > which it used to leave out; without it there was no way back to the tunnel
 > once you had selected something else.
 >
-> It also **wraps**. Five games at their full names are ~760 px of chips, and a
-> centred non-wrapping flex row that wide in a 402 px viewport puts the first
-> and last games off *both* edges of the screen with nothing to scroll —
-> `THE TUNNEL` among them.
+> The five games were **chips laid out on the start screen** before that,
+> which is five things to READ before the one thing to DO — on the screen
+> whose whole job is to start the game. At their full names they were about
+> 760 px wide in a 402 px viewport, so the row had to wrap into three lines of
+> alternatives stacked above the leaderboard. Choosing a game is a rare act
+> with a short answer, so the control collapses to that answer and the
+> alternatives live one tap behind it.
+>
+> Each row in the list carries the mode's **one line**, not just its name.
+> Nothing about "STAND STILL" tells you what it is, which is what made the
+> chips a worse list and not merely a busier one.
+>
+> The picker cannot be opened over a live run. Switching games under one would
+> throw it away without saying so, and the pause menu's `END RUN` is where
+> that decision belongs.
 
 ## Two buttons on the menu, one page behind the second
 
@@ -264,7 +276,8 @@ the menu.
 | a save's identity | `stampSave` / `saveIdFor` |
 | renaming, and what a blank name means | `commitSaveName` / `closeSaveInfo` |
 | which game the menu is showing | `menuMode` / `selectMenuMode` |
-| the game selector row | `renderAltRow`, `#altrow` in `index.html` |
+| the button that names the game | `renderAltRow`, `#modebtn` in `index.html` |
+| the list behind it | `renderModePick` / `openModePick`, `#modepick` |
 | the world behind the menu | `menuBackdrop` / `menuIsCity` |
 | the default name of a save | `saveName` |
 | what a run is worth, and what it is called | `recordRun` / `scoreUnit` / `unit` in `src/modes.js` |

@@ -514,7 +514,7 @@
   #timebtn.arrive { animation:tbarrive .62s cubic-bezier(.2,1.4,.4,1) both; }
 
   /* ---- save slots ---- */
-  #saves, #askTut { position:fixed; inset:0; z-index:14; display:none;
+  #saves, #askTut, #modepick { position:fixed; inset:0; z-index:14; display:none;
             align-items:center; justify-content:center; background:rgba(22,24,29,.45); }
   /* above the list it was opened from, so BACK returns to it rather than to
      the menu */
@@ -663,15 +663,16 @@
   .btn-1 .gosub { margin-top:6px; font-size:9.5px;
             font-weight:800; letter-spacing:.16em; opacity:.75; }
   #newrun { display:none; margin-top:9px; }
-  /* the selected game, in the row that chooses one */
-  #altrow .btn-2.on { border-color:#ff2d1a; color:#ff2d1a; }
-  /* WRAPS, because it is a selector and not a shortcut. Five games at their
-     full names are ~760 px of chips; a centred non-wrapping flex row that wide
-     in a 402 px viewport puts the FIRST and LAST games off both edges of the
-     screen with no way to reach them — THE TUNNEL, the main game, among them.
-     Wrapping keeps every game tappable on the narrowest phone we support. */
-  #altrow { flex-wrap:wrap; max-width:356px; gap:8px; }
-  #altrow .btn-2 { padding:10px 14px; font-size:10px; letter-spacing:.16em; }
+  /* ONE BUTTON, NAMING THE GAME. Five chips laid out on the start screen were
+     five things to read before the one thing to do, and at their full names
+     they were ~760 px wide in a 402 px viewport — so the row had to wrap into
+     three lines of alternatives sitting above the leaderboard. The choice is
+     rare and the answer is short, so it collapses to its own answer and the
+     alternatives live one tap away. */
+  #modebtn { padding:10px 18px; font-size:10px; letter-spacing:.18em;
+            color:#6b717a; border-color:rgba(22,24,29,.3);
+            background:rgba(238,240,243,.5); }
+  #modebtn b { font-weight:900; letter-spacing:.16em; color:#16181d; }
   .btn-2 { padding:12px 20px; font-size:11px; letter-spacing:.2em;
            color:#16181d; border:2px solid #16181d; background:rgba(238,240,243,.62); }
   .btn-3 { padding:9px 16px; font-size:9.5px; letter-spacing:.22em;
@@ -682,6 +683,16 @@
             text-shadow:0 0 10px rgba(232,234,238,.95); }
   .mdiv { width:min(292px, 82vw); height:1px; background:rgba(22,24,29,.13); }
   #altwrap { display:flex; flex-direction:column; align-items:center; gap:11px; }
+  /* the picker's rows are the settings catalogue's rows — one look for one
+     list, wherever it is opened from */
+  #picklist { width:246px; margin:6px 0 12px; }
+  /* `.moderow2` carries a -10px side margin so it can bleed past the SETTINGS
+     card's text column. Here the list IS the column, and that bleed pulled
+     every row ten pixels left of centre inside a centred card. */
+  #picklist .moderow2 { width:100%; margin:0; padding:10px 12px;
+            background:rgba(22,24,29,.05); }
+  #picklist .moderow2 + .moderow2 { margin-top:6px; }
+  #picklist .moderow2.cur { box-shadow:inset 0 0 0 2px #ff2d1a; }
   /* how-to + settings ride tier 3 (.btn-3) */
   #sndbtn { width:38px; height:38px; border-radius:50%;
             display:flex; align-items:center; justify-content:center; color:#7a8089;
@@ -785,8 +796,7 @@
   <div class="go btn btn-1">PLAY</div>
   <div class="btn btn-2" id="newrun">LOAD GAME</div>
   <div id="altwrap">
-    <span class="mlabel" id="altlabel">CHOOSE A GAME</span>
-    <div class="mrow" id="altrow"></div>
+    <div class="btn btn-2" id="modebtn">MODE: THE TUNNEL</div>
   </div>
   <div class="mdiv"></div>
   <div id="scores"></div>
@@ -850,6 +860,11 @@
   </div>
 </div>
 
+<div id="modepick"><div class="htpcard">
+  <h3>CHOOSE A GAME</h3>
+  <div id="picklist"></div>
+  <div class="pbtn" id="modepickclose">CLOSE</div>
+</div></div>
 <div id="saves"><div class="htpcard">
   <h3>SAVES</h3>
   <div id="slotlist"></div>

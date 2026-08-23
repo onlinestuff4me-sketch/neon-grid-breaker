@@ -1,10 +1,10 @@
 // ---------------------------------------------------------------------------
 // THE MODE REGISTRY — every mode the game can start.
 //
-// One list, two readers: the menu's OTHER MODES row and the MODES section in
-// Settings both render from this, so a mode cannot exist in one and not the
-// other, and its one-line description cannot say two different things in two
-// places (docs/PILLARS.md §7).
+// One list, two readers: the menu's CHOOSE A GAME picker and the MODES
+// section in Settings both render from this, so a mode cannot exist in one
+// and not the other, and its one-line description cannot say two different
+// things in two places (docs/PILLARS.md §7).
 //
 // ORDER: the main game first, then the rest in the order they were built.
 //
@@ -17,9 +17,9 @@
 // time we prototype. So the list reads as "here is the game, and here is
 // everything else we have tried, oldest first", which is what it is.
 //
-// `main: true` is what puts a mode at the top, and it is also what PLAY
-// starts and what the OTHER MODES row leaves out. One flag, so those three
-// cannot disagree.
+// `main: true` is what puts a mode at the top of both lists, and it is also
+// the game a first launch opens on (`DEFAULT_MODE` in main.js reads it). One
+// flag, so those two cannot disagree.
 //
 // `line` is one line. It is the whole description a player gets, so it says
 // what you DO, not what the mode is about.
