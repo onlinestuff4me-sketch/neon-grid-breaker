@@ -158,13 +158,42 @@ random every time the panel opens.
 > without that, a save made seconds earlier reported its creation date as
 > unknown.
 
+## The world behind the menu is the game's too
+
+The attract fight read `game.mode` — what was last **played** — so it never
+followed the selector at all: Rush Hour's crowd could not appear behind Rush
+Hour's own menu, and every game got the arena's cast. It reads `menuMode` now,
+`DEMO_CAST` gives each game its own roster, and Rush Hour keeps a street full
+of silhouettes instead of a firefight.
+
+The corridor games are shown **from inside a corridor**. The attract camera
+orbits a ghost at radius 12, which is outside the walls of a 3 m corridor and
+renders their backs — the tunnel's menu was three flat grey planes. In a
+corridor mode the camera sits on the spine at eye height and looks down it,
+which is the shot the game gives you with the gun taken out of it.
+
+`buildMenuHall()` builds the one leg that shot needs, because
+`setEnvironment('hall')` only hides the city — it does not make a corridor,
+and a first launch had four enemies floating in an empty fog void.
+
+> That needed `clearHall()`, which is also a **leak fix**. Tearing a corridor
+> down lived inline in `setEnvironment`'s city branch and ran nowhere else.
+> During a run a leg is retired two doors back, but the last one or two legs
+> of a FINISHED run were never removed — `initHall` built a new `hall` over
+> the top of them — so every tunnel run left its corridor in the scene for the
+> rest of the session. `backdrop.js` §4 is the assertion.
+
 ## The board is the game's too
 
-Runs are filed **per slot**, and a slot belongs to one game, so `TOP RUNS`
-under the menu is already the selected game's board. `recordRun` used to return
-early unless the mode was `wave` — fine when the city was the only place a run
-meant anything, and the reason **the main game's board was permanently empty**.
-Every mode files its runs now.
+Runs are filed **per slot**, and the board is the union of every slot of the
+selected mode, deduped by the run's own `id`. Reading only the most recent
+save's meant **NEW GAME wiped the leaderboard**: a door-40 run still on disk
+under the save next to it simply stopped being on it. "Your best runs in this
+game" is the question, and every save of the game answers it.
+
+`recordRun` used to return early unless the mode was `wave` — fine when the
+city was the only place a run meant anything, and the reason **the main game's
+board was permanently empty**. Every mode files its runs now.
 
 Each mode declares what one step of progress is **called** — `unit` in
 `src/modes.js`: `DOOR` for the tunnel, `WAVE` for City Streets, `ROUND` for the
@@ -285,7 +314,8 @@ the menu.
 | which game the menu is showing | `menuMode` / `selectMenuMode` |
 | the button that names the game | `renderAltRow`, `#modebtn` in `index.html` |
 | the list behind it | `renderModePick` / `openModePick`, `#modepick` |
-| the world behind the menu | `menuBackdrop` / `menuIsCity` |
+| the world behind the menu | `menuBackdrop` / `menuIsCity` / `buildMenuHall` |
+| the attract fight behind the title | `demoMode` / `DEMO_CAST` / `demoCorridor` |
 | the default name of a save | `saveName` |
 | what a run is worth, and what it is called | `recordRun` / `scoreUnit` / `unit` in `src/modes.js` |
 | the whole surface, tested | `saves.js` in the harness |

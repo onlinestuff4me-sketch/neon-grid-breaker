@@ -178,9 +178,10 @@ This is the only place that answer exists.
 
 | Field | What to put |
 |---|---|
-| **Subtitle** (30 chars) | This does the work you wanted the name to do. `Stop time. Shoot. Shatter.` (26) or `Freeze time, clear the floor` (28). It appears under the name in search results and is the main thing that tells a browser what the game is. |
+| **Subtitle** (30 chars) | **`Stop time. Shoot. Shatter.`** (26). This does the work you wanted the name to do: it appears under the name in search results and is the main thing that tells a browser what the game is. It is also the line under the title on the game's own start screen and the first sentence of the `manifest.json` description — one phrase, so what somebody reads in search is what they read when the game opens. Change it in all three or in none. (The runner-up was `Freeze time, clear the floor`, 28.) |
+| **Description** — first line | `Stop time. Shoot. Shatter. A first-person time-manipulation arcade shooter.` The second sentence is for the places with room for it — the store listing and the manifest. It is deliberately **not** on the game's start screen, which wants one line under the title and nothing else. |
 | **Promotional text** (170) | Editable without a new build — use it for what's new. |
-| **Description** | Lead with the mechanic in the first two lines; that's all that shows before "more". |
+| **Description** — body | Lead with the mechanic; only the first two lines show before "more", and the row above is those lines. |
 | **Keywords** (100, comma-separated, no spaces) | `slowmo,bullet time,fps,shooter,arcade,time,reflex,one hit,roguelike,portrait` — don't repeat words from the name or subtitle, they're already indexed. |
 | **Support URL** | Required. `littlebearlabs.com/support` |
 | **Marketing URL** | `timeshatter.app` |

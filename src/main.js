@@ -6171,13 +6171,19 @@ function fmtWhen(t) {
 // metric is dropped rather than ranking every run equal-first.
 function scoreUnit() { return unitOf(menuMode); }
 function renderScores() {
-  // THE BOARD BELONGS TO THE GAME THE MENU IS SHOWING, so it reads that game's
-  // most recent save rather than whatever slot is active. Selecting a mode
-  // with no saves of its own leaves slotIx where it was, and the board then
-  // presented the PREVIOUS game's runs under this game's heading.
-  const src = latestSave();
-  // only real, complete runs make the table — no placeholder rows
-  const display = (src ? loadRuns(src.i) : []).filter((r) => r.w != null && r.k != null && r.at);
+  // THE BOARD BELONGS TO THE GAME, NOT TO ONE SAVE OF IT. Runs are stored per
+  // slot, and reading only the most recent save's meant starting a NEW GAME
+  // wiped the board: a door-40 run still on disk under the save next to it
+  // simply stopped being on the leaderboard. "Your best runs in this game" is
+  // the question, so every save of this mode answers it — deduped by `id`,
+  // because that is the run's own identity and a save could in principle be
+  // read twice while the index is being repaired.
+  const seen = new Set();
+  const display = savesByRecent()
+    .flatMap((e) => loadRuns(e.i))
+    // only real, complete runs make the table — no placeholder rows
+    .filter((r) => r && r.w != null && r.k != null && r.at)
+    .filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)));
   if (!display.length) {   // nothing to show until you've played
     el.scores.style.display = 'none';
     return;
@@ -6608,7 +6614,12 @@ const menuIsCity = (id) => id === 'wave' || id === 'rush';
 // the five are city games and three are corridors, and putting the wrong one
 // behind a CTA for the other is a small lie the menu does not need to tell.
 function menuBackdrop() {
-  setEnvironment(menuIsCity(menuMode) ? 'city' : 'hall');
+  const corridor = !menuIsCity(menuMode);
+  setEnvironment(corridor ? 'hall' : 'city');
+  // ...and if this launch has never built one, build the one leg the menu
+  // stands in. setEnvironment('hall') only hides the city; it does not make
+  // a corridor.
+  if (corridor && !hall) buildMenuHall();
 }
 
 // `live` = opened from the main menu, where a tap can start a run. From the
@@ -8099,6 +8110,25 @@ let gunRiseT = 0;   // seconds left of the weapon's rise into frame
 let tutorPrevX = 0, tutorPrevZ = 0, tutorPrevYaw = 0;
 
 let demoT = 0, demoSpawnT = 0.3, demoKillT = 4;   // menu attract-mode clocks
+// THE ATTRACT FIGHT BELONGS TO THE GAME THE MENU IS SHOWING. It read
+// `game.mode` — what was last PLAYED — so it never followed the selector at
+// all: Rush Hour's crowd could not appear behind Rush Hour's own menu, and
+// every mode got the arena's cast.
+const demoMode = () => (game.state === 'menu' ? menuMode : game.mode);
+// The cast each game fields, which is not the same as its wave composer:
+// `composeWave` and `hallWave` both want a live run, and this is a shop
+// window four bodies deep.
+const DEMO_CAST = {
+  hall: ['gunner', 'gunner', 'shotgunner', 'heavy', 'shieldbearer'],
+  wave: ['gunner', 'gunner', 'shotgunner', 'heavy', 'bomber', 'rusher', 'shieldbearer'],
+  rush: ['gunner'],
+  duel: ['gunner', 'gunner', 'rusher'],
+  stop: ['gunner', 'gunner', 'rusher'],
+};
+// The corridor games are shown FROM INSIDE the corridor. Orbiting a ghost at
+// radius 12 puts the camera outside the walls, which is why the tunnel's menu
+// was three flat grey planes and read as nothing at all.
+const demoCorridor = () => (!menuIsCity(demoMode()) && hall && hall.legs[hall.cur]) || null;
 
 // New players were missing the time button entirely. It now re-teaches
 // itself at the start of every wave until it has been used several times.
@@ -8924,15 +8954,40 @@ function setEnvironment(env) {
   scene.fog.color.copy(fogWant.col);
   if (!inHall) { gradeWant = null; condNow = null; gradeK = 0; }   // updateFog hides them next frame
   if (!inHall && hall) {
-    for (const L of hall.legs) {
-      if (!L) continue;
-      for (const m of L.meshes) scene.remove(m);
-      scene.remove(L.door.slab);
-      if (L.seal) scene.remove(L.seal.slab);
-    }
-    hall = null;
+    clearHall();
     setLayout();   // restore the city's obstacles
   }
+}
+
+// EVERY MESH A CORRIDOR PUT IN THE SCENE, TAKEN BACK OUT. This lived inline
+// in setEnvironment's city branch and ran NOWHERE ELSE. During a run a leg is
+// retired two doors back, but the last one or two legs of a FINISHED run were
+// never removed — `initHall` just built a new `hall` over the top of them —
+// so every tunnel run left its final corridor in the scene for the rest of
+// the session.
+function clearHall() {
+  if (!hall) return;
+  for (const L of hall.legs) {
+    if (!L) continue;
+    for (const m of L.meshes) scene.remove(m);
+    scene.remove(L.door.slab);
+    if (L.seal) scene.remove(L.seal.slab);
+    if (L.grind) scene.remove(L.grind.g);
+  }
+  hall = null;
+}
+// ONE LEG, FOR THE MENU TO STAND IN. A corridor mode with no corridor built
+// yet had nothing to show: the hall environment hides the floor and the city,
+// so a first launch got four enemies floating in an empty fog void, and the
+// alternative — falling back to the city — puts CORRIDOR DUEL over a street.
+function buildMenuHall() {
+  clearHall();
+  hall = { legs: [], grid: new Set(), cur: 0, doorsPassed: 0,
+    checkpoint: { x: 0, z: 0 }, legInDoor: 0, legsThisDoor: 1,
+    mem: newRunMemory(archive) };
+  hall.legs.push(buildHallLeg(0, 0, composeProtocol(1, lifetimeDoors, hall.mem)));
+  applyLegVisibility(true);
+  rebuildHallObstacles();
 }
 
 // One corridor leg: forward runs with 90° jogs, plus 1-2 side loops that
@@ -9430,6 +9485,7 @@ function initHall(from = 1) {
   resetSimpleState();
   tutorLegsBuilt = 0;
   tutorResetWorld();   // whatever the last run left, gone — teaching or not
+  clearHall();         // ...including its corridor, which nothing used to remove
   game.wave = door;
   game.state = 'intro';
   game.stateT = 0;
@@ -10514,11 +10570,23 @@ function frame(now) {
   player.roll += (-velRight / MOVE_SPEED * 0.05 - player.roll) * Math.min(dt * 8, 1);
 
   if (game.state === 'menu') {
-    // attract mode: slow orbit around the arena, gun hidden
     gun.visible = false;
-    const a = demoT * 0.07;
-    camera.position.set(Math.sin(a) * 12, 4.2 + Math.sin(demoT * 0.11), Math.cos(a) * 12);
-    camera.lookAt(0, 1.2, 0);
+    const leg = demoCorridor();
+    if (leg) {
+      // IN THE CORRIDOR, AT EYE HEIGHT — the same shot the game gives you,
+      // with the gun taken out of it. An orbit at radius 12 is outside the
+      // walls of a 3 m corridor and shows their backs.
+      camera.position.set(player.pos.x, EYE_HEIGHT, player.pos.z);
+      camera.rotation.order = 'YXZ';
+      camera.rotation.y = player.yaw + Math.sin(demoT * 0.19) * 0.16;
+      camera.rotation.x = Math.sin(demoT * 0.13) * 0.04;
+      camera.rotation.z = 0;
+    } else {
+      // attract mode: slow orbit around the arena
+      const a = demoT * 0.07;
+      camera.position.set(Math.sin(a) * 12, 4.2 + Math.sin(demoT * 0.11), Math.cos(a) * 12);
+      camera.lookAt(0, 1.2, 0);
+    }
   } else {
     gun.visible = tutorMay('gun');
     // the crosshair and the pause button ride with the weapon — see index.html
@@ -10688,12 +10756,34 @@ function frame(now) {
     // ghost target, and every few seconds one of them shatters
     demoT += dt;
     player.iframes = 2;   // the ghost can't die
-    player.pos.set(Math.sin(demoT * 0.23) * 6, 0, Math.cos(demoT * 0.31) * 6);
-    if (enemies.length < 4) {
+    const dm = demoMode();
+    const leg = demoCorridor();
+    if (leg) {
+      // ...and in a corridor the ghost walks the spine rather than circling,
+      // because a circle of radius 6 in a corridor is mostly inside the walls.
+      // ON THE AXIS, not toward the door: a leg's door can be off to one side
+      // after a jog, and drifting at it points the camera into a wall. The
+      // first straight run leaves the origin along +z, which is the shot.
+      const t = Math.sin(demoT * 0.12) * 0.5 + 0.5;
+      player.pos.set(0, 0, 1.5 + t * 5.5);
+      player.yaw = Math.PI;   // the corridor runs +z
+    } else {
+      player.pos.set(Math.sin(demoT * 0.23) * 6, 0, Math.cos(demoT * 0.31) * 6);
+    }
+    // RUSH HOUR IS A CROWD, not a firefight: its whole picture is a street
+    // full of silhouettes with one face that matters somewhere in it.
+    if (dm === 'rush') {
+      while (crowd.length + enemies.length < RUSH.crowd) spawnNPC(true);
+      updateCrowd(sdt);
+    } else if (crowd.length) {
+      clearCrowd();
+    }
+    const cast = DEMO_CAST[dm] || DEMO_CAST.wave;
+    if (enemies.length < (dm === 'rush' ? 2 : 4)) {
       demoSpawnT -= sdt;
       if (demoSpawnT <= 0) {
         game.waveBearing = Math.random() * Math.PI * 2;
-        spawnEnemy(['gunner', 'gunner', 'shotgunner', 'heavy', 'bomber', 'shieldbearer'][Math.floor(Math.random() * 6)]);
+        spawnEnemy(cast[Math.floor(Math.random() * cast.length)]);
         demoSpawnT = 0.9;
       }
     }
@@ -10705,7 +10795,6 @@ function frame(now) {
     }
     for (const e of enemies) updateEnemy(e, sdt);
     updateBullets(sdt);
-    if (game.mode === 'rush') updateCrowd(sdt);
     updateMarks(sdt);
   }
   updateShells(sdt);
