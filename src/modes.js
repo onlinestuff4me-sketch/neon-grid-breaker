@@ -23,27 +23,36 @@
 //
 // `line` is one line. It is the whole description a player gets, so it says
 // what you DO, not what the mode is about.
+//
+// `unit` is what one step of progress is CALLED in that mode, because the
+// leaderboard is per mode and "WAVE 12" is a lie in a game made of doors.
+// `null` means the count does not move there and the board leaves it out
+// rather than ranking everybody equal-first.
 // ---------------------------------------------------------------------------
 
 export const MODES = [
   {
     id: 'hall',
+    unit: 'DOOR',
     name: 'THE TUNNEL',
     line: 'Door to door, deeper each time. The main game.',
     main: true,
   },
   {
     id: 'wave',
+    unit: 'WAVE',
     name: 'CITY STREETS',
     line: 'Endless waves in the white city — the original arena.',
   },
   {
     id: 'rush',
+    unit: null,
     name: 'RUSH HOUR',
     line: 'Freeze the crowd, find the one face that matters, walk out.',
   },
   {
     id: 'duel',
+    unit: 'ROUND',
     name: 'CORRIDOR DUEL',
     line: 'They come to you. Drag to sidestep, tap them to shatter.',
     simple: true,
@@ -52,6 +61,7 @@ export const MODES = [
   },
   {
     id: 'stop',
+    unit: 'ROUND',
     name: 'STAND STILL',
     line: 'Time only moves while you do. Stand still and the world waits.',
     simple: true,

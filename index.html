@@ -529,6 +529,16 @@
   .sirow b { font-size:11px; font-weight:900; letter-spacing:.06em;
             text-align:right; font-variant-numeric:tabular-nums; }
   .sirow b i { font-style:normal; font-weight:700; color:#5b616c; }
+  /* the one editable field on the card; everything else is the file's own
+     account of itself */
+  .sirow.name { padding:5px 2px 7px; }
+  #savename { width:150px; text-align:right; font:inherit; font-size:11px;
+            font-weight:900; letter-spacing:.06em; color:#16181d;
+            background:rgba(22,24,29,.05); border:2px solid rgba(22,24,29,.16);
+            border-radius:7px; padding:5px 8px; }
+  #savename:focus { outline:none; border-color:#ff2d1a; background:#fff; }
+  .sinote { font-size:9px; letter-spacing:.12em; color:#8b919b; text-align:center;
+            margin:2px 0 10px; }
   #slotlist { display:flex; flex-direction:column; gap:8px; width:246px; margin:4px 0 10px; }
   .slot { border:2px solid rgba(22,24,29,.28); border-radius:12px; padding:10px 12px; text-align:left; }
   .slot.on { border-color:#ff2d1a; }
@@ -653,6 +663,15 @@
   .btn-1 .gosub { margin-top:6px; font-size:9.5px;
             font-weight:800; letter-spacing:.16em; opacity:.75; }
   #newrun { display:none; margin-top:9px; }
+  /* the selected game, in the row that chooses one */
+  #altrow .btn-2.on { border-color:#ff2d1a; color:#ff2d1a; }
+  /* WRAPS, because it is a selector and not a shortcut. Five games at their
+     full names are ~760 px of chips; a centred non-wrapping flex row that wide
+     in a 402 px viewport puts the FIRST and LAST games off both edges of the
+     screen with no way to reach them — THE TUNNEL, the main game, among them.
+     Wrapping keeps every game tappable on the narrowest phone we support. */
+  #altrow { flex-wrap:wrap; max-width:356px; gap:8px; }
+  #altrow .btn-2 { padding:10px 14px; font-size:10px; letter-spacing:.16em; }
   .btn-2 { padding:12px 20px; font-size:11px; letter-spacing:.2em;
            color:#16181d; border:2px solid #16181d; background:rgba(238,240,243,.62); }
   .btn-3 { padding:9px 16px; font-size:9.5px; letter-spacing:.22em;
@@ -766,7 +785,7 @@
   <div class="go btn btn-1">PLAY</div>
   <div class="btn btn-2" id="newrun">LOAD GAME</div>
   <div id="altwrap">
-    <span class="mlabel">OTHER MODES</span>
+    <span class="mlabel" id="altlabel">CHOOSE A GAME</span>
     <div class="mrow" id="altrow"></div>
   </div>
   <div class="mdiv"></div>
@@ -839,7 +858,8 @@
 <div id="saveinfo"><div class="htpcard">
   <h3>SAVE DETAILS</h3>
   <div class="sibody"></div>
-  <div class="pbtn" id="saveinfoclose">BACK</div>
+  <div class="sinote">DATES AND IDENTIFIER ARE PART OF THE FILE</div>
+  <div class="pbtn" id="saveinfoclose">SAVE &amp; BACK</div>
 </div></div>
 <div id="askTut"><div class="htpcard">
   <h3>NEW GAME</h3>

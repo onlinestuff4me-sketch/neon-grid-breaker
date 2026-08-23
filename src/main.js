@@ -24,7 +24,7 @@ import { HALL, genHallLeg } from './genleg.js';
 // both rendered from it.
 import { MODES, modeById, isSimple } from './modes.js';
 import { loadTutorial, previewing as tutorPreviewing, NO_GRANTS } from './tutorial.js';
-import { haptic, persist, hydrateStorage, shellSetup, isNative } from './native.js';
+import { haptic, persist, forget, hydrateStorage, shellSetup, isNative } from './native.js';
 
 // ---------------------------------------------------------------------------
 // THE DOOR-TO-DOOR MODES.
@@ -4408,7 +4408,13 @@ function onPointerDown(ev) {
   const inArchScroll = ev.target && ev.target.closest && ev.target.closest('#archlist');
   // ...and the new-game question's checkbox, for the same reason.
   const inAsk = ev.target && ev.target.closest && ev.target.closest('#askNever');
-  if (!inSettings && !inArchScroll && !inAsk) ev.preventDefault();
+  // ...and the save-name field, which is the same problem: preventDefault on
+  // pointerdown suppresses the compatibility mouse event, and with it focus
+  // and the soft keyboard. The `return` further down stops the LIST from
+  // acting on the tap; it cannot un-prevent a default already prevented, so
+  // without this line the field could be rendered and never typed into.
+  const inName = ev.target && ev.target.closest && ev.target.closest('#savename');
+  if (!inSettings && !inArchScroll && !inAsk && !inName) ev.preventDefault();
   sfx.init();
   if (el.settings.style.display === 'flex') {   // settings modal open
     if (inSettings) {
@@ -4447,10 +4453,16 @@ function onPointerDown(ev) {
           }
           return;
         }
+        // SELECT, do not launch — the same thing the menu's own row does.
+        // Starting a run from here set `game.mode` and nothing else: no
+        // `menuMode`, no `slotUse`, no save. The run then wrote its doors,
+        // its best and its runs into whatever slot happened to be active,
+        // so a city game filed itself into a tunnel save; and on a fresh
+        // profile the orphan sweep later adopted that slot as a TUNNEL save
+        // whatever mode had actually been played.
         el.settings.style.display = 'none';
-        game.mode = mrow.dataset.mode;
+        selectMenuMode(mrow.dataset.mode);
         vibrate(12);
-        advanceFromOverlay();
         return;
       }
       if (ev.target.closest && ev.target.closest('#modelink')) {
@@ -4560,6 +4572,7 @@ function onPointerDown(ev) {
       }
       if (ev.target.closest('#newsave.off')) return;   // the list is full
       if (ev.target.closest('#newsave')) { startNewRun(); return; }
+      if (ev.target.closest('#savename')) return;   // typing, not tapping
       const inf = ev.target.closest('#slotlist .info');
       if (inf) { openSaveInfo(parseInt(inf.dataset.i, 10) || 0); return; }
       if (ev.target.closest('#saveinfoclose')) { closeSaveInfo(); return; }
@@ -4604,8 +4617,11 @@ function onPointerDown(ev) {
     const mbtn = game.state === 'menu' && ev.target && ev.target.closest
       && ev.target.closest('#altrow [data-mode]');
     if (mbtn) {
-      game.mode = mbtn.dataset.mode;
-      advanceFromOverlay();
+      // SELECT, do not launch. This used to start a run on the tapped mode
+      // immediately, which meant the only way into City Streets was a button
+      // that skipped past its own saves — the mode with the leaderboard on it
+      // could not be continued at all.
+      selectMenuMode(mbtn.dataset.mode);
       return;
     }
     // on the main menu only TAP TO BEGIN starts a run — a stray tap right
@@ -4617,14 +4633,13 @@ function onPointerDown(ev) {
     // with the list on it, reached by one button.
     if (game.state === 'menu' && ev.target && ev.target.closest
         && ev.target.closest('#newrun')) {
-      game.mode = 'hall';
       openSaves();
       return;
     }
     if (game.state === 'menu' &&
         !(ev.target && ev.target.closest && ev.target.closest('.go'))) return;
     if (game.state === 'menu') {
-      game.mode = 'hall';   // the big button is the tunnel, either way
+      game.mode = menuMode;   // the big button is whatever the page is showing
       const last = latestSave();
       if (last) { continueSave(last.i); return; }
       // Nothing to continue: this IS a new run, and it still needs a save to
@@ -5832,11 +5847,59 @@ const game = {
 // survives untouched; `ts_saves` is simply an index over them — which indices
 // exist, in what order, under what name. Anything not in that index is not a
 // save, which is also how deleting works.
-const MAX_SAVES = 8;        // enough for a shared phone; few enough to scan
+// A SAVE BELONGS TO A MODE. The tunnel, the city, rush hour and the two
+// one-thumb modes are five different games sharing a menu, and a list that
+// mixed them would make you read the mode off every row before you could find
+// the run you meant. So the index carries `mode` and everything — the list,
+// CONTINUE, NEW GAME, the cap — filters on it.
+//
+// The SLOT INDEX stays globally unique across modes, which is what let this
+// change be additive: `ts_s{i}_*` keys are untouched, and an entry written
+// before modes existed is a tunnel save because that is the only mode there
+// was. Nothing on disk had to move.
+const MAX_SAVES = 6;       // per mode: enough for a shared phone, few to scan
+const MAX_SLOTS = 40;      // ...and a ceiling on the pool they are drawn from
 const SAVES_KEY = 'ts_saves';
+const DEFAULT_MODE = 'hall';
 const slotKey = (i, k) => `ts_s${i}_${k}`;
+// A SAVE'S NAME IS TYPED BY A PERSON and is interpolated into four different
+// pieces of innerHTML. Unescaped, a name of `<div style="display:none">` hid
+// the rest of its own row — including DELETE, so the save could not be got rid
+// of — and the same string in the primary button destroyed the menu.
+const escHtml = (t) => String(t).replace(/[&<>"]/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+// WHAT ONE STEP OF PROGRESS IS CALLED in a given game — `null` where the count
+// does not move at all. Every save list, button and board went through the
+// tunnel's vocabulary, so a City Streets save read `DOOR 1 · 0 doors` and so
+// did every other one: the list could not tell two city saves apart.
+const unitOf = (mode) => {
+  const m = MODES.find((x) => x.id === (mode || DEFAULT_MODE));
+  return m && 'unit' in m ? m.unit : 'WAVE';
+};
+// ...and only the tunnel is resumed at a point. Everywhere else CONTINUE means
+// "play this save", and the number worth showing is how far it has ever got.
+const resumesByDoor = (mode) => (mode || DEFAULT_MODE) === 'hall';
+// The one-line summary a save gives of itself, in its own game's words.
+function saveDepthLine(e) {
+  if (resumesByDoor(e.mode)) {
+    return `<b>DOOR ${Math.max(1, e.resumeDoor)}</b> · ${e.doors} door${e.doors === 1 ? '' : 's'}`
+      + ` · ${e.filed} filed`;
+  }
+  const u = unitOf(e.mode);
+  const best = u && e.best > 1 ? `<b>BEST ${u} ${e.best}</b> · ` : '';
+  return `${best}${e.filed} filed`;
+}
 let slotIx = 0;
 try { slotIx = Math.max(0, parseInt(localStorage.getItem('ts_slot') || '0', 10) || 0); } catch { /* private */ }
+// WHICH GAME THE MENU IS SHOWING. Not `game.mode` — that is what is running,
+// and on the menu nothing is. Selecting a mode changes the page: its name, its
+// CONTINUE, its saves, its backdrop and its board. It is remembered, because
+// somebody who plays the city does not want to re-pick it every launch.
+let menuMode = DEFAULT_MODE;
+try {
+  const m = localStorage.getItem('ts_menumode');
+  if (m && MODES.some((x) => x.id === m)) menuMode = m;
+} catch { /* private */ }
 
 // The index, repaired on every read: an entry whose slot holds nothing is not
 // a save, and a slot holding something that nobody indexed is. Neither can
@@ -5850,45 +5913,82 @@ function saveIndex() {
     try {
       list = (JSON.parse(raw) || [])
         .filter((e) => e && Number.isInteger(e.i) && e.i >= 0)
-        .map((e) => ({ i: e.i, name: String(e.name || '').slice(0, 24) }));
+        // An entry with no mode predates modes having saves, and the only mode
+        // there was then is the one it belongs to now.
+        .map((e) => ({ i: e.i, name: String(e.name || '').slice(0, 24),
+          num: Number.isInteger(e.num) && e.num > 0 ? e.num : 0,
+          mode: MODES.some((m) => m.id === e.mode) ? e.mode : DEFAULT_MODE }));
     } catch { list = []; }
   }
   const seen = new Set(list.map((e) => e.i));
   // MIGRATION, and the recovery path in one. Before this index existed there
   // were three fixed slots; any of them that was played is a save now. The
   // same sweep re-adopts an orphaned slot.
-  for (let i = 0; i < MAX_SAVES; i++) {
+  for (let i = 0; i < MAX_SLOTS; i++) {
     if (seen.has(i)) continue;
-    if (slotRead(i).used) { list.push({ i, name: '' }); seen.add(i); }
+    if (slotRead(i).used) { list.push({ i, name: '', num: 0, mode: DEFAULT_MODE }); seen.add(i); }
+  }
+  // THE DEFAULT NAME'S NUMBER IS THE SAVE'S OWN, not its position in the list.
+  // Positional numbering renamed everybody below a deletion — delete THE
+  // TUNNEL 1 and the save the player knew as THE TUNNEL 2 silently became
+  // THE TUNNEL 1, which is the name the CONTINUE button and the delete
+  // confirmation then read out. Anything without a number (written before
+  // this, or adopted by the sweep above) gets the lowest one free in its mode.
+  const taken = {};
+  for (const e of list) if (e.num) (taken[e.mode] = taken[e.mode] || new Set()).add(e.num);
+  for (const e of list) {
+    if (e.num) continue;
+    const used = taken[e.mode] = taken[e.mode] || new Set();
+    let n = 1;
+    while (used.has(n)) n++;
+    e.num = n;
+    used.add(n);
   }
   // ...and an indexed slot that is empty is dropped, EXCEPT the active one:
   // a save made seconds ago has nothing in it yet and must not vanish.
   return list.filter((e) => slotRead(e.i).used || e.i === slotIx);
 }
 function writeSaveIndex(list) {
-  try { persist(SAVES_KEY, JSON.stringify(list.map((e) => ({ i: e.i, name: e.name || '' })))); }
-  catch { /* private */ }
+  try {
+    persist(SAVES_KEY, JSON.stringify(list.map((e) =>
+      ({ i: e.i, name: e.name || '', num: e.num || 0,
+        mode: e.mode || DEFAULT_MODE }))));
+  } catch { /* private */ }
 }
-// Every save, newest first — which is what "continue where I left off" means.
-function savesByRecent() {
+// Every save of one mode, newest first — which is what "continue where I left
+// off" means, and the order you think about your own runs in.
+function savesByRecent(mode = menuMode) {
   return saveIndex()
+    .filter((e) => e.mode === mode)
     .map((e) => ({ ...e, ...slotRead(e.i) }))
     .sort((a, b) => b.at - a.at);
 }
-const saveName = (e) => e.name || `SAVE ${e.i + 1}`;
-// The one CONTINUE resumes: most recently played, or null if there are none.
-function latestSave() {
-  const all = savesByRecent();
+// The default name is per MODE, not per slot: the tunnel's third save is
+// THE TUNNEL 3 whatever global index it happens to occupy — and it keeps that
+// number for life, see the backfill in saveIndex().
+const modeName = (mode) =>
+  ((MODES.find((x) => x.id === (mode || DEFAULT_MODE)) || {}).name) || 'SAVE';
+function defaultName(e) {
+  const n = e.num || (saveIndex().find((x) => x.i === e.i) || {}).num || 1;
+  return `${modeName(e.mode)} ${n}`;
+}
+function saveName(e) { return e.name || defaultName(e); }
+// The one CONTINUE resumes: most recently played in this mode, or null.
+function latestSave(mode = menuMode) {
+  const all = savesByRecent(mode);
   return all.length ? all[0] : null;
 }
-function makeSave(name) {
+function makeSave(mode, name) {
   const list = saveIndex();
-  if (list.length >= MAX_SAVES) return null;
+  if (list.filter((e) => e.mode === mode).length >= MAX_SAVES) return null;
   const used = new Set(list.map((e) => e.i));
   let i = 0;
-  while (used.has(i) && i < MAX_SAVES) i++;
-  if (i >= MAX_SAVES) return null;
-  const entry = { i, name: String(name || '').slice(0, 24) };
+  while (used.has(i) && i < MAX_SLOTS) i++;
+  if (i >= MAX_SLOTS) return null;
+  const mine = new Set(list.filter((e) => e.mode === mode).map((e) => e.num || 0));
+  let num = 1;
+  while (mine.has(num)) num++;
+  const entry = { i, name: String(name || '').slice(0, 24), num, mode };
   slotClear(i);                 // whatever a deleted save left behind, gone
   stampSave(i);
   writeSaveIndex([...list, entry]);
@@ -5910,9 +6010,14 @@ function deleteSave(i) {
   const list = saveIndex().filter((e) => e.i !== i);
   writeSaveIndex(list);
   slotClear(i);
-  // The active save cannot be one that no longer exists.
+  // The active save cannot be one that no longer exists — and it should become
+  // one of the same mode, because that is the list the player is looking at.
   if (slotIx === i) {
-    const next = list.length ? list[0].i : 0;
+    // ...and the NEWEST of them, because that is the one CONTINUE will offer.
+    // Index order picked the oldest, so the row marked ACTIVE and the save the
+    // big button was about to start could be two different saves.
+    const mine = savesByRecent(menuMode);
+    const next = mine.length ? mine[0].i : (list[0] || { i: 0 }).i;
     slotUse(next);
   }
 }
@@ -5938,7 +6043,15 @@ function slotRead(i) {
   const at = parseInt(get('at', '0'), 10) || 0;
   const born = parseInt(get('born', '0'), 10) || 0;
   return {
-    i, used: at > 0 || doors > 0,
+    // A SAVE THE PLAYER MADE EXISTS. `at` is only written by saveProgress()
+    // (which needs something new archived) and slotNoteDoor() (tunnel only),
+    // so a Rush Hour or duel save — where nothing archives and no door is
+    // crossed — read as UNUSED, and saveIndex() drops unused entries. It
+    // survived only while it happened to be the active slot: selecting
+    // another game moved slotIx and the save vanished, then makeSave handed
+    // its index to somebody else and slotClear wiped it. `born` is stamped at
+    // creation and removed by slotClear, which is exactly the fact wanted.
+    i, used: born > 0 || at > 0 || doors > 0,
     doors, at,
     born, bornKnown: born > 0,
     id: get('id', '') || saveIdFor(i, born || at),
@@ -5968,7 +6081,10 @@ function slotClear(i) {
   // slot key now (see slotTimeUses).
   for (const k of ['doors', 'archive', 'best', 'runs', 'rdoor', 'at', 'timeuses',
     'born', 'id']) {
-    try { localStorage.removeItem(slotKey(i, k)); } catch { /* private */ }
+    // `forget`, not removeItem: these keys are mirrored to durable storage in
+    // the app, and one removed from localStorage alone comes back on the next
+    // launch — a deleted save resurrecting itself.
+    forget(slotKey(i, k));
   }
 }
 function slotUse(i) {
@@ -5993,12 +6109,17 @@ let runPlayT = 0;   // real seconds actually in combat this run (all retries)
 let scoreMetric = 'w';   // 'w' = wave, 'k' = shards (kills)
 let scoreView = 'top';   // 'top' = ranked by metric, 'recent' = newest first
 
-function loadRuns() {
-  try { return JSON.parse(localStorage.getItem(slotKey(slotIx, 'runs')) || '[]'); } catch { return []; }
+function loadRuns(i = slotIx) {
+  try { return JSON.parse(localStorage.getItem(slotKey(i, 'runs')) || '[]'); } catch { return []; }
 }
 
+// EVERY MODE FILES ITS RUNS. This used to return early unless the mode was
+// `wave`, which was fine while there was one board and the city was the only
+// place a run meant anything. Now that each game has its own saves — and runs
+// are stored per SLOT, and a slot belongs to one game — the board under the
+// menu is already that game's board, and returning early only meant the main
+// game's was permanently empty.
 function recordRun() {
-  if (game.mode !== 'wave') return;   // TOP RUNS is the wave-mode board
   const runs = loadRuns();
   const e = runs.find((r) => r.id === runStartAt);
   if (e) {   // retries extend the same run instead of adding a new row
@@ -6011,6 +6132,7 @@ function recordRun() {
   }
   runs.sort((a, b) => b.at - a.at);
   try { persist(slotKey(slotIx, 'runs'), JSON.stringify(runs.slice(0, 5))); } catch { /* private mode */ }
+  slotWriteNow();   // a run was played here: this save is not stale
 }
 
 function fmtWhen(t) {
@@ -6019,27 +6141,42 @@ function fmtWhen(t) {
   return `${p(d.getMonth() + 1)}.${p(d.getDate())}.${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
+// What one step of progress is CALLED in the game the menu is showing. A board
+// over a tunnel run that ranks people by "WAVES" is describing a different
+// game; `null` means the count does not move in that mode at all, and the
+// metric is dropped rather than ranking every run equal-first.
+function scoreUnit() { return unitOf(menuMode); }
 function renderScores() {
+  // THE BOARD BELONGS TO THE GAME THE MENU IS SHOWING, so it reads that game's
+  // most recent save rather than whatever slot is active. Selecting a mode
+  // with no saves of its own leaves slotIx where it was, and the board then
+  // presented the PREVIOUS game's runs under this game's heading.
+  const src = latestSave();
   // only real, complete runs make the table — no placeholder rows
-  const display = loadRuns().filter((r) => r.w != null && r.k != null && r.at);
+  const display = (src ? loadRuns(src.i) : []).filter((r) => r.w != null && r.k != null && r.at);
   if (!display.length) {   // nothing to show until you've played
     el.scores.style.display = 'none';
     return;
   }
+  const unit = scoreUnit();
+  // A remembered metric can be meaningless in the game just selected, so the
+  // board falls back rather than showing a column of 1s.
+  const metric = (scoreMetric === 'w' && !unit) ? 'k' : scoreMetric;
   el.scores.style.display = 'block';
   // TOP ranks by the chosen metric so #1 is your best; RECENT is just the
   // last few runs in order — two different questions, one table
   if (scoreView === 'recent') display.sort((a, b) => b.at - a.at);
-  else display.sort((a, b) => ((b[scoreMetric] || 0) - (a[scoreMetric] || 0)) || (b.at - a.at));
+  else display.sort((a, b) => ((b[metric] || 0) - (a[metric] || 0)) || (b.at - a.at));
   const fmtVal = (r) => {
-    if (scoreMetric === 'd') {   // survival time as M:SS
+    if (metric === 'd') {   // survival time as M:SS
       if (r.d == null) return '—<em></em>';
       const m = Math.floor(r.d / 60), s = String(r.d % 60).padStart(2, '0');
       return `${m}:${s}<em>ALIVE</em>`;
     }
-    const v = r[scoreMetric];
-    const unit = scoreMetric === 'w' ? (v === 1 ? 'WAVE' : 'WAVES') : (v === 1 ? 'ENEMY' : 'ENEMIES');
-    return `${v}<em>${unit}</em>`;
+    const v = r[metric];
+    const word = metric === 'w'
+      ? `${unit}${v === 1 ? '' : 'S'}` : (v === 1 ? 'ENEMY' : 'ENEMIES');
+    return `${v}<em>${word}</em>`;
   };
   const rows = display.slice(0, 5).map((r) =>
     `<div class="scrow"><span class="scval">${fmtVal(r)}</span>` +
@@ -6052,9 +6189,9 @@ function renderScores() {
     // the metric pills only rank TOP; RECENT is already answered by its order
     (scoreView === 'top'
       ? `<div class="scpills">` +
-        `<span class="scpill${scoreMetric === 'w' ? ' active' : ''}" data-m="w">WAVES</span>` +
-        `<span class="scpill${scoreMetric === 'k' ? ' active' : ''}" data-m="k">ENEMIES</span>` +
-        `<span class="scpill${scoreMetric === 'd' ? ' active' : ''}" data-m="d">TIME</span>` +
+        (unit ? `<span class="scpill${metric === 'w' ? ' active' : ''}" data-m="w">${unit}S</span>` : '') +
+        `<span class="scpill${metric === 'k' ? ' active' : ''}" data-m="k">ENEMIES</span>` +
+        `<span class="scpill${metric === 'd' ? ' active' : ''}" data-m="d">TIME</span>` +
         `</div>`
       : '') + rows;
 }
@@ -6177,6 +6314,10 @@ let pendingNewSlot = -1;
 
 function openSaves() {
   renderSlots();
+  const m = MODES.find((x) => x.id === menuMode);
+  const h = el.saves.querySelector('h3');
+  // The card is a list of ONE game's runs, so it is titled with that game.
+  if (h) h.textContent = (m && m.name) || 'SAVES';
   el.saves.style.display = 'flex';
 }
 function closeSaves() { el.saves.style.display = 'none'; closeSaveInfo(); }
@@ -6185,19 +6326,18 @@ function renderSlots() {
   const list = savesByRecent();
   el.slotlist.innerHTML = '';
   if (!list.length) {
-    el.slotlist.innerHTML = '<div class="snone">No saves yet. Starting a run makes one.</div>';
+    el.slotlist.innerHTML =
+      '<div class="snone">No saves in this game yet. Starting a run makes one.</div>';
   }
   for (const e of list) {
     const d = document.createElement('div');
     d.className = 'slot' + (e.i === slotIx ? ' on' : '');
-    const depth = e.resumeDoor > 1 ? `DOOR ${e.resumeDoor}` : 'DOOR 1';
     // LAST PLAYED, said out loud. The list is ordered by it, so leaving the
     // date unlabelled invited it to be read as when the save was MADE — which
     // is a different fact, lives behind the info button, and for most saves is
     // a different day.
-    d.innerHTML = `<div class="sname">${saveName(e)}${e.i === slotIx ? ' · ACTIVE' : ''}</div>`
-      + `<div class="smeta"><b>${depth}</b> · ${e.doors} door${e.doors === 1 ? '' : 's'}`
-      + ` · ${e.filed} filed</div>`
+    d.innerHTML = `<div class="sname">${escHtml(saveName(e))}${e.i === slotIx ? ' · ACTIVE' : ''}</div>`
+      + `<div class="smeta">${saveDepthLine(e)}</div>`
       + `<div class="swhen">LAST PLAYED ${fmtSlotWhen(e.at)}</div>`
       + '<div class="srow">'
       + `<div class="sbtn cont" data-i="${e.i}">CONTINUE</div>`
@@ -6224,20 +6364,72 @@ function openSaveInfo(i) {
   const e = savesByRecent().find((x) => x.i === i) || slotRead(i);
   if (!el.saveinfo) return;
   const row = (k, v) => `<div class="sirow"><span>${k}</span><b>${v}</b></div>`;
+  const esc = escHtml;
+  infoFor = e.i;
   el.saveinfo.querySelector('.sibody').innerHTML =
-    row('NAME', saveName(e))
+    // THE NAME IS YOURS. Everything under it is the file's own account of
+    // itself and cannot be edited from here — a save whose dates could be
+    // typed is not a record of anything.
+    `<div class="sirow name"><span>NAME</span>`
+    + `<input id="savename" maxlength="24" value="${esc(saveName(e))}"`
+    + ` placeholder="${esc(defaultName(e))}"></div>`
     + row('IDENTIFIER', e.id)
     + row('CREATED', e.bornKnown ? fmtSlotWhen(e.born)
       : `${fmtSlotWhen(e.at)} <i>(or earlier)</i>`)
     + row('LAST PLAYED', fmtSlotWhen(e.at))
-    + row('RESUMES AT', `DOOR ${Math.max(1, e.resumeDoor)}`)
-    + row('DOORS CLEARED', String(e.doors))
+    + (resumesByDoor(e.mode)
+      ? row('RESUMES AT', `DOOR ${Math.max(1, e.resumeDoor)}`)
+        + row('DOORS CLEARED', String(e.doors))
+      : '')
     + row('FILED TO ARCHIVE', String(e.filed))
-    + row('BEST WAVE', String(e.best))
-    + row('SLOT', `${e.i + 1} of ${MAX_SAVES}`);
+    // BEST is the high-water mark of a game that does not resume. In the
+    // tunnel it is never written — every tunnel save reported `BEST DOOR 1`
+    // next to `RESUMES AT DOOR 13`, which reads as a contradiction and is
+    // just a field that does not apply here.
+    + (!resumesByDoor(e.mode) && unitOf(e.mode)
+      ? row(`BEST ${unitOf(e.mode)}`, String(e.best)) : '')
+    + row('GAME', ((MODES.find((m) => m.id === (e.mode || DEFAULT_MODE)) || {}).name)
+      || String(e.mode))
+    + row('SLOT', String(e.i + 1));
   el.saveinfo.style.display = 'flex';
 }
-function closeSaveInfo() { if (el.saveinfo) el.saveinfo.style.display = 'none'; }
+// RENAMED ON THE WAY OUT, so there is no SAVE button to forget to press and
+// no half-typed name lost to a stray tap. An empty field is not a name — it
+// puts the save back to its default, which is what the placeholder promises.
+let infoFor = -1;
+function commitSaveName() {
+  if (infoFor < 0) return;
+  const field = document.getElementById('savename');
+  if (!field) return;
+  const list = saveIndex();
+  const e = list.find((x) => x.i === infoFor);
+  if (!e) return;
+  const typed = field.value.trim().slice(0, 24);
+  // A DEFAULT NAME IS NOT A NAME. Storing one freezes it, and typing ANOTHER
+  // save's default — `THE TUNNEL 2` onto save 1 — makes two rows that read
+  // identically, including the delete confirmation that is supposed to say
+  // which one is about to go. Any string shaped like this mode's default is
+  // treated as "put it back to default", which is what the placeholder says.
+  const looksDefault = new RegExp(
+    `^${modeName(e.mode).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} *\\d+$`, 'i')
+    .test(typed);
+  e.name = (typed && !looksDefault) ? typed : '';
+  writeSaveIndex(list);
+}
+function closeSaveInfo() {
+  // Was the panel actually open? closeSaves() calls this unconditionally, and
+  // closeSaves() also runs on the way INTO a run — so redrawing the list and
+  // the menu button here regardless meant starting a run rewrote the big
+  // button behind the overlay to CONTINUE the run that was just starting.
+  // Nothing can have been renamed if nothing was open.
+  const wasOpen = infoFor >= 0;
+  commitSaveName();
+  infoFor = -1;
+  if (el.saveinfo) el.saveinfo.style.display = 'none';
+  if (!wasOpen) return;
+  if (el.saves && el.saves.style.display !== 'none') { renderSlots(); }
+  refreshMenuPrimary();   // a rename changes what CONTINUE is called
+}
 // Deleting is the one thing on this screen that cannot be undone, so it asks —
 // and it asks INSIDE the row, naming what is about to go, rather than in a
 // dialogue that has lost track of which one you tapped.
@@ -6249,7 +6441,7 @@ function askDelete(i) {
   if (!row) return;
   const e = savesByRecent().find((x) => x.i === i) || { i };
   row.querySelector('.srow').innerHTML =
-    `<div class="sbtn red delyes" data-i="${i}">DELETE ${saveName(e)}</div>`
+    `<div class="sbtn red delyes" data-i="${i}">DELETE ${escHtml(saveName(e))}</div>`
     + '<div class="sbtn delno">KEEP</div>';
 }
 function askTutorial(i) {
@@ -6264,6 +6456,8 @@ function askTutorial(i) {
 let pendingResumeDoor = 1;
 function continueSave(i) {
   slotUse(i);
+  const e = saveIndex().find((x) => x.i === i);
+  game.mode = (e && e.mode) || menuMode;   // the save says which game this is
   const st = slotRead(i);
   pendingResumeDoor = Math.max(1, st.resumeDoor || 1);
   closeSaves();
@@ -6279,7 +6473,12 @@ function continueSave(i) {
 // the game. Deliberately choosing NEW RUN or + NEW SAVE, with saves already on
 // the list, IS that decision, and gets the question.
 function startNewRun(ask = true) {
-  const entry = makeSave('') || latestSave();
+  game.mode = menuMode;
+  // NO FALLBACK. This used to be `makeSave(...) || latestSave()`, so a mode at
+  // its save cap answered NEW GAME by handing back the player's most recent
+  // save — which beginNewGame then wipes and re-stamps, destroying the run and
+  // the creation date the details panel promises never moves.
+  const entry = makeSave(menuMode, '');
   if (!entry) return;
   if (!ask) {
     // NO DIALOGUE AND NO ARMING. Going through beginNewGame here would call
@@ -6300,8 +6499,7 @@ function startNewRun(ask = true) {
 // The menu's own PLAY path, so a slot button starts a run the same way the
 // big button does rather than by simulating a tap on it.
 function startRunFromMenu() {
-  game.mode = 'hall';
-  advanceFromOverlay();
+  advanceFromOverlay();   // game.mode is already set by whoever asked for this
 }
 function beginNewGame(i, withTutorial) {
   el.askTut.style.display = 'none';
@@ -6337,11 +6535,45 @@ function beginNewGame(i, withTutorial) {
 // is the catalogue that says what each one actually is. Neither knows what
 // modes exist — src/modes.js does.
 // ---------------------------------------------------------------------------
+// EVERY MODE, INCLUDING THE MAIN ONE, because this row is a SELECTOR now
+// rather than a launcher. It used to leave the tunnel out on the grounds that
+// PLAY already started it — true when tapping a row started a run, and wrong
+// the moment the row decides what the page is about: with the tunnel missing
+// there was no way back to it once you had selected something else.
 function renderAltRow() {
   if (!el.altrow) return;
-  // PLAY already starts the main mode, so it does not need a button here.
-  el.altrow.innerHTML = MODES.filter((m) => !m.main)
-    .map((m) => `<div class="btn btn-2" data-mode="${m.id}">${m.name}</div>`).join('');
+  el.altrow.innerHTML = MODES
+    .map((m) => `<div class="btn btn-2${m.id === menuMode ? ' on' : ''}" `
+      + `data-mode="${m.id}">${m.name}</div>`).join('');
+  if (el.altlabel) el.altlabel.textContent = 'CHOOSE A GAME';
+}
+// SELECTING A MODE CHANGES THE PAGE, and starts nothing. Its name, its one
+// line, its CONTINUE, its saves, the world behind the menu and the board all
+// belong to the mode you are looking at — which is the whole point of a menu
+// that has five games on it.
+function selectMenuMode(id) {
+  if (!MODES.some((m) => m.id === id)) return;
+  menuMode = id;
+  try { persist('ts_menumode', id); } catch { /* private */ }
+  // The active save follows the selection, so the board and the archive counts
+  // belong to the game being looked at rather than to whatever was played last.
+  const last = latestSave(id);
+  if (last && last.i !== slotIx) slotUse(last.i);
+  renderAltRow();
+  refreshMenuPrimary();
+  renderScores();
+  el.overlay.querySelector('.sub').textContent = taglineFor();
+  // ...and so does the world behind it. Two of the five are city games and
+  // three are corridors; showing the wrong one behind the CTA for the other is
+  // a small lie the menu does not need to tell.
+  if (game.state === 'menu') menuBackdrop();
+}
+const menuIsCity = (id) => id === 'wave' || id === 'rush';
+// The world behind the menu belongs to the game the menu is showing: two of
+// the five are city games and three are corridors, and putting the wrong one
+// behind a CTA for the other is a small lie the menu does not need to tell.
+function menuBackdrop() {
+  setEnvironment(menuIsCity(menuMode) ? 'city' : 'hall');
 }
 
 // `live` = opened from the main menu, where a tap can start a run. From the
@@ -6350,9 +6582,10 @@ function renderAltRow() {
 // END RUN.
 function renderModeList(live) {
   if (!el.modelist) return;
-  // On the menu the "current" mode is whatever PLAY would start — read off
-  // the registry, not written out here, so the two cannot disagree.
-  const cur = live ? (MODES.find((m) => m.main) || {}).id : game.mode;
+  // On the menu the "current" mode is whatever the big button would start,
+  // which is the game the menu is showing — not the registry's main one, since
+  // the menu can be showing any of them.
+  const cur = live ? menuMode : game.mode;
   el.modelist.classList.toggle('live', !!live);
   el.modelist.innerHTML = MODES.map((m) => {
     const on = m.id === cur ? ' cur' : '';
@@ -6361,7 +6594,7 @@ function renderModeList(live) {
   if (el.modenote) {
     el.modenote.classList.remove('nudge');
     el.modenote.textContent = live
-      ? 'tap one to play — the main game first, then oldest to newest'
+      ? 'tap one to choose it — the main game first, then oldest to newest'
       : 'the main game first, then oldest to newest';
   }
 }
@@ -6379,8 +6612,12 @@ function openSettings() {
   el.modelink.classList.toggle('on', timeMode === 'toggle');
   el.settings.style.display = 'flex';
 }
+// THE SELECTED MODE'S OWN LINE. The registry already carries one sentence per
+// mode saying what you DO in it (src/modes.js), and the menu was showing the
+// same slogan whichever game you were about to start.
 function taglineFor() {
-  return 'STOP TIME. SHATTER THEM ALL.';
+  const m = MODES.find((x) => x.id === menuMode);
+  return (m && m.line) || 'STOP TIME. SHATTER THEM ALL.';
 }
 
 function updateModeUI() {
@@ -7912,6 +8149,7 @@ const el = {
   saves: document.getElementById('saves'),
   newrun: document.getElementById('newrun'),
   saveinfo: document.getElementById('saveinfo'),
+  altlabel: document.getElementById('altlabel'),
   slotlist: document.getElementById('slotlist'),
   askTut: document.getElementById('askTut'),
   askNeverBox: document.getElementById('askNeverBox'),
@@ -7944,10 +8182,6 @@ const el = {
   reloadbar: document.getElementById('reloadbar'),
   reloadfill: document.getElementById('reloadfill'),
 };
-
-// The menu is already on screen at boot — showMenu() only runs on the way
-// BACK to it — so the OTHER MODES row is filled in once here as well.
-renderAltRow();
 
 // ---------------------------------------------------------------------------
 // THE ARCHIVE
@@ -8037,6 +8271,19 @@ const MENU_HTML = {
 // page loads — so the primary button has to be decided here too, or a returning
 // player's first sight of the game is a button offering to start over.
 refreshMenuPrimary();
+// ...and the row that chooses a game belongs to the mode this launch
+// remembered. The WORLD behind the menu is set by menuBackdrop(), which cannot
+// be called here: setEnvironment reads `fogWant`, declared further down, and
+// touching it at module-init time is a temporal dead zone. The first paint
+// gets it from the boot path instead.
+renderAltRow();
+// ...and so does the line under the title: MENU_HTML captured the generic
+// slogan a few lines up, so overwriting it now is safe and a returning player
+// sees the game they left in, not the boilerplate.
+el.overlay.querySelector('.sub').textContent = taglineFor();
+// ...which is this, one turn later: by the time a timeout fires every
+// top-level binding in the module exists, so setEnvironment is safe to call.
+setTimeout(() => { if (game.state === 'menu') menuBackdrop(); }, 0);
 
 // THE PRIMARY ACTION IS "CARRY ON", when there is anything to carry on from.
 //
@@ -8046,6 +8293,15 @@ refreshMenuPrimary();
 // the deliberate second choice underneath it. With no saves at all there is
 // nothing to continue and the button is simply PLAY — one action, no list, no
 // decision to make before the first game.
+// Where CONTINUE is about to put you — the door in the tunnel, the high-water
+// mark everywhere else, and nothing at all on a save that has not been
+// anywhere yet. Saying `DOOR 1` on a City Streets save was three kinds of
+// wrong: the city has no doors, it does not resume, and every save said it.
+function goWhere(e) {
+  if (resumesByDoor(e.mode)) return ` · DOOR ${Math.max(1, e.resumeDoor)}`;
+  const u = unitOf(e.mode);
+  return u && e.best > 1 ? ` · BEST ${u} ${e.best}` : '';
+}
 function refreshMenuPrimary() {
   const go = el.overlay.querySelector('.go');
   if (!go) return;
@@ -8056,7 +8312,7 @@ function refreshMenuPrimary() {
   // from the menu. "Is there a run to go back to" is the question, and a run
   // on its first door is still a run.
   go.innerHTML = last
-    ? `CONTINUE<span class="gosub">${saveName(last)} · DOOR ${Math.max(1, last.resumeDoor)}</span>`
+    ? `CONTINUE<span class="gosub">${escHtml(saveName(last))}${goWhere(last)}</span>`
     : MENU_HTML.go;
   go.classList.toggle('two', !!last);
   if (el.newrun) {
@@ -8101,7 +8357,7 @@ function showMenu() {
   el.altwrap.style.display = '';
   renderAltRow();
   for (const d of document.querySelectorAll('.mdiv')) d.style.display = '';
-  setEnvironment('city');
+  menuBackdrop();
   renderScores();
   updateSndBtn();
   el.menubtn.style.display = 'none';
@@ -8367,6 +8623,10 @@ function hitPlayer(ended = false) {
   el.reloadbar.style.display = 'none';
   // retry retries THIS mode only — the alternates leave the death screen
   el.altwrap.style.display = 'none';
+  // ...and so does LOAD GAME, which nothing else ever hid. It sat under RETRY
+  // FROM LAST DOOR on every death, and did nothing when tapped: its handler
+  // requires the menu.
+  if (el.newrun) el.newrun.style.display = 'none';
   if (!ended) {   // a chosen exit skips the death drama
     el.redflash.style.opacity = 1;
     sfx.die();
@@ -8407,16 +8667,22 @@ function hitPlayer(ended = false) {
       ? `<div class="stats">${(modeById(game.mode) || {}).name || 'TUNNEL'} · ` +
         `${hall ? hall.doorsPassed : 0} ` +
         `${hall && hall.doorsPassed === 1 ? 'DOOR' : 'DOORS'} · ${game.kills} SHATTERED</div>`
-      : `<div class="stats">${game.wave} ${game.wave === 1 ? 'WAVE' : 'WAVES'} · ` +
-        `${game.kills} SHATTERED · BEST ${bestWave} ${bestWave === 1 ? 'WAVE' : 'WAVES'}</div>`) + filed;
+      // ...and the two simplified modes count ROUNDS, not waves. The registry
+      // says what a step of progress is called in each game; this line used to
+      // say WAVES in all three.
+      : (() => { const u = unitOf(game.mode) || 'WAVE';
+        const pl = (n) => `${n} ${u}${n === 1 ? '' : 'S'}`;
+        return `<div class="stats">${pl(game.wave)} · ` +
+          `${game.kills} SHATTERED · BEST ${pl(bestWave)}</div>`; })()) + filed;
     r.style.display = 'flex';
     el.scores.style.display = 'none';
     el.menurow.style.display = 'none';
     el.moderow.style.display = 'none';   // keep the stats line's row clear
     const goEl = el.overlay.querySelector('.go');
     goEl.textContent = game.mode === 'rush' ? 'RETRY RUSH HOUR'
-      : inHall() ? 'RETRY FROM LAST DOOR' : 'RETRY WAVE';
+      : inHall() ? 'RETRY FROM LAST DOOR' : `RETRY ${unitOf(game.mode) || 'WAVE'}`;
     goEl.classList.add('long');
+    goEl.classList.remove('two');   // the menu's two-line CONTINUE shape
     el.menubtn.style.display = 'inline-block';
     el.overlay.classList.remove('hidden');
   }, ended ? 400 : 900);
