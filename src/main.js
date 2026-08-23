@@ -13,7 +13,7 @@
 
 import * as THREE from '../lib/three.module.min.js';
 import { WEAPONS, TYPE_INTRO, TYPE_SHARE, TYPE_DROP, DROPS, RAMP, COMP, PACING, TIME, LEG, SHATTER,
-  VIS, GRIND, EARLY, scarcity, condTax } from './balance.js';
+  VIS, GRIND, EARLY, OPENING, ramp, scarcity, condTax } from './balance.js';
 import { composeProtocol, newRunMemory, enemyRoster, ELEMENTS } from './protocols.js';
 // The corridor generator lives in its own module so the level tool at /tool
 // draws the real layouts rather than a second implementation of them.
@@ -3242,9 +3242,9 @@ function killEnemy(i, impulseDir) {
 // room holds a single floor: whoever is second waits his turn.
 let lastEnemyShotAt = -1e9;
 let worldT = 0;
-// measured in WORLD seconds, not real ones: in bullet time the gap has to
-// stretch with everything else or the stagger collapses the moment you freeze
-const ENEMY_SHOT_GAP = 0.28;
+// Measured in WORLD seconds, not real ones: in bullet time the gap has to
+// stretch with everything else or the stagger collapses the moment you freeze.
+// It is a RAMP now rather than a constant — see shotGap().
 
 // Early doors fire ONE round at a time: nobody pulls a trigger while a round
 // is still on its way to you. "Still on its way" is a direction test, not a
@@ -3335,6 +3335,35 @@ function diffT() {
 
 // Enemy rounds open slow enough to sidestep at a walk (wave 1: ~55% speed),
 // reach full pace by wave 8, then keep creeping (+2%/wave, capped at +35%).
+// ---------------------------------------------------------------------------
+// THE OPENING RAMP — see OPENING in balance.js for the shape and the reasons.
+// Everything below is a read of it; nothing here decides anything.
+// ---------------------------------------------------------------------------
+// How many corridors and rooms stand behind one door.
+const doorLegs = (d) => Math.min(OPENING.legsCap, ramp(d, OPENING.legsEvery));
+// ...how many bodies the WHOLE door holds, across all of them.
+const doorBodies = (d) => ramp(d, OPENING.bodiesEvery);
+// ...and how many may be up at once. Never more than the door holds.
+const doorAlive = (d) => Math.min(doorBodies(d), ramp(d, OPENING.aliveEvery));
+// THE ROOM'S SHOT FLOOR, in world seconds: how long everybody else waits after
+// one of them pulls a trigger. Three seconds for the opening doors — long
+// enough that every round is its own event — closing to the deep game's gap.
+function shotGap() {
+  if (game.mode !== 'hall') return OPENING.gapTo;
+  const d = hall ? hall.doorsPassed + 1 : 1;
+  const t = Math.max(0, Math.min(1,
+    (d - OPENING.gapDoors) / Math.max(1, OPENING.gapBy - OPENING.gapDoors)));
+  return OPENING.gapFrom + (OPENING.gapTo - OPENING.gapFrom) * t;
+}
+// A door's budget, split across its legs — weighted to the LAST of them, so
+// walking deeper into a door is walking into more of it rather than less.
+function legShare(d, i) {
+  const legs = doorLegs(d), total = doorBodies(d);
+  const base = Math.floor(total / legs);
+  const extra = total - base * legs;          // handed to the last `extra` legs
+  return base + (i >= legs - extra ? 1 : 0);
+}
+
 function enemyBulletSpeed() {
   const w = game.mode === 'rush' ? 1 + rushT / 25 : game.wave;
   const late = Math.max(0, w - (RAMP.rampWaves + 1)) * RAMP.lateCreep;
@@ -3525,7 +3554,7 @@ function updateEnemy(e, sdt) {
         // loud event you cannot parse. The 0.6 s ceiling stops a crowd from
         // deadlocking each other into never firing at all.
         const held = e.holdFireT || 0;
-        if (worldT - lastEnemyShotAt < ENEMY_SHOT_GAP && held < 0.6) {
+        if (worldT - lastEnemyShotAt < shotGap() && held < 0.6) {
           e.holdFireT = held + sdt;
         } else {
           e.holdFireT = 0;
@@ -3686,6 +3715,11 @@ function playerFire() {
   if (spec.melee) { knifeStrike(spec); return; }
   if (player.mag <= 0) { startReload(); return; }       // dry: rack a new mag
   player.fireCd = spec.cd;
+  // THE LESSON DOES NOT COUNT ROUNDS. The magazine is on screen, and it fills
+  // itself: running dry and being made to read RELOADING is a fourth thing to
+  // learn on the beat that is teaching the trigger. Scarcity starts at the
+  // first real door, with everything else.
+  if (tutorStep !== null) player.mag = spec.mag + 1;
   camera.getWorldDirection(_dir);
   // fire from the gun muzzle, converging on the crosshair ~30m out, so the
   // bullet doesn't hang in front of the lens when time is frozen
@@ -4251,7 +4285,7 @@ function onPointerMove(ev) {
   // caused on the way down. The camera has been tracking it all along.
   if (ev.pointerId === timeBtnPointer &&
       Math.hypot(ev.clientX - timeBtnDownX, ev.clientY - timeBtnDownY) > TIMEBTN_SLIP_PX) {
-    if (!timeBtnWasLocked && !tutorRefusesResume()) setTimeLocked(false);
+    if (!timeBtnWasLocked) setTimeLocked(false);
     timeBtnPointer = null;
   }
   const p = input.pointers.get(ev.pointerId);
@@ -4466,8 +4500,8 @@ function onPointerUp(ev) {
     undoTimeBtnLook();
     if (performance.now() - timeBtnDownAt < TIMEBTN_TAP_MS) {
       // quick tap: toggle (was locked -> off, was off -> stays locked)
-      if (timeBtnWasLocked && !tutorRefusesResume()) setTimeLocked(false);
-    } else if (!tutorRefusesResume()) {
+      if (timeBtnWasLocked) setTimeLocked(false);
+    } else {
       setTimeLocked(false);   // long press: time flows again when you let go
     }
     releasePointer(ev, false);   // clean up its look pointer; never fires
@@ -4479,7 +4513,7 @@ function onPointerCancel(ev) {
   if (ev.pointerId === timeBtnPointer) {
     timeBtnPointer = null;
     undoTimeBtnLook();
-    if (!tutorRefusesResume()) setTimeLocked(false);
+    setTimeLocked(false);
   }
   releasePointer(ev, false);
 }
@@ -5560,10 +5594,21 @@ let timeLocked = false;
 // it drains in real time while locked, and every kill pours BONUS back in.
 // Empty bank -> time snaps back (the usual resume sound/visuals fire).
 const SLOWMO = { base: TIME.base, bonus: TIME.bonus, cap: TIME.cap, drain: TIME.drain,
-  low: TIME.low, crit: TIME.crit };
+  low: TIME.low, crit: TIME.crit, unlockDoor: TIME.unlockDoor };
+// SLOW MOTION IS A THING YOU UNLOCK. Not during the onboarding, which never
+// mentions it, and not on door 1 — a few doors in, once the rhythm is a habit
+// and the rounds have started to arrive faster than a walk can answer. Until
+// then the button and the meter are not on the screen at all and the control
+// is inert, so there is nothing to discover early and nothing to miss.
+function timeUnlocked() {
+  if (tutorStep !== null) return tutorMay('timebtn');
+  if (game.mode !== 'hall') return true;         // the other modes are not a ramp
+  return !hall || hall.doorsPassed + 1 >= SLOWMO.unlockDoor;
+}
 let slowBank = SLOWMO.base;
 
 function setTimeLocked(v) {
+  if (v && !timeUnlocked()) return;                          // not yours yet
   if (v && timeMode === 'toggle' && slowBank <= 0) return;   // dry tank
   if (v && !timeLocked) noteTimeUse();
   timeLocked = v;
@@ -5672,12 +5717,12 @@ function updateModeUI() {
   // The onboarding hides the button and the meter until it has taught the
   // rest of the controls, and updateModeUI runs from several places that
   // would otherwise hand them straight back.
-  const on = timeMode === 'toggle' && inRun;
+  const on = timeMode === 'toggle' && inRun && timeUnlocked();
   el.timebtn.style.display = (on && tutorMay('timebtn')) ? 'flex' : 'none';
   // during the lesson the bar only appears once the meter beat has started,
   // even on a step that grants it: it is introduced, not just switched on
   el.slowmeter.style.display =
-    (on && tutorMay('meter') && (!tutorActive() || tutorMeterOn)) ? 'block' : 'none';
+    (on && tutorMay('meter')) ? 'block' : 'none';
   el.gtime.style.display = timeMode === 'toggle' ? '' : 'none';
 }
 function updateSlowMeter() {
@@ -5753,18 +5798,17 @@ let tutorEverHeld = false;     // ...and it has actually happened at least once
 // and what the tank held at that moment, which is what "half gone" is measured
 // against. A wave starts with `base` against a bar drawn to `cap`, so the
 // meter is already at 50% when it appears: half the BAR is not half the tank.
-let tutorLockWas = false, tutorSlowFrom = 0;
+// Where the player stood on the frame the world stopped: the dodge is measured
+// from there, because the freeze is released by MOVING and by nothing else.
+const tutorHeldFrom = { x: 0, z: 0 };
 // WHAT THE PLAYER HAS ALREADY SHOWN THEY CAN DO IN THIS AREA. Cleared with the
 // step, and a training area IS a step — so the reminders start again in the
 // next room and nowhere else.
 let tutorSpent = new Set();
-let tutorSlowedHere = false, tutorResumedHere = false;
 let tutorWorldHeld = false;    // ...and right now the world is actually held
 let tutorLegIx = 0;          // which entry of TUTOR_LEGS the current leg is
 let tutorVolleyT = 0;        // beat between rounds in the three-round lesson
 let tutorSpineIx = 0;        // how far along the leg's spine they have walked
-let tutorMeterOn = false, tutorMeterAt = 0, tutorMeterSaid = false;
-let tutorMeterEverShown = false;   // once taught, it does not un-teach
 let tutorBar = null;
 let tutorArmed = false, tutorSeen = false;
 let tutorShaping = false, tutorLegsBuilt = 0;
@@ -5799,29 +5843,6 @@ const tutorFreeIsFree = () => tutorStep !== null && !tutorMay('bank');
 // reach: measured at 58 s stuck, bar at 97.5%, player alive, nothing on the
 // screen changing. Until the bar has reached the knee the button holds, which
 // is also what goal 2 asks for — the lesson ends when it is learnt.
-// A BEAT WHOSE SUBJECT IS A ROUND IN THE AIR. Two things key off this: the
-// world runs again between rounds (so the next freeze and the next tap are a
-// real beat rather than a button that is already down), and time has a floor
-// while one is in flight (see the frame loop).
-function tutorDodgeBeat() {
-  if (tutorStep === null) return false;
-  const sp = tutorSpecOf(tutorStep);
-  const k = sp && sp.advance && sp.advance.kind;
-  return k === 'froze' || k === 'dodged';
-}
-function tutorRefusesResume() {
-  if (tutorStep === null) return false;
-  const sp = tutorSpecOf(tutorStep);
-  const k = sp && sp.advance && sp.advance.kind;
-  if (k === 'resumed') return !tutorMeterSaid;
-  // ...and the freeze and dodge beats hold for as long as they last. The
-  // button is a toggle on a quick tap and a hold-to-slow on a long press, and
-  // a first-time player told "TAP HERE TO SLOW TIME" presses it like a button:
-  // slowly. That is a long press, so time snapped back to full speed the
-  // instant the thumb lifted — on the one beat in the game with a round
-  // already in the air and the words on screen saying DRAG TO MOVE.
-  return k === 'froze' || k === 'dodged';
-}
 
 // --- the text slots --------------------------------------------------------
 // One element per slot, all able to be on screen at once. They used to share a
@@ -5876,12 +5897,10 @@ let tutorFired = new Set();
 // this room they have shown they can, and once they have pulled the trigger
 // they have shown that too — neither un-happens until the next room.
 const CUE_CLEARS = {
-  threat: ['held', 'freeze', 'dodge', 'low', 'resume'],
-  held: ['freeze', 'dodge', 'low', 'resume'],
-  freeze: ['dodge', 'low', 'resume'],
-  dodge: ['low', 'resume'],
-  low: ['resume'],
-  resume: ['threat', 'held', 'freeze', 'low'],
+  threat: ['held', 'freeze', 'dodge'],
+  held: ['freeze', 'dodge'],
+  freeze: ['dodge'],
+  dodge: ['threat', 'held', 'freeze'],
 };
 function tutorEmit(ev) {
   if (tutorStep === null) return;
@@ -6338,8 +6357,6 @@ function tutorResetWorld() {
   tutorRound = null; tutorMark = null;
   tutorMoved = 0; tutorLooked = 0; tutorFroze = false;
   tutorShotsFired = 0; tutorDodged = 0;
-  tutorMeterOn = false; tutorMeterAt = 0; tutorMeterSaid = false;
-  tutorMeterEverShown = false;
   tutorAwaitShot = false; tutorAnchor = null; tutorDeadPending = false;
   tutorAnchorStep = null; tutorButtonShown = false; tutorFired = new Set();
   tutorHardFreeze = false; tutorWorldHeld = false;
@@ -6359,8 +6376,8 @@ function startTutorial() {
   tutorT = 0; tutorSub = 0;
   tutorMoved = 0; tutorLooked = 0; tutorFroze = false;
   tutorMark = null; tutorRound = null;
-  tutorShotsFired = 0; tutorDodged = 0; tutorMeterOn = false; tutorCrossedDoor = false;
-  tutorMeterSaid = false; tutorAwaitShot = false; tutorAnchor = null;
+  tutorShotsFired = 0; tutorDodged = 0; tutorCrossedDoor = false;
+  tutorAwaitShot = false; tutorAnchor = null;
   tutorDeadPending = false; tutorAnchorStep = null; tutorButtonShown = false;
   tutorFired = new Set(); tutorHardFreeze = false; tutorWorldHeld = false;
   tutorLegIx = 0; tutorSpineIx = 0; tutorTurn = 0; tutorCrossedDoor = false;
@@ -6382,6 +6399,7 @@ function endTutorial(taught = true) {
   el.timebtn.classList.remove('arrive', 'hint');
   gun.visible = true;
   if (el.ammo) el.ammo.style.display = '';
+  updateAmmoHud();          // spare clips are a real number again
   if (tutorBar) {
     // Dropped AND taken out. The sink is driven from updateTutorial, which
     // returns on the first line once tutorStep is null — so END RUN half way
@@ -6420,7 +6438,6 @@ function tutorNext(step) {
   tutorStep = step; tutorT = 0; tutorSub = 0;
   tutorFired = new Set();
   tutorSpent = new Set();
-  tutorSlowedHere = false; tutorResumedHere = false;
   tutorHardFreeze = false;
   const sp = tutorSpecOf(step);
   if (sp) {
@@ -6444,16 +6461,6 @@ function tutorNext(step) {
       if (added) tutorSub = sp.hardFreeze ? TUTOR.aimBeat : TUTOR.volleyGap;
       tutorHardFreeze = !!sp.hardFreeze;
     }
-    if (sp.startMeter) {
-      tutorMeterOn = true; tutorMeterEverShown = true; tutorMeterAt = 0;
-      slowBank = SLOWMO.cap; updateSlowMeter();
-      // THE LESSON IS WATCHING IT DRAIN, so time is slow whether or not they
-      // arrived that way. A player who tapped the button off one beat early
-      // used to pass this step at 1.6 s with the bar sitting at 100% — the
-      // only explanation of the resource the whole game is built on, skipped
-      // by not doing it.
-      if (!timeLocked) setTimeLocked(true);
-    }
     if (sp.raiseGun) { gunRiseT = TUTOR.gunRise; game.noFireBefore = 0; }
     if (sp.dropBarrier) tutorDropBarrier();
     if (sp.openDoor && hall && hall.legs[hall.cur] && !hall.legs[hall.cur].door.open) openHallDoor();
@@ -6464,6 +6471,9 @@ function tutorNext(step) {
   const wants = tutorMay('timebtn') && !sp.hardFreeze;
   if (wants && !tutorButtonShown) { tutorButtonShown = true; tutorRevealButton(); }
   else updateModeUI();
+  // ...and the ammo readout, because what it says depends on whether a lesson
+  // is running and the magazine no longer changes to trigger a redraw.
+  updateAmmoHud();
   tutorEmit('enter');
 }
 
@@ -6590,9 +6600,11 @@ function tutorRetry() {
   tutorWorldHeld = false;
   updateSlowMeter();
   tutorFroze = false;
-  tutorMeterAt = 0; tutorMeterSaid = false;
   tutorRound = null; tutorAwaitShot = false;
-  tutorShotsFired = 0; tutorDodged = 0;
+  tutorShotsFired = 0;
+  // ...BUT NOT THE DODGES. Dying on the third round and being made to dodge
+  // all three again is being punished for getting two of them right. The beat
+  // you failed is the beat you get back, and the two behind it stay done.
   // 'block', not ''. The base rule is `display:none` — the button is turned on
   // by script — so handing it back the empty string handed it back to the
   // stylesheet, and a single death removed the pause button for the rest of
@@ -6631,7 +6643,6 @@ function tutorRetry() {
   if (sp && sp.checkpoint) tutorPopulateLeg();
   // ...and the meter stays on if this area is past the lesson that introduced
   // it: turning it off on every retry hid it for the whole rest of the run.
-  tutorMeterOn = !!(sp && sp.grants && sp.grants.meter && tutorMeterEverShown);
   // the button's teaching halo is stripped by the death; put it back, because
   // the beat you die on repeatedly is the beat that most needs it
   tutorButtonShown = false;
@@ -6662,7 +6673,6 @@ function updateTutorial(dtReal, movedM, yawDelta) {
   const sp = tutorSpecOf(tutorStep);
   tutorUpdateBarrier(dtReal);
   tutorUpdateSpineIx();
-  tutorShowMeter(tutorMeterOn);
   if (el.ammo) el.ammo.style.display = tutorMay('ammo') ? '' : 'none';
 
   // THE FREEZE LANDS ON THE ROUND, NOT ON THE ARM.
@@ -6682,64 +6692,39 @@ function updateTutorial(dtReal, movedM, yawDelta) {
     if (!tutorWorldHeld && flown >= tutorRound.span * TUTOR.freezeAfter) {
       tutorWorldHeld = true;
       tutorEverHeld = true;
-      // A FRESH HOLD NEEDS A FRESH PRESS. `tutorFroze` is a latch that nothing
-      // used to clear, so the second round's freeze was released on the frame
-      // it began — by the tap that answered the first one, two rounds ago.
-      tutorFroze = false;
-      tutorRevealButton();     // the control arrives with the beat it answers
+      // WHERE THEY WERE STANDING WHEN IT STOPPED, so "have they stepped out of
+      // the way" is measured from the moment they were asked to.
+      tutorHeldFrom.x = player.pos.x;
+      tutorHeldFrom.z = player.pos.z;
       tutorEmit('held');
     }
   } else if (!tutorHardFreeze || !tutorRound) {
     tutorWorldHeld = false;
   }
-  // ...and the tap lets it go. Shared by every beat that freezes rather than
-  // living inside one advance condition, because the three-round lesson stops
-  // the world three times and each of them is released the same way.
-  //
-  // `tutorFroze` is set by the time BUTTON. In CLASSIC mode there is no button
-  // and any held finger slows time, so that counts instead — but ONLY in
-  // classic: `input.holding` is true whenever a finger is down at all, so
-  // accepting it in button mode meant the thumb still resting on the move
-  // stick from walking to the barrier released the freeze on the frame it
-  // began, and the prompt naming the button flashed for one frame.
-  if (tutorWorldHeld && (tutorFroze || (timeMode !== 'toggle' && input.holding))) {
-    tutorWorldHeld = false;
-    if (tutorRound) tutorRound.let = true;   // this round has been let go
-    // A DOUBLE TAP USED TO HAND BACK A FULL-SPEED WORLD: `tutorFroze` is
-    // latched by any press, so two of them — "did that register?" — left time
-    // running and the round arrived at full speed. You come out in slow motion.
-    if (!timeLocked) setTimeLocked(true);
-    tutorEmit('freeze');
+  // ...AND STEPPING OUT OF THE LANE LETS IT GO. The release used to be the
+  // time button. There is no time button during the onboarding any more: the
+  // whole slow-motion control is deferred past it, so the freeze here is the
+  // game buying the player a moment to read three words rather than a mechanic
+  // being introduced. What answers it is the thing the words ask for — moving
+  // sideways, which is the one control they already have.
+  if (tutorWorldHeld) {
+    const acrossM = Math.abs(player.pos.x - tutorHeldFrom.x);
+    const downM = Math.abs(player.pos.z - tutorHeldFrom.z);
+    // sideways, not forward: walking INTO the round is not dodging it
+    if (acrossM >= TUTOR.dodgeStepM && acrossM > downM) {
+      tutorWorldHeld = false;
+      if (tutorRound) tutorRound.let = true;   // this round has been let go
+      tutorEmit('freeze');
+    }
   }
   // AFTER the hold, not before it: placed first, the ring appeared a frame
   // late — which on the frame the world stops is the frame that matters.
   tutorPlaceRoundPin();
 
-  // THE TRAINING ROOMS' REMINDER LOOP. Three events, none of which the dodge
-  // lessons need, all of which are just observations about the world: somebody
-  // has started to aim, the clock has been slowed or let go, the bar has
-  // fallen past the mark. What is DONE with them is in src/tutorial.js.
-  if (enemies.some((e) => e.alive && (e.state === 'aim' || e.state === 'burst'))) {
-    if (!tutorFired.has('threat')) tutorEmit('threat');
-  }
-  if (timeLocked !== tutorLockWas) {
-    tutorLockWas = timeLocked;
-    // what the tank held when they reached for it, so "half gone" means half
-    // of what they actually spent rather than half of the bar's full scale
-    if (timeLocked) { tutorSlowFrom = slowBank; tutorSlowedHere = true; }
-    else if (tutorSlowedHere) tutorResumedHere = true;
-    tutorEmit(timeLocked ? 'freeze' : 'resume');
-  }
-  // BOTH HALVES OF THE CONTROL, DEMONSTRATED. Only then is there room for a
-  // third instruction — and only if they are not already shooting. The order
-  // is the point: slowing and resuming are the thing they have just been
-  // taught, and a prompt about the trigger arriving on top of one about the
-  // clock is two instructions competing for the same beat.
-  if (tutorSlowedHere && tutorResumedHere && !tutorFired.has('ready')) tutorEmit('ready');
-  if (timeLocked && tutorMay('bank') && !tutorFired.has('low')
-      && slowBank <= Math.max(SLOWMO.low, tutorSlowFrom * TUTOR.warnAt)) {
-    tutorEmit('low');
-  }
+  // WHO IS ABOUT TO SHOOT. The one observation the training rooms still make:
+  // the trigger reminder answers it, and the dodge lesson does not need it.
+  if (enemies.some((e) => e.alive && (e.state === 'aim' || e.state === 'burst'))
+      && !tutorFired.has('threat')) tutorEmit('threat');
 
   // A turn-ordered room hands the trigger on when the round goes past, so the
   // second man is a second problem rather than a simultaneous one.
@@ -6768,29 +6753,11 @@ function updateTutorial(dtReal, movedM, yawDelta) {
         // shot away, freeze, tap — and it cannot be if time never went back to
         // normal in between: the button would already be down and the prompt
         // telling them to press it would be a lie.
-        if (tutorDodgeBeat()) { setTimeLocked(false); tutorFroze = false; }
       }
     } else if (!tutorRound.counted) {
       tutorRound = null;   // it hit something; the next shot still comes
     }
     if (tutorRound && tutorRound.counted) tutorRound = null;
-  }
-  // once the meter lesson is on, the bank drains on the SCRIPT's clock so the
-  // beat is readable rather than tied to whatever the drain rate happens to be
-  if (tutorMeterOn && timeLocked) {
-    const frac = slowBank / SLOWMO.cap;
-    if (frac > TUTOR.meterFloor) {
-      // meterSecs is FULL TO THE KNEE, which is what its comment always said
-      // and what the code never did: `cap / meterSecs` is a full-to-empty
-      // rate, so the first half went in 3.5 s instead of 7 and the bar the
-      // player is being introduced to was half gone before they read the
-      // sentence about it.
-      const rate = frac > TUTOR.meterKnee
-        ? SLOWMO.cap * (1 - TUTOR.meterKnee) / TUTOR.meterSecs
-        : SLOWMO.cap * (TUTOR.meterKnee - TUTOR.meterFloor) / TUTOR.meterCrawlSecs;
-      slowBank = Math.max(SLOWMO.cap * TUTOR.meterFloor, slowBank - dtReal * rate);
-      updateSlowMeter();
-    }
   }
 
   // THE SWITCH IS KEYED ON THE ADVANCE CONDITION, not on the step's name. The
@@ -6859,24 +6826,6 @@ function updateTutorial(dtReal, movedM, yawDelta) {
       if (!tutorRound && !tutorAwaitShot && tutorSub <= 0) {
         tutorSub = tutorAimNext() ? TUTOR.reshoot : 1;
       }
-      break;
-
-    case 'resumed':
-      // the sentence about the meter, then the way out of it
-      // WHEN THE BAR HAS ACTUALLY MOVED, not on a 1.6 s timer. "TAP TO LET
-      // TIME RUN" used to come up five seconds before the bar reached the knee
-      // this step waits for — so a player who did exactly as they were told
-      // stopped the drain and the lesson could never end. The words wait for
-      // the knee; the timeout is a floor under a bar that somehow never falls.
-      const kneed = slowBank <= SLOWMO.cap * TUTOR.meterKnee;
-      if (!tutorMeterSaid && tutorT > TUTOR.resumeDelay
-          && (kneed || tutorT > TUTOR.resumeDelay + TUTOR.meterSecs + 8)) {
-        tutorMeterSaid = true;
-        tutorEmit('meter');
-      }
-      // ...and it is not over until the bar has visibly gone somewhere. Goal 4:
-      // the step ends on success, and success here is having SEEN it drain.
-      if (tutorMeterSaid && !timeLocked) { tutorEmit('resume'); done(); }
       break;
 
     case 'gunUp':
@@ -7140,10 +7089,16 @@ function updateAmmoHud() {
   } else if (player.reloadT > 0) {
     el.ammo.textContent = `${name} · RELOADING`;
   } else {
-    const pips = '▮'.repeat(Math.max(player.mag, 0)) +
-      '▯'.repeat(Math.max(spec.mag - Math.max(player.mag, 0), 0));
-    el.ammo.textContent = `${name} · ${pips}` +
-      (player.clips > 0 ? ' · +' + player.clips : '');
+    // ROUNDS SHAPED LIKE ROUNDS. `▮`/`▯` are a bar chart of a magazine; these
+    // are cartridges — a case with a nose on it — drawn in CSS so they scale
+    // with the readout and flip with it in bullet time.
+    const live = Math.max(0, Math.min(player.mag, spec.mag));
+    const pips = '<i class="pip"></i>'.repeat(live)
+      + '<i class="pip out"></i>'.repeat(Math.max(spec.mag - live, 0));
+    // ...and during the lesson the magazine does not run down, so the count
+    // of spare clips is a number about a system nobody has met.
+    const spare = tutorStep === null && player.clips > 0 ? ' · +' + player.clips : '';
+    el.ammo.innerHTML = `${name} · <b class="mag">${pips}</b>${spare}`;
   }
   el.ammo.classList.remove('shotgun');   // the HUD stays ink; red is the bank
 }
@@ -7331,12 +7286,8 @@ function maxAlive() {
   if (game.mode === 'hall') {
     // A condition thins the crowd as well as the loot: two bodies met
     // separately are two searches, where a clump is one problem solved once.
-    if (game.wave <= EARLY.soloDoors) return 1;
-    // ...and the first door that lets a pair be up together lets exactly two.
-    if (game.wave <= EARLY.twoAliveDoors) return 2;
-    return Math.max(1, Math.round(
-      Math.min(PACING.hallAliveBase + Math.floor(game.wave / 2), PACING.hallAliveCap)
-      * scarcity('groupSize', game.wave) * condTax(legCondition(), 'groupSize')));
+    return Math.max(1, Math.round(doorAlive(game.wave)
+      * condTax(legCondition(), 'groupSize')));
   }
   return Math.min(PACING.cityAliveBase + Math.floor(game.wave / 2), PACING.cityAliveCap);
 }
@@ -8038,26 +7989,29 @@ function hallAllowance() {
 }
 
 function hallWave(n) {
-  // The opening doors are a metronome: one body in the whole leg, then two,
-  // so the four-beat rhythm — see him, watch the round leave, step out of it,
-  // shatter him — is learned once before it is asked for twice. See EARLY.
-  const early = game.mode !== 'hall' ? 0
-    : n <= EARLY.oneBodyDoors ? 1
-      : n <= EARLY.twoBodyDoors ? 2 : 0;
-  if (early) {
+  let hallWant = null;
+  // A LEG HOLDS ITS SHARE OF THE DOOR, and nothing else. The old rule sized a
+  // leg from its own geometry — every stretch worth a few bodies — which is
+  // why door 5 wanted twenty-four of them the frame after door 4 wanted one.
+  // The door has a budget; the legs behind it split it; the leg's length
+  // decides where they stand, not how many there are.
+  if (game.mode === 'hall') {
+    const want = legShare(n, hall ? hall.legInDoor : 0);
     const leg = hall && hall.legs[hall.cur];
     if (leg && leg.stretches && leg.stretches.length) {
-      // ONE EACH IN THE LAST `early` STRETCHES, so the fight travels with the
+      // ONE EACH IN THE LAST `want` STRETCHES, so the fight travels with the
       // player rather than waiting in a heap at the door — and if the leg is
       // shorter than that, whatever is left over joins the approach.
       const k = leg.stretches.length;
-      leg.quota = leg.stretches.map((_, i) => (i >= k - early ? 1 : 0));
+      leg.quota = leg.stretches.map((_, i) => (i >= k - want ? 1 : 0));
       const placed = leg.quota.reduce((a, b) => a + b, 0);
-      if (placed < early) leg.quota[k - 1] += early - placed;
+      if (placed < want) leg.quota[k - 1] += want - placed;
       leg.released = 0; leg.markK = undefined; leg.budget = 0;
     }
-    return Array.from({ length: early }, () => 'gunner');
+    hallWant = want;
   }
+  // ...and the CAST is composed the same way it always was — the ramp decides
+  // how many, never who. A door that debuts a type still leads with it.
   const sub = { laser: 'rusher', sniper: 'gunner', rocketeer: 'heavy', bomber: 'shotgunner' };
   // Only types this player has actually unlocked may appear — the same two
   // keys the protocols use, so the cast is metered across runs too.
@@ -8070,7 +8024,8 @@ function hallWave(n) {
   // always exactly as big as there is corridor to fight it in.
   const leg = hall && hall.legs[hall.cur];
   let want = COMP.baseTotal + n * COMP.perWave;
-  if (leg && leg.stretches) {
+  if (hallWant !== null) want = hallWant;
+  else if (leg && leg.stretches) {
     leg.quota = stretchQuota(leg, n);
     leg.released = 0;
     leg.markK = undefined;   // the release window re-arms with the wave
@@ -8104,8 +8059,12 @@ function initHall() {
   game.introLen = 1.6;
   game.seenTypes = {};
   setEnvironment('hall');
+  // A DOOR IS MADE OF LEGS. One for the opening doors, more as the ramp
+  // widens — so "deeper" is a longer walk before the next door as well as a
+  // busier one, and the two grow on different schedules. `legInDoor` is which
+  // of them you are standing in; only the last one counts as the door.
   hall = { legs: [], grid: new Set(), cur: 0, doorsPassed: 0, checkpoint: { x: 0, z: 0 },
-    mem: newRunMemory(archive) };
+    legInDoor: 0, legsThisDoor: doorLegs(1), mem: newRunMemory(archive) };
   hall.legs.push(buildHallLeg(0, 0, forced(composeProtocol(1, lifetimeDoors, hall.mem))));
   recordMetProto(hall.legs[0].proto);   // leg 1 counts too; only 2+ used to
   applyLegVisibility(true);             // leg 1 starts in its own weather
@@ -8182,6 +8141,15 @@ function retryHall() {
 // every real run, which is why it can sit in the composer's path.
 let forcedMeasures = null, forcedCondition;
 function forced(proto) {
+  // ONE SHAPE TO LEARN FIRST. A vault, an atrium or a gallery is a second
+  // thing to read on a door whose whole job is the four-beat rhythm — see
+  // him, watch the round leave, step out of it, shatter him. The opening
+  // doors are corridors, and the first room is a change the player notices.
+  if (game.mode === 'hall' && hall
+      && hall.doorsPassed + 1 <= OPENING.corridorDoors && proto) {
+    const corridor = ELEMENTS.find((e) => e.id === 'corridor');
+    if (corridor) proto.form = corridor;
+  }
   if (forcedMeasures) {
     proto.measures = forcedMeasures.map((id) => ELEMENTS.find((e) => e.id === id)).filter(Boolean);
   }
@@ -8401,7 +8369,12 @@ function openHallDoor() {
   L.door.open = true;
   if (!L.nextBuilt) {   // the corridor beyond appears as the door opens
     L.nextBuilt = true;
-    const proto = forced(composeProtocol(hall.doorsPassed + 2, lifetimeDoors, hall.mem));
+    // WHICH DOOR THE NEXT LEG BELONGS TO. With more than one leg behind a
+    // door, the leg after this one is often the SAME door — composing it for
+    // the next one skipped a rung of every curve the protocol reads.
+    const nextDoor = hall.doorsPassed + 1
+      + (hall.legInDoor + 1 >= hall.legsThisDoor ? 1 : 0);
+    const proto = forced(composeProtocol(nextDoor, lifetimeDoors, hall.mem));
     hall.legs.push(buildHallLeg(L.endGx, L.endGz + 1, proto));
   }
   rebuildHallObstacles();
@@ -8427,11 +8400,19 @@ function crossHallDoor() {
   //
   // So the lesson is a prologue: it costs no doors, and the run's own door 1
   // is the first one after it, with the whole early curve intact.
+  // ...AND ONLY THE LAST LEG OF A DOOR IS THE DOOR. The ones before it are
+  // more corridor behind the same number: you walk out of one and into the
+  // next without the run advancing, which is what lets "how far to the next
+  // door" grow independently of "how hard the door is".
   const counts = tutorStep === null;
-  if (counts) {
+  if (counts) hall.legInDoor++;
+  const doorDone = counts && hall.legInDoor >= hall.legsThisDoor;
+  if (doorDone) {
     hall.doorsPassed++;
     game.wave++;
     lifetimeDoors++;
+    hall.legInDoor = 0;
+    hall.legsThisDoor = doorLegs(hall.doorsPassed + 1);
     slotNoteDoor(hall.doorsPassed + 1);
     saveProgress();
   }
@@ -8452,7 +8433,17 @@ function crossHallDoor() {
   slowBank = Math.max(slowBank, SLOWMO.base);
   updateSlowMeter();
   if (tutorStep === null) {
-    showBanner(legHeadline(hall.legs[hall.cur] && hall.legs[hall.cur].proto), 2000);
+    // THE NEW POWER GETS THE FRAME TO ITSELF. On the door it unlocks, the
+    // headline is what just arrived rather than what the corridor is shaped
+    // like — and the button makes the same entrance the onboarding used to
+    // give it, because that animation is what says "this is new".
+    if (doorDone && hall.doorsPassed + 1 === SLOWMO.unlockDoor) {
+      updateModeUI();
+      tutorRevealButton();
+      showBanner('SLOW MOTION UNLOCKED \u00B7 TAP THE DIAL', 2600);
+    } else {
+      showBanner(legHeadline(hall.legs[hall.cur] && hall.legs[hall.cur].proto), 2000);
+    }
     showTimeTip();
   }
   sfx.wave();
@@ -8725,7 +8716,7 @@ function frame(now) {
       // rate empties a full bank in about one training-room fight, so a player
       // using the button the way they have just been taught to ran dry in the
       // first room and spent the other five without it.
-      slowBank -= dt * SLOWMO.drain * (tutorStep !== null ? TUTOR.rampDrain : 1)
+      slowBank -= dt * SLOWMO.drain
         * (game.mode === 'rush' ? RAMP.rushDrain
           : (RAMP.drainFloor + RAMP.drainRange * diffT())
             * scarcity('timeDrain', game.mode === 'hall' ? game.wave : 1));
@@ -8750,7 +8741,6 @@ function frame(now) {
     // to move. It still speeds up when they move; it just no longer stops.
     // The ordinary rule comes back with the meter, which is the lesson about
     // what slow time costs.
-    if (tutorDodgeBeat()) target = Math.max(target, TUTOR.dodgeScale);
   }
   if (game.state === 'dead') target = 0.12;
   if (game.state === 'menu') target = 0.5;   // dreamy half-speed attract mode
@@ -9229,8 +9219,7 @@ window.__ts = {
   mode: () => timeMode,
   tutor: () => ({ step: tutorStep, armed: tutorArmed, seen: tutorSeen,
     shaping: tutorShaping, legs: tutorLegsBuilt,
-    dodged: tutorDodged, shots: tutorShotsFired, meterOn: tutorMeterOn,
-    meterSaid: tutorMeterSaid, deadPending: tutorDeadPending,
+    dodged: tutorDodged, shots: tutorShotsFired, deadPending: tutorDeadPending,
     awaitShot: tutorAwaitShot, froze: tutorFroze,
     anchor: tutorAnchor && { x: +tutorAnchor.x.toFixed(2), z: +tutorAnchor.z.toFixed(2) },
     anchorStep: tutorAnchorStep,
@@ -9262,7 +9251,7 @@ window.__ts = {
   // The time button, pressed, without a pointer: exactly what a quick tap
   // does, so a harness can answer a beat that is waiting for one.
   timeTap: () => {
-    if (timeLocked) { if (!tutorRefusesResume()) setTimeLocked(false); }
+    if (timeLocked) setTimeLocked(false);
     else setTimeLocked(true);
     return timeLocked;
   },
@@ -9285,8 +9274,6 @@ window.__ts = {
     const sp = tutorSpecOf(tutorStep);
     return { fired: [...tutorFired], cues: sp ? sp.cues : [] };
   },
-  startMeterLesson: () => { tutorMeterOn = true; tutorMeterAt = tutorT;
-    slowBank = SLOWMO.cap; updateSlowMeter(); },
   flash: (s = 1) => muzzleFlash(player.pos.x, 1.4, player.pos.z, s),
   muzzle: () => muzzleLights.map((m) => +m.l.intensity.toFixed(2)),
   gradeState: () => ({ allowed: gradeAllowed, slowT: +gradeSlowT.toFixed(2),

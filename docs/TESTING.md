@@ -155,12 +155,10 @@ existing state and costs nothing — but nothing in `src/` may depend on it.
 | `fixbatch.js` | the wedges: the meter beat's early tap, the long press on the freeze, the retry's clock, the barrier after END RUN, six bodies in six places |
 | `signwalk.js` / `four.js` | STAND HERE as an object — hidden round the corners, and width × distance constant down the straight |
 | `pastbar.js` | the men past the barrier stand where they are put, and a death rebuilds the fight behind a shut door |
-| `coachcue.js` | the words and the arrow that name the time button, sampled on the frame the world stops |
-| `tips.js` | the per-area reminder rules: the first room nags, the rest are spent by the action they asked for, and the trigger prompt waits for both halves of the clock |
-| `handover.js` | one banner at the end, door 1 with somebody in it, and the 1/1/2/2 opening ramp |
-| `ramp.js` | the training rooms: the reminder loop, the half-price drain, the TRAINING line, and the pause button surviving a retry |
+| `newflow.js` | the opening as it is now: no slow-motion control anywhere in it, the round dodged by MOVING, the gun and the squad together, and a magazine that never runs down |
+| `handover.js` | one banner at the end, door 1 with somebody in it, and the opening ramp against the table in balance.js |
+| `ramp.js` | the TRAINING line at the top of the screen, and the pause button surviving a retry |
 | `shatter.js` | the shooting lesson driven with the REAL weapon: three shatters, the barrier down, the door open |
-| `beat.js` | the dodge beat — fires, freezes on the round, tap, readable flight, sideways coach, and the loop repeating for all three |
 | `corner.js` | the barrier is up from frame one and its sign is on from the last corner |
 | `tutool.js` | the tutorial pane: a clean spec warns about nothing, a duplicate id is named, the revert leaves the map on the live object, and a new leg is editable |
 | `physics.js`, `halldoor3.js`, `timebtn.js`, `slots.js`, `meterfloor.js` | the rest of the game, so a tutorial change that breaks it is caught |
@@ -196,8 +194,8 @@ lesson that teaches shooting — and it was, by a one-line variable-name
 collision, for as long as the cue system had existed.
 
 If a lesson teaches an input, a test has to make that input the way a player
-does. `shatter.js` fires the weapon; `beat.js` presses the time button;
-`coachcue.js` reads what is on the glass on the frame the world stops.
+does. `shatter.js` fires the weapon; `newflow.js` steps the player out of a
+frozen round's lane, which is the only thing that releases it.
 
 Related trap, an hour of it: `playerFire` aims with
 `camera.getWorldDirection`, and the camera takes its yaw from the player in the

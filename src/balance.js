@@ -50,12 +50,17 @@ export const DROPS = {
 // The difficulty ramp. diffT() runs 0 -> 1 across `rampWaves`, and bullet
 // speed, telegraph length and slow-mo cost all read from it.
 export const RAMP = {
-  rampWaves: 11,       // waves until full heat (wave 12)
+  rampWaves: 18,       // waves until full heat. Was 11 — the opening now runs
+                       // on far fewer bodies, so the speed has room to take
+                       // longer over the same distance.
   // Superhot runs these at 19-34 m/s while you move; we deliberately do NOT
   // match that. This is a nudge (+27%), not a conversion — the power
   // fantasy depends on rounds you can still read and walk out of.
   bulletBase: 16,      // reference enemy bullet speed, m/s
-  bulletFloor: 0.55,   // fraction of reference on wave 1
+  bulletFloor: 0.34,   // fraction of reference on wave 1. 16 x 0.34 = 5.4 m/s,
+                       // which crosses a 16 m room in three seconds: a round
+                       // you can watch coming and walk out of, before anybody
+                       // has been given a way to slow it down.
   bulletRange: 0.45,   // added across the ramp
   bulletCap: 1.35,     // hard ceiling including the late-game creep
   lateCreep: 0.02,     // per wave past the ramp
@@ -79,18 +84,53 @@ export const RAMP = {
 // -- is the whole game in four beats, and it cannot be learned while three
 // people are shooting at you. So the opening doors deal it out one beat at a
 // time and then get out of the way.
-// THE FIRST FOUR DOORS ARE A RAMP, and it is a ramp in two separate dials:
-// how many bodies the leg holds at all, and how many of them may be on you at
-// once. Doors 1-2 are one man in the whole corridor. Door 3 is two men, but
-// strictly one at a time — the same beat twice, not a new problem. Door 4 is
-// the first time two can be up together, which is where the game proper
-// starts. Both dials moving separately is what stops "more enemies" and
-// "harder fight" arriving on the same door.
+// ---------------------------------------------------------------------------
+// THE OPENING RAMP
+//
+// Every dial below moves on the same shape, and it is the shape a person
+// actually learns on: hold a value for a while, step up by one, then hold the
+// NEXT value for LONGER. The bands widen, so each new number gets more room
+// than the one before it — which is the opposite of a curve that compounds,
+// and the reason the old one had a cliff at door 5 (one body at door 4, a
+// leg wanting twenty-four at door 5).
+//
+//   ramp(d, first) — value 1 covers doors 1..first, value 2 the next first+1,
+//   value 3 the next first+2, and so on.
+//
+// Four dials, moved on four different schedules on purpose. "More rooms",
+// "more bodies", "more of them at once" and "they shoot sooner" must never
+// arrive on the same door: one change per step is the whole idea.
+export function ramp(d, first) {
+  let v = 1, from = 1, width = first;
+  while (d >= from + width) { from += width; width++; v++; }
+  return v;
+}
+export const OPENING = {
+  legsEvery: 4,        // rooms/corridors behind one door: 1 for doors 1-4,
+                       // 2 for 5-9, 3 for 10-15, 4 for 16-22, 5 for 23-30...
+  bodiesEvery: 2,      // bodies in the WHOLE door: 1 for 1-2, 2 for 3-5,
+                       // 3 for 6-9, 4 for 10-14, 5 for 15-20, 6 for 21-27...
+  // (There is no separate "bodies per leg" dial. A door's budget is split
+  //  evenly across its legs, remainder to the last of them, so the per-leg
+  //  count is a RESULT — 1 while a door holds one, 2 when a single-leg door
+  //  holds two, and back to 1 the moment the door grows a second leg. A dial
+  //  on top of that could only ever clip the budget: an early version capped
+  //  door 3 at one body per leg, which turned it back into door 1.)
+  aliveEvery: 3,       // how many may be up at once: 1 for 1-3, 2 for 4-8,
+                       // 3 for 9-15, 4 for 16-24...
+  corridorDoors: 3,    // no rooms at all before this: one shape to learn first
+  legsCap: 5,
+  // THE ROOM'S SHOT FLOOR, in world seconds. Three seconds between one enemy
+  // firing and the next for the first ten doors — long enough to deal with
+  // each round as its own event — then closing to the reflex gap the deep
+  // game runs on.
+  gapDoors: 10,        // ...held flat until here
+  gapFrom: 3.0,
+  gapTo: 0.28,
+  gapBy: 25,           // ...and all the way down by this door
+};
+
 export const EARLY = {
-  oneBodyDoors: 2,     // doors 1-2 hold exactly ONE enemy, whole leg
-  twoBodyDoors: 4,     // doors 3-4 hold exactly TWO
-  soloDoors: 3,        // ...and up to door 3, never more than one alive
-  twoAliveDoors: 4,    // door 4 is the first pair you meet together
   gunnerOnlyDoors: 5,  // no other type may debut before this door
   oneRoundDoors: 5,    // and only one enemy round may be in the air at once
 };
@@ -462,6 +502,13 @@ export const SHATTER = {
 
 // The slow-mo bank.
 export const TIME = {
+  // THE CONTROL IS UNLOCKED, NOT TAUGHT. The onboarding never mentions it: a
+  // player who has just been handed a corridor and a gun wants to shoot
+  // something, not to learn a resource. It arrives at this door, with a name
+  // and a banner, as a new power — by which point they have cleared three
+  // doors of one or two men at a bullet speed they can walk out of, and know
+  // exactly what it is going to be useful for.
+  unlockDoor: 4,
   base: 5,             // seconds at wave start (and the floor each wave)
   bonus: 2,            // seconds refunded per kill
   cap: 10,             // bank ceiling

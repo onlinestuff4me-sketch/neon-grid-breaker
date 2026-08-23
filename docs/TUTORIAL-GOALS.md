@@ -39,125 +39,92 @@ death rewinds to the start of the current area and nothing further back.
 
 ---
 
+## The fifth goal, added after the first real playtests
+
+### 5. Let them play before you teach them a system
+
+The onboarding used to introduce slow motion in its fifth lesson: the freeze,
+the button, the meter, the bank, the cost. Five lessons in, before the player
+had shot anything.
+
+People love shooting these bodies and watching them shatter. That is the game,
+and it is fun at full speed. A resource with a bar and a cost is not something
+a first-time player wants in their first ninety seconds — it is something they
+want once the rhythm is a habit and the rounds have started arriving faster
+than a walk can answer.
+
+So: **the onboarding never mentions slow motion.** Move, look, walk to the
+mark, get out of the way of three rounds, take the gun, shatter three men, go
+through the door. The button and the meter are not on the screen and the
+control is inert. Slow motion arrives **at door 4** with a banner and its own
+entrance animation — as a thing you unlock rather than a fifth thing to read.
+
+The freeze in the dodge lesson is *not* that mechanic being introduced early.
+It is the game buying the player a moment to read three words, and the thing
+that releases it is the only control they have: their thumb.
+
+---
+
 ## The lessons
 
-Fifteen beats. The first nine teach; the last six are the ramp into the
-ordinary game, and are where the difficulty curve actually starts.
-
-| # | area | lesson | ends when |
-|---|---|---|---|
-| 1 | straight hallway | **Move** | they reach the turn at the end |
-| 2 | the turn | **Look** | they have swept the view round the corner |
-| 3 | two more turning legs, then a forking one | **Move + look together** | they reach the end of the fork's rejoin |
-| 4 | single hallway, barrier 6 cells ahead | **Stand here** | they reach the barrier |
-| 5 | same | **Slow time to dodge** | they dodge the round |
-| 6 | same | **Dodge three rounds** | the third is dodged |
-| 7 | same | **The meter is finite** | they let time run again |
-| 8 | same | **Shoot** | all three are down |
-| 9 | same | **Go through the door** | they cross it |
-| 10 | room | one enemy, fires on entry | it is down |
-| 11 | straight hallway | one enemy blocking the door | it is down |
-| 12 | room | two enemies, taking turns | both down |
-| 13 | hallway | two enemies | both down |
-| 14 | room | three enemies | all down |
-| 15 | hallway | three enemies, one then two | all down |
+Seven, then six training areas, then the game.
 
 ### 1. Move
-
-A straight hallway. `DRAG TO MOVE` on the left with the thumb-stick coach
-animation, **and it stays there the whole way down**. Nothing else on screen —
-no gun, no time button, no meter, no door counter. At the end of the hallway,
-the corridor turns right.
+`DRAG TO MOVE`, left half, thumb coach, dotted divider down the middle.
+Nothing else on the screen. Ends at the first corner.
 
 ### 2. Look
+`DRAG TO LOOK` joins it on the right with its own coach — **and `DRAG TO MOVE`
+stays**, because the point is that looking is a separate action you do at the
+same time. Ends at the end of the next straight.
 
-Reaching the turn, `DRAG TO LOOK` appears on the right with the side-to-side
-coach animation. **`DRAG TO MOVE` and its thumb-stick stay on screen**, because
-the point being made is that looking is a *separate* action that happens at the
-same time as moving — not a mode you switch into.
-
-### 3. More corners, and a fork
-
-Two more legs that turn, then a third that forks and rejoins into one hallway.
-Both prompts and both coach animations stay up throughout. The fork exists to
-show that a branch is not a wrong turn.
+### 3. Corners
+Both prompts stay through two more turns and a fork that rejoins. Ends **at
+the last corner** — which is where the barrier comes into view.
 
 ### 4. Stand here
+The prompts go. The barrier has been standing there since the first frame of
+the run; `STAND HERE` is painted on it, and from the last corner it is legible
+at 32 m. Ends when they reach it.
 
-The prompts finally go. In the single hallway a black barrier stands 6 cells
-ahead with `STAND HERE` hovering above it. This is the first thing they are
-asked to *aim* at rather than just do.
+### 5. Three rounds, dodged with a thumb
 
-### 5. Slow time to dodge
-
-At the barrier, one enemy appears 4 cells beyond it, raises his arm and fires.
-
-**The game freezes on the ROUND, not on the telegraph.** He shoots first; the
-round clears the muzzle and covers nearly half the distance; and *then*
-everything stops — bullet, enemy, corridor — with the thing they have to get
-out of the way of hanging in the air in front of them, a ring drawn on it. Only
-then does the prompt come up:
+One gunner appears four cells past the barrier, raises his arm, and **fires**.
+The round clears the muzzle, covers nearly half its flight, and **the world
+stops** — with the round hanging in the air between them, a ring drawn on it.
 
 > **DODGE THE BULLET**
-> *TAP HERE TO SLOW TIME* → *(pointer to the button)*
+> *(a thumb, directly under the words, swiping side to side)*
 
-Freezing before the trigger meant those words arrived with no bullet anywhere
-on the screen: the player was being asked to dodge a thing they had never seen.
+Nothing moves until they step aside. Not a timer, not a button — sideways
+movement, at least 0.85 m of it, and more sideways than forward, because
+walking *into* the round is not dodging it. Then time runs, the round goes
+past at ordinary speed, the words fade, and the next one comes.
 
-Nothing moves until they tap. On the tap the round travels again — at a pace a
-person can read, not the standing-still crawl the ordinary rule gives — the
-prompt and pointer go, and `DRAG TO MOVE` comes back with its coach swiping
-**sideways**, because the second half of the lesson is *what to do now that
-time is slow* and an upward swipe over the move stick reads as "forward", which
-is straight into the round.
+Three times. **A death here rewinds to this beat and keeps the dodges already
+banked** — being made to dodge all three again is being punished for getting
+two of them right.
 
-Then the world runs again and **the whole beat repeats** for the second man and
-the third: appear, arm, shot, freeze, tap, move. Repetition, not escalation.
+### 6. The gun, and the other two
 
-Dying here rewinds to exactly this beat: enemy raising his arm, freeze, prompt.
+The squad arrives and the weapon comes up on the same beat as the words that
+name it: `TAP ANYWHERE TO SHOOT`. Nothing else is on screen. This is the first
+thing the player is asked to do *to* somebody rather than get away from.
 
-### 6. Three rounds
+The magazine is drawn — as cartridges, not bar-chart blocks — and it does not
+run down. Running dry and reading `RELOADING` is a fourth thing to learn on the
+beat that is teaching the trigger. Scarcity starts at the first real door.
 
-Two more enemies appear and fire one at a time, 2–3 seconds apart, so three
-rounds have to be dodged in sequence. There is no meter yet, so they can stay
-in slow motion for the whole thing. This is repetition, not escalation.
+Ends when all three are down. Then the barrier sinks and the door opens.
 
-### 7. The meter
+### 7. The door
+`GO TO THE NEXT ROOM`. Ends when they cross.
 
-Only after the third round is dodged does the bar appear, labelled
-**SLOW TIME METER**, and only then does it start draining — 100% to 50% at a
-readable rate, then to a crawl. The message and pointer explain it. It ends
-when they let time run again.
-
-The meter is introduced *after* the dodging, not during it, because a resource
-you are watching drain while you are learning to dodge is two lessons at once.
-
-### 8. Shoot
-
-The gun rises into frame and the prompt says to fire. Three enemies to clear.
-
-### 9. The door
-
-The barrier sinks into the floor and `GO TO THE NEXT ROOM` appears.
-
-### 10–15. The ramp
-
-The teaching is over; these are the first real fights, and each one is a
-checkpoint. Dying in any of them puts the player back at the start of *that*
-area, not further.
-
-| # | shape | who is in it |
-|---|---|---|
-| 10 | room | 1 enemy in front of the exit door, fires as they enter |
-| 11 | straight hallway | 1 enemy blocking the door at the end |
-| 12 | room | 2 side by side; the second fires only after the first's round is dodged or the first is down |
-| 13 | hallway | 2 |
-| 14 | room | 3 |
-| 15 | hallway | 3 — one, then two close behind |
-
-Area 15 hands over to the ordinary generated tunnel with no seam: the same
-corridor generator, the same protocol composer, the same difficulty curve
-picking up where the ramp left it.
+### 8–13. The training areas
+Room, hall, room, hall, room, hall with 1, 1, 2, 2, 3, 3 bodies. Real fights
+and checkpoints; the teaching is over. The only words left are a single
+reminder — `TAP ANYWHERE TO SHOOT`, on the first man to raise his arm in an
+area, **once per area**, spent the moment they fire.
 
 ---
 
@@ -170,8 +137,16 @@ written down:
 * `DOOR 1 · OPEN — GO` printed over `DRAG TO MOVE`
 * the ammo readout on screen before the gun exists
 * the "straight hallway" arriving with a five-cell pillared room in it
-* a round arriving while the meter is being explained
 * two enemies while the lesson is one enemy
-* a death costing more ground than the current area
+* a death costing more ground than the current area — or costing dodges the
+  player has already banked in the beat they died on
 * invulnerability during the lesson, which teaches that a hit is survivable
-* a bullet slower than the game's, which teaches the wrong timing
+* a resource, a bar and a cost before the player has shot anything
+* a magazine that runs dry on the beat that teaches the trigger
+
+One that used to be on this list has come off it, and the reason matters: *"a
+bullet slower than the game's, which teaches the wrong timing."* The rounds in
+the onboarding are still exactly the game's rounds — but the GAME's rounds are
+slower now for the opening doors and speed up across the first eighteen, so
+what the lesson teaches is the timing of the game the player is about to play.
+The rule was right; it was the constant behind it that was wrong.

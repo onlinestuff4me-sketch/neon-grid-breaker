@@ -1,5 +1,76 @@
 # TIME SHATTER — balance reference
 
+## The opening ramp
+
+Every dial in the first thirty doors moves on the same shape, and it is the
+shape a person actually learns on: **hold a value for a while, step up by one,
+then hold the next value for LONGER.** The bands widen, so each new number gets
+more room than the one before it — the opposite of a curve that compounds.
+
+```js
+ramp(d, first)   // value 1 covers doors 1..first,
+                 // value 2 the next first+1, value 3 the next first+2, …
+```
+
+Four dials, on four different schedules **on purpose**. "More rooms", "more
+bodies", "more of them at once" and "they shoot sooner" must never arrive on
+the same door: one change per step is the whole idea.
+
+| door | legs | bodies | split | alive at once | bullet m/s | shot gap |
+|---|---|---|---|---|---|---|
+| 1 | 1 | 1 | 1 | 1 | 5.4 | 3.00 s |
+| 2 | 1 | 1 | 1 | 1 | 5.8 | 3.00 s |
+| 3 | 1 | **2** | 2 | 1 | 6.2 | 3.00 s |
+| 4 | 1 | 2 | 2 | **2** | 6.6 | 3.00 s |
+| 5 | **2** | 2 | 1+1 | 2 | 7.0 | 3.00 s |
+| 6 | 2 | **3** | 1+2 | 2 | 7.4 | 3.00 s |
+| 8 | 2 | 3 | 1+2 | **3** | 8.2 | 3.00 s |
+| 10 | **3** | **4** | 1+1+2 | 3 | 9.0 | 3.00 s |
+| 15 | 3 | 5 | 1+2+2 | 4 | 11.0 | 2.09 s |
+| 20 | 4 | 5 | 1+1+1+2 | 5 | 12.6 | 1.19 s |
+| 30 | 5 | 7 | 1+1+1+2+2 | 6 | 12.6 | 0.28 s |
+| 50 | 5 | 9 | 1+2+2+2+2 | 8 | 12.6 | 0.28 s |
+
+**A door is made of legs.** One for the opening doors, more as the ramp widens
+— so "deeper" is a longer walk before the next door as well as a busier one.
+Only the last leg of a door counts as the door; the ones before it are more
+corridor behind the same number.
+
+**There is no separate "bodies per leg" dial.** A door's budget is split evenly
+across its legs, remainder to the last of them, so the per-leg count is a
+*result*: 1 while a door holds one, 2 when a single-leg door holds two, and
+back to 1 the moment the door grows a second leg. A dial on top of that could
+only ever clip the budget — an early version capped door 3 at one body per leg,
+which turned it back into door 1.
+
+**The first three doors are corridors.** A vault or an atrium is a second thing
+to read on a door whose whole job is the four-beat rhythm — see him, watch the
+round leave, step out of it, shatter him.
+
+**The shot floor is three seconds** for the first ten doors: long enough that
+every round is its own event, rather than a room going off at once. It closes
+to the deep game's 0.28 s by door 25.
+
+**What this replaced.** The old rule sized a leg from its own geometry — every
+stretch worth a few bodies, the approach worth one last group — with a hard
+table for doors 1–4 on top. Which is why door 4 held one body and door 5's leg
+wanted **twenty-four**. That cliff is the single thing this ramp exists to
+remove.
+
+**What it costs.** The deep game is much less dense than it was: door 50 is
+nine bodies across five legs rather than a capped thirty in one. Depth is now
+long before it is crowded. If that is the wrong trade, `OPENING` in
+`src/balance.js` is four numbers and a cap.
+
+## Slow motion is unlocked, not taught
+
+`TIME.unlockDoor` (4). Before it the button and the meter are not drawn and
+`setTimeLocked` refuses — there is nothing to discover early and nothing to
+miss. On the door it unlocks, the headline is the unlock rather than the
+corridor's shape, and the button makes the entrance the onboarding used to give
+it. See docs/TUTORIAL-GOALS.md §5 for why it is deferred at all.
+
+
 <!-- GENERATED FILE — do not edit by hand.
      Source of truth: src/balance.js
      Regenerate:      node tools/gen-balance-doc.mjs -->

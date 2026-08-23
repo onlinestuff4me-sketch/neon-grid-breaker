@@ -82,9 +82,10 @@ function validate() {
   // not just the dodge at the end of it.
   const KIND_EVENTS = {
     froze: ['held', 'freeze'],
-    dodged: ['held', 'freeze', 'dodge'],
+    dodged: ['held', 'freeze', 'dodge', 'shot'],
     resumed: ['meter', 'resume'],
     cleared: ['kill', 'threat', 'freeze', 'low', 'resume', 'ready', 'shot'],
+    gunUp: ['shot'],
     // a training room: a real fight, so the whole reminder loop is live in it
     crossed: ['threat', 'freeze', 'low', 'resume', 'ready', 'shot', 'kill'],
   };

@@ -35,23 +35,23 @@ Two rules keep the split honest:
 
 ## The sequence
 
-Eighteen steps carrying fifteen lessons. The spec is
-`docs/TUTORIAL-GOALS.md`; this table is what the build does.
+Fourteen steps. The spec is `docs/TUTORIAL-GOALS.md`; this table is what the
+build does.
 
-| step | lesson | what the player sees | ends when |
-|---|---|---|---|
-| `move` | 1 | `DRAG TO MOVE`, left half, thumb coach, dotted divider. Nothing else on screen at all. | they reach the corner (spine index, not a distance) |
-| `look` | 2 | `DRAG TO LOOK` joins it on the right with its own coach — **and `DRAG TO MOVE` stays**, because the point is that looking is a separate action you do at the same time | they reach the end of the next straight |
-| `corners` | 3 | both prompts stay up through two more turns and a fork that rejoins | **they turn the last corner** |
-| `stand` | 4 | prompts go; the barrier is already standing 32 m down the straight and `STAND HERE` is on it from this frame | they reach the barrier |
-| `dodge1` | 5 | a gunner appears four cells beyond it, raises his arm and **fires** — and the world stops with the round in the air, ringed, half way to them. `DODGE THE BULLET` over `TAP HERE TO SLOW TIME`, pointer on the button | they press the button |
-| `dodgeMove` | 5b | the round travels again, at a pace a person can read; the prompt becomes `DRAG TO MOVE` with the coach swiping **sideways** | the round goes past |
-| `dodge3` | 6 | two more appear beside him and take the same turn each: arm, shot, freeze, tap, move. No meter yet, so slow motion is free | three rounds dodged |
-| `meter` | 7 | the bar appears for the first time, drains, and explains itself | they let time run |
-| `gunup` | 8a | the weapon rises on the reload rig | the rise finishes |
-| `shoot` | 8b | `TAP ANYWHERE TO SHOOT`; magazine topped up | all three down |
-| `exit` | 9 | barrier sinks, door opens, `GO TO THE NEXT ROOM` | they cross |
-| `ramp1`–`ramp6` | 10–15 | room/hall/room/hall/room/hall with 1,1,2,2,3,3 enemies. No prompts: the teaching is over | they cross each door |
+| step | what the player sees | ends when |
+|---|---|---|
+| `move` | `DRAG TO MOVE`, left half, thumb coach, dotted divider. Nothing else on screen at all. | they reach the corner (spine index, not a distance) |
+| `look` | `DRAG TO LOOK` joins it on the right with its own coach — **and `DRAG TO MOVE` stays** | they reach the end of the next straight |
+| `corners` | both prompts stay through two more turns and a fork that rejoins | **they turn the last corner** |
+| `stand` | prompts go; the barrier is already standing 32 m down the straight and `STAND HERE` is on it from this frame | they reach the barrier |
+| `dodge` | a gunner appears, raises his arm and **fires** — the world stops with the round ringed in mid-air, `DODGE THE BULLET`, and a thumb swiping side to side directly under the words. Stepping aside releases it; the round goes past at ordinary speed. Three times. | three rounds dodged |
+| `shoot` | the other two arrive and the weapon comes up with `TAP ANYWHERE TO SHOOT`. Magazine drawn as cartridges, and it does not run down | all three down |
+| `exit` | barrier sinks, door opens, `GO TO THE NEXT ROOM` | they cross |
+| `ramp1`–`ramp6` | room/hall/room/hall/room/hall with 1,1,2,2,3,3 enemies. One reminder only: `TAP ANYWHERE TO SHOOT`, once per area, spent when they fire | they cross each door |
+
+**There is no time button anywhere in it, and no meter.** The slow-motion
+control is deferred past the whole onboarding and unlocks at door 4 — see
+`docs/TUTORIAL-GOALS.md` §5, and `docs/BALANCE.md` for the unlock itself.
 
 ## The legs
 
@@ -226,40 +226,33 @@ The dodge lesson is **one beat played three times**:
 2. he raises his arm
 3. **he fires**
 4. the world stops, with the round in the air and a ring drawn on it
-5. the player taps the time button
-6. the round travels — at a readable pace, not the standing-still crawl
-7. `DRAG TO MOVE`, the coach swiping **sideways**
-8. they get out of the way
-9. the other two appear, and each does 2–8 again
-
-Three things about that are deliberate and were wrong before:
+5. `DODGE THE BULLET`, and a thumb swiping side to side directly under it
+6. **they step aside** — and that, not a button, is what releases the freeze
+7. the round goes past at ordinary speed and the words fade
+8. the next one comes
 
 **The freeze lands on the round, not on the arm.** It used to stop the world
 part-way up the telegraph, before the trigger — so `DODGE THE BULLET` arrived
-with no bullet anywhere on the screen, and a first-time player was being asked
-to get out of the way of something they had never seen. `TUTOR.freezeAfter`
-is a *fraction of the flight*, not a time or a distance, so it reads the same
-whoever fires it from wherever they are standing.
+with no bullet anywhere on the screen. `TUTOR.freezeAfter` is a *fraction of
+the flight*, so it reads the same whoever fires it from wherever they stand.
 
 **A ring is drawn on the frozen round.** A round is 8.5 cm across; nine metres
 down a corridor on a phone that is a few pixels, and the beat that stops the
-world to point at it was pointing at something the player could not find. The
-ring is screen-space and fixed-size, so it names the object without pretending
-the bullet is bigger than it is, and it goes the moment time runs.
+world to point at it was pointing at something the player could not find.
 
-**Time has a floor while the round is in the air.** The ordinary rule is that
-time moves when *you* move — `slowScale` is 0.05 — and at that rate a round
-nine metres out takes three minutes to arrive. On the one beat whose
-instruction is "dodge the bullet", the bullet did not appear to move at all.
-`TUTOR.dodgeScale` floors it at 0.18 for the dodging lessons only; it still
-speeds up when the player moves, and the ordinary rule comes back with the
-meter, which is the lesson about what slow time costs.
+**The release is `TUTOR.dodgeStepM` of sideways movement**, and more sideways
+than forward — walking *into* the round is not dodging it. This used to be the
+time button. It is not any more, because there is no time button: the freeze
+here is the game buying three words' worth of reading time, not a mechanic
+being introduced.
 
-And between rounds **the world runs again**. The next round has to be a fresh
-beat — arm, shot, freeze, tap — and it cannot be if the button is already down
-and the prompt telling them to press it is a lie. `held` un-fires `freeze` and
-`dodge` (see `BEAT_CYCLE`), which is what lets two declarative cues in
-`src/tutorial.js` play three times with no machinery in the step.
+**Standing still is not a way to die in this beat.** The round hangs there for
+as long as the player leaves it. That is deliberate — goal 4, in its strongest
+form — and it means a harness that wants a failed lesson has to ask for one.
+
+**A death keeps the dodges already banked.** `tutorRetry` rewinds to this beat
+and does *not* reset `tutorDodged`: dying on the third round and being made to
+dodge all three again is being punished for getting two of them right.
 
 ## The barrier is a fixture
 
@@ -281,54 +274,21 @@ grows one. Which meant three other things had to move:
 
 ## The training rooms
 
-The six ramp areas used to carry no words at all — the teaching was over, and
-the point of them was the habit rather than the lesson. That left the one
-control a new player forgets under pressure, the time button, unmentioned for
-the whole back half of the onboarding. They now carry a **three-cue reminder
-loop**, declared like any other cues:
+Six areas — room, hall, room, hall, room, hall — with 1, 1, 2, 2, 3, 3 bodies.
+Real fights and checkpoints; the teaching is over.
 
-| beat | what appears |
-|---|---|
-| somebody starts to aim (`threat`) | `TAP TO SLOW TIME` over the button |
-| they use it (`freeze`) | the words go |
-| the bar falls to half the tank (`low`) | `YOUR METER IS RUNNING OUT` under the meter, `TAP AGAIN TO RESUME` over the button |
-| they let time run (`resume`) | both go — and `resume` clears `threat`, so the next man to raise his arm starts it over |
+They used to carry a three-cue loop about the time button. There is no time
+button during the onboarding any more, so what is left is the one thing a
+player can forget under pressure on their first corridor: the trigger.
 
-### The first room nags; the rest do not
+`TAP ANYWHERE TO SHOOT`, on `threat` — the first man in the area to start
+aiming, so it answers something rather than captioning an empty corridor — and
+**`once` per area**, which means *spent by the action it asked for*. Shoot in
+this room and the words are gone for this room; the next room starts fresh,
+because `tutorSpent` is cleared with the step and an area **is** a step.
+`ramp1` carries no cue at all: the trigger was taught one screen ago.
 
-Room 1 (`ramp1`) runs the loop above for as long as the room lasts. The first
-time somebody is asked to use the control unprompted is the time they need it
-in front of them.
-
-**Every room after that marks the same cues `once`.** A cue with `once` is
-*spent by the action it asked for*, for the rest of that area:
-
-| the player… | …and the tip |
-|---|---|
-| slows time in this room | `TAP TO SLOW TIME` is spent — including if they slowed *before* anyone aimed |
-| lets time run again | `YOUR METER IS RUNNING OUT` and `TAP AGAIN TO RESUME` are spent |
-| pulls the trigger | `TAP ANYWHERE TO SHOOT` is spent |
-
-The state is per-area: `tutorSpent` is cleared by `tutorNext`, and a training
-area **is** a step. Room 3 starts fresh no matter what happened in room 2. Room
-1 is deliberately outside the rule.
-
-### …and the trigger waits its turn
-
-`TAP ANYWHERE TO SHOOT` appears on `ready` — which fires only once the player
-has **both** slowed time and let it run again in this area — and goes on
-`shot`. Neither event is cleared by anything: they are facts about the area,
-not beats in a loop.
-
-That ordering is the point. Slowing and resuming are what the player has just
-been taught, and a prompt about the trigger landing on top of one about the
-clock is two instructions competing for the same beat. Because the meter tips
-are `once` and are spent by the same resume that fires `ready`, the two can
-never be on screen together. It starts at `ramp3` — after the first hallway
-with anybody in it, which is where a player who has been shooting unprompted
-has proved they do not need it and one who has not is overdue.
-
-### Two other things the training rooms do differently
+Two other things the training areas do differently:
 
 * **every body leaves a clip**, and **drops do not sink**. Scarcity is the
   lever the whole game hangs off, and it is not a lever anyone can feel before
@@ -339,18 +299,6 @@ has proved they do not need it and one who has not is overdue.
 * **every area with more than one body in it takes turns** (`fireOrder`). Two
   rounds resolving on the same frame is one loud event a first-time player
   cannot parse; the same two a beat apart is a room reacting to them.
-
-**Half the tank, not half the bar.** A wave starts with `SLOWMO.base` seconds
-against a bar drawn to `SLOWMO.cap`, so the meter is *already* at 50% on the
-frame it appears — a warning at half the bar fired the instant the button was
-pressed. `warnAt` is a fraction of what the tank held when they reached for it,
-floored at the game's own `SLOWMO.low` so a tap on a nearly-empty tank is still
-warned.
-
-**And the drain is half price for the whole lesson** (`TUTOR.rampDrain`). The
-ordinary rate empties a full bank in about one training-room fight, so a player
-using the button the way they have just been taught to ran dry in the first
-room and spent the other five without it.
 
 ## The line at the top of the screen
 
@@ -364,36 +312,25 @@ The instruction is a field on the step (`hud`), so the tool edits it and the
 words follow the lesson rather than the geometry. An open door overrides it
 with `GO TO THE NEXT DOOR`, because that is a state rather than a step.
 
-## The handover, and the first four doors
+## The handover, and the opening ramp
 
-**One banner.** It used to be two — `TRAINING OVER · YOU'RE ON YOUR OWN` then
-`REACH THE RED DOOR` — followed by the new leg's own headline: three
-instructions in five seconds, on the exact frame that everything the lesson had
-been withholding arrived at once. It says `TRAINING COMPLETE · GO TO THE NEXT
-DOOR` and nothing else. (`IT OPENS UP`, the atrium form's headline, is gone
-too; it described nothing a player could act on.)
+**One banner:** `TRAINING COMPLETE · GO TO THE NEXT DOOR`. It used to be two,
+followed by the new leg's own headline — three instructions in five seconds, on
+the exact frame that everything the lesson had been withholding arrived at
+once. (`IT OPENS UP`, the atrium form's headline, is gone too; it described
+nothing a player could act on.)
 
 **Door 1 was empty.** `PLAYING` grants `spawns: false`, because a training
 area's bodies come from the LEG rather than the spawn queue. But `done` is
 entered on crossing into the **first real leg**, whose wave has just been
 composed and queued — so `tutorHoldsSpawns()` emptied that queue every frame
-until the onboarding finished ending, and the first door of the actual game had
-nobody behind it. `done` grants `spawns: true`.
+until the onboarding finished ending. `done` grants `spawns: true`.
 
-**And the opening ramp is two dials, not one.** `EARLY` now separates how many
-bodies a leg holds from how many may be on you at once:
-
-| door | bodies in the leg | alive at once |
-|---|---|---|
-| 1 | 1 | 1 |
-| 2 | 1 | 1 |
-| 3 | **2** | 1 |
-| 4 | 2 | **2** |
-
-Door 3 is the same beat twice rather than a new problem; door 4 is the first
-time two can meet you together, which is where the game proper starts. Moving
-the two dials on different doors is what stops "more enemies" and "harder
-fight" arriving on the same one.
+**And the opening ramp is four dials on four schedules.** The whole table, the
+shape it is built on and what it replaced are in `docs/BALANCE.md`; the short
+version is that a door is made of legs now, a door has a budget its legs split,
+and "more rooms" / "more bodies" / "more at once" / "they shoot sooner" never
+arrive on the same door.
 
 ## The pause button was gone for eight lessons
 

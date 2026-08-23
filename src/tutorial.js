@@ -62,28 +62,25 @@ export const TUTOR = {
   // the beat that teaches dodging, the bullet did not appear to move at all.
   // The floor lifts for the dodging lessons and the ordinary rule comes back
   // with the meter, which is the lesson that is about the cost of slow time.
-  dodgeScale: 0.18,
+  // HOW FAR SIDEWAYS COUNTS AS OUT OF THE WAY. The freeze in the dodge lesson
+  // is released by MOVING, not by a button — the slow-time control does not
+  // exist yet — so this is the whole answer to "have they done it".
+  dodgeStepM: 0.85,
   volleyGap: 2.6,       // seconds between rounds in the three-round lesson
   reshoot: 3.2,         // ...and the gap before a missed shot is retried
   // THE METER LESSON HAS A FLOOR. It empties at a readable rate to half, then
   // slows to a crawl, and never goes below a quarter: the player is being
   // taught that time is finite, not put in a hole they cannot climb out of
   // before anyone has told them how.
-  meterSecs: 7,         // full to the knee, in seconds. The code used to read
                         // this as full-to-EMPTY, so the half the player is
                         // being introduced to went in 3.5 s.
 
-  meterCrawlSecs: 70,   // ...and the rate below that
-  meterKnee: 0.5,
-  meterFloor: 0.25,
-  resumeDelay: 1.6,     // beat between the warning and what to do about it
   gunRise: 0.6,         // seconds for the weapon to swing up into frame
   rampFireDelay: 0.9,   // beat after entering a ramp room before anyone fires
   // HALF PRICE WHILE THEY ARE STILL LEARNING. The ordinary drain empties a
   // full bank in ten seconds of frozen world, which in a training room is
   // about one fight — so a player using the button the way they have just been
   // taught to ran dry in the first room and spent the other five without it.
-  rampDrain: 0.5,       // multiplier on the bank's drain, for the whole lesson
   // ...and where "it is running out" is worth saying out loud. HALF OF WHAT
   // THEY HAD WHEN THEY SLOWED TIME, not half of the bar: a wave starts with
   // `base` seconds against a bar drawn to `cap`, so the meter is ALREADY at
@@ -91,7 +88,6 @@ export const TUTOR = {
   // instant the button was pressed. Half the tank is what a player means by
   // half gone. The game's own `low` mark is the floor under it, so a tap on a
   // nearly-empty tank still gets warned.
-  warnAt: 0.5,          // fraction of the tank left that trips the reminder
   // NOTHING DEAD IN HERE. `dodgeRounds`, `faceRate` and `finalEnemies` used to
   // sit in this list, complete with sliders and help text in the tool, and not
   // one line of main.js read any of them: dragging "how many rounds must be
@@ -281,8 +277,12 @@ export const NO_GRANTS = {
   bank: false, ammo: false, aiFire: false, spawns: false, score: false,
 };
 // ...and what the ramp areas grant, which is simply "the game".
-const PLAYING = { gun: true, fire: true, timebtn: true, meter: true,
-  bank: true, ammo: true, aiFire: true, spawns: false, score: true };
+// What a training area grants: the game, MINUS the slow-motion control. That
+// is deferred past the whole onboarding on purpose (docs/TUTORIAL-GOALS.md) —
+// it arrives later as something you unlock, not as a fifth thing to read on
+// your first corridor.
+const PLAYING = { gun: true, fire: true, timebtn: false, meter: false,
+  bank: false, ammo: true, aiFire: true, spawns: false, score: true };
 
 // --- when a cue comes and goes ---------------------------------------------
 export const CUE_EVENTS = [
@@ -292,11 +292,7 @@ export const CUE_EVENTS = [
   ['dodge',   'a round goes past them'],
   ['kill',    'they drop one'],
   ['threat',  'somebody starts to aim at them'],
-  ['low',     'the meter falls past the warning mark'],
-  ['ready',   'they have slowed AND resumed time in this area'],
   ['shot',    'they pull the trigger'],
-  ['meter',   'the meter warning lands'],
-  ['resume',  'the player lets time run again'],
   ['advance', 'the step ends'],
 ];
 // `advance` as a HIDE is the same as "stays until the step ends", because the
@@ -332,54 +328,28 @@ export const ADVANCE_KINDS = [
   ['atBarrier','reached the barrier'],
   ['froze',    'stopped time (the world is held until they do)'],
   ['dodged',   'dodged N rounds'],
-  ['resumed',  'let time run again'],
   ['gunUp',    'the weapon has finished rising'],
   ['cleared',  'every enemy is down'],
   ['crossed',  'walked through the door'],
   ['none',     'never (the last step)'],
 ];
 
-// --- the training rooms' reminders -----------------------------------------
+// --- the training rooms' one reminder --------------------------------------
 //
-// THE FIRST ROOM NAGS; THE REST DO NOT.
+// The six training areas used to carry a three-cue loop about the time button.
+// The time button does not exist during the onboarding any more — the whole
+// slow-motion control is deferred past it — so what is left is the one thing
+// a player can forget under pressure on their first corridor: the trigger.
 //
-// Room 1 (`ramp1`) runs the reminders as a LOOP: somebody starts to aim and
-// the button is named; they use it and the words go; the bar falls past the
-// warning mark and it is named again with the way out; they let time run and
-// everything clears, ready for the next man to raise his arm. It repeats for
-// as long as the room lasts, because the first time somebody is asked to use
-// the control unprompted is the time they need it in front of them.
-//
-// Every room after that marks the same cues `once`. A cue with `once` is SPENT
-// by the action it asked for, for the rest of that area: a player who has
-// already slowed time in this room has answered the reminder, and showing it
-// again is nagging. The state is per-area — `tutorSpent` is cleared with the
-// step, and an area IS a step — so room 3 starts fresh regardless of what
-// happened in room 2.
-//
-// And once they have shown BOTH halves of the control in an area (`ready`),
-// there is room for the third instruction: the trigger. It waits behind the
-// clock deliberately — a prompt about shooting landing on top of one about
-// slowing time is two instructions competing for the same beat — and it goes
-// the moment they fire.
-const REMIND = [
-  { text: 'TAP TO SLOW TIME', slot: 'atbtn', arrow: 'down', hand: 'none',
-    pulse: true, on: 'threat', off: 'freeze' },
-  { text: 'YOUR METER IS RUNNING OUT', slot: 'top', arrow: 'up', hand: 'none',
-    pulse: false, on: 'low', off: 'resume' },
-  { text: 'TAP AGAIN TO RESUME', slot: 'atbtn', arrow: 'down', hand: 'none',
-    pulse: true, on: 'low', off: 'resume' },
-];
-const SHOOT_CUE = { text: 'TAP ANYWHERE TO SHOOT', slot: 'mid', arrow: 'none',
-  hand: 'none', pulse: true, on: 'ready', off: 'shot' };
-// the loop, for the first room only
-const RAMP_CUES = REMIND.map((c) => ({ ...c }));
-// ...and the once-per-area version every room after it uses
-const rem = (withShoot) => {
-  const out = REMIND.map((c) => ({ ...c, once: true }));
-  if (withShoot) out.push({ ...SHOOT_CUE, once: true });
-  return out;
-};
+// It is `once` per area, which means SPENT BY THE ACTION IT ASKED FOR. Shoot
+// in this room and the words are gone for this room; the next room starts
+// fresh, because `tutorSpent` is cleared with the step and an area IS a step.
+// It arrives on `threat` — somebody starting to aim — rather than on entry,
+// so it is an answer to something rather than a caption on an empty corridor.
+const REMIND_SHOOT = () => [{
+  text: 'TAP ANYWHERE TO SHOOT', slot: 'mid', arrow: 'none', hand: 'none',
+  pulse: true, on: 'threat', off: 'shot', once: true,
+}];
 
 export const STEPS = [
   // --- 1. MOVE -------------------------------------------------------------
@@ -440,129 +410,54 @@ export const STEPS = [
     cues: [{ text: 'STAND HERE', slot: 'world', arrow: 'none', hand: 'none',
       pulse: true, on: 'enter', off: 'advance' }],
   },
-  // --- 5-6. THE ROUND, THREE TIMES ----------------------------------------
-  // ONE BEAT, REPEATED. He appears, raises his arm, FIRES, and the world stops
-  // with the round in the air. The prompt names the button; the tap lets the
-  // round go at a pace you can read; DRAG TO MOVE — sideways — gets you out of
-  // its way. Then the world runs again and the next man does exactly the same
-  // thing, so the second and third rounds are the first one practised rather
-  // than a new problem.
+  // --- 5. THE ROUND, THREE TIMES ------------------------------------------
+  // ONE BEAT, REPEATED, AND THE ANSWER IS YOUR THUMB. He appears, raises his
+  // arm, FIRES, and the world stops with the round in the air. The words say
+  // dodge it and a thumb swipes side to side under them. Step out of the lane
+  // and time runs again on its own: the round goes past, the words fade, and
+  // the next one comes.
   //
-  // It used to freeze part-way through the telegraph, which meant the words
-  // DODGE THE BULLET arrived with no bullet on the screen.
+  // There is no time BUTTON here and no meter. The whole slow-motion control
+  // is deferred — see docs/TUTORIAL-GOALS.md — because a player who has just
+  // been handed a corridor and a gun wants to shoot something, not to learn a
+  // resource. The freeze in this lesson is the game buying them a moment to
+  // read three words, not a mechanic being introduced.
   {
-    id: 'dodge1', label: '5 · Slow time',
-    hud: 'DODGE THE ROUNDS',
-    advance: { kind: 'froze' },
-    // `bodies` is how many should be STANDING THERE, not how many to add.
-    // Declaring it per beat is what lets a retry rebuild the world: the steps
-    // after this one used to declare nothing, so clearField() on a death
-    // emptied the corridor and re-entering the step put nobody back.
-    grants: { timebtn: true }, bodies: 1, hardFreeze: true,
-    // ON `held` — the frame the world stops, which is now the frame after the
-    // shot. The prompt used to appear the instant the gunner did, 2.6 s before
-    // anything happened, and the button was live for that whole window: tapping
-    // in it satisfied the step, so the freeze, the telegraph and the entire
-    // "nothing moves until you press this" lesson were skipped by a player
-    // doing exactly what the screen said.
-    cues: [{ text: 'DODGE THE BULLET<span>TAP HERE TO SLOW TIME</span>',
-      slot: 'atbtn', arrow: 'down', hand: 'none', pulse: true,
-      on: 'held', off: 'freeze' }],
-  },
-  // --- 5b. ...NOW GET OUT OF THE WAY --------------------------------------
-  // Time is slow and the round is coming. The prompt is the one they already
-  // know, because the answer to "what do I do now" is the thing lesson 1
-  // taught them — but the hand swipes SIDEWAYS. An upward swipe over the move
-  // stick reads as "forward", which is into the round.
-  {
-    id: 'dodgeMove', label: '5b · Move out of the way',
-    hud: 'DODGE THE ROUNDS',
-    advance: { kind: 'dodged', need: 1 },
-    grants: { timebtn: true }, bodies: 1,
-    cues: [{ text: 'DRAG TO MOVE', slot: 'left', arrow: 'none', hand: 'sway',
-      pulse: false, on: 'enter', off: 'advance' }],
-  },
-  // --- 6. TWO MORE, THE SAME WAY -------------------------------------------
-  // The other two appear beside him and take the same turn: arm, shot, freeze,
-  // tap, move. Repetition, not escalation — there is still no meter, so slow
-  // motion costs nothing and the only thing being practised is the beat.
-  {
-    id: 'dodge3', label: '6 · Dodge three',
-    hud: 'DODGE THE ROUNDS',
+    id: 'dodge', label: '5 · Dodge three rounds',
     advance: { kind: 'dodged', need: 3 },
-    grants: { timebtn: true }, bodies: 3, hardFreeze: true,
-    // The pair below is a LOOP, not a sequence: `held` clears `freeze` and
-    // `dodge` on the way in (see BEAT_CYCLE in main.js), so the same two cues
-    // play again for the second round and the third.
-    cues: [
-      { text: 'DODGE THE BULLET<span>TAP HERE TO SLOW TIME</span>',
-        slot: 'atbtn', arrow: 'down', hand: 'none', pulse: true,
-        on: 'held', off: 'freeze' },
-      { text: 'DRAG TO MOVE', slot: 'left', arrow: 'none', hand: 'sway',
-        pulse: false, on: 'freeze', off: 'dodge' },
-    ],
+    // `bodies` is how many should be STANDING THERE, not how many to add.
+    // Declaring it per beat is what lets a retry rebuild the world.
+    grants: {}, bodies: 1, hardFreeze: true,
+    hud: 'DODGE THE ROUNDS',
+    // ON `held` — the frame the world stops, which is the frame after the
+    // shot. The hand is the instruction: a swipe across, under the words,
+    // over the half of the screen the move stick lives on.
+    cues: [{ text: 'DODGE THE BULLET', slot: 'mid', arrow: 'none', hand: 'sway',
+      pulse: false, on: 'held', off: 'dodge' }],
   },
-  // --- 7. THE METER --------------------------------------------------------
-  // Only now. A resource you watch drain while you are learning to dodge is
-  // two lessons at once.
+  // --- 6. THE GUN, AND THE OTHER TWO --------------------------------------
+  // The squad arrives and the weapon comes up on the same beat as the words
+  // that name it. Nothing else is on the screen: this is the first thing the
+  // player has been asked to DO to somebody rather than get away from.
   {
-    id: 'meter', label: '7 · The meter',
-    hud: 'WATCH THE METER',
-    advance: { kind: 'resumed' },
-    grants: { timebtn: true, meter: true }, bodies: 3, startMeter: true,
-    cues: [
-      // ONE SENTENCE, BROKEN WHERE IT READS BEST. It used to be a heading and
-      // a subtitle — a label for the bar and then a fact about it — which is
-      // two things to read on a beat that has one thing to say.
-      { text: 'YOUR METER DRAINS<br>WHILE TIME IS SLOW',
-        slot: 'top', arrow: 'up', hand: 'none',
-        pulse: false, on: 'enter', off: 'advance' },
-      // ...and what refills it, which is the fact that makes the meter make
-      // sense and was never stated anywhere.
-      // Four words. That it is limited is the bar draining in front of them,
-      // which teaches it better than a second line of text.
-      { text: 'TAP AGAIN TO RESUME',
-        slot: 'atbtn', arrow: 'down', hand: 'none',
-        pulse: true, on: 'meter', off: 'advance' },
-    ],
-  },
-  // --- 8. SHOOT ------------------------------------------------------------
-  {
-    id: 'gunup', label: '8a · Weapon up',
-    hud: 'ARM YOURSELF',
-    advance: { kind: 'gunUp' },
-    // gun: true so the rise is SEEN. Without it this step was 0.6 s of an
-    // empty corridor and the weapon then popped into frame on the next one.
-    grants: { gun: true, timebtn: true, meter: true, bank: true }, bodies: 3, raiseGun: true,
-    cues: [],
-  },
-  {
-    id: 'shoot', label: '8b · Shoot',
-    hud: 'CLEAR THE HALLWAY',
+    id: 'shoot', label: '6 · Shoot',
     advance: { kind: 'cleared' },
-    grants: { gun: true, fire: true, timebtn: true, meter: true, bank: true, ammo: true },
-    bodies: 3,
+    grants: { gun: true, fire: true, ammo: true },
+    bodies: 3, raiseGun: true,
+    hud: 'CLEAR THE HALLWAY',
     cues: [
       { text: 'TAP ANYWHERE TO SHOOT', slot: 'mid', arrow: 'none',
-        hand: 'none', pulse: true, on: 'enter', off: 'advance' },
-      // ON THE FIRST KILL, not on entry — so it is not a second lesson being
-      // taught alongside the first, it is the consequence of the first one
-      // landing, named at the moment the player can see it happen. This is
-      // where the meter's other half belongs: lesson 7 can only honestly say
-      // the bar is finite, because at lesson 7 there is nothing to kill.
-      { text: 'KILLS REFILL THE METER', slot: 'top', arrow: 'up',
-        hand: 'none', pulse: false, on: 'kill', off: 'advance' },
+        hand: 'none', pulse: true, on: 'enter', off: 'shot' },
     ],
   },
   // --- 9. THE DOOR ---------------------------------------------------------
   {
-    id: 'exit', label: '9 · The door',
+    id: 'exit', label: '7 · The door',
     advance: { kind: 'crossed' },
     // The score line comes on here — the first beat of the onboarding where
     // there is a door count worth having — and reads TRAINING · GO TO THE NEXT
     // DOOR rather than DOOR 1 · OPEN — GO.
-    grants: { gun: true, fire: true, timebtn: true, meter: true, bank: true,
-      ammo: true, score: true },
+    grants: { gun: true, fire: true, ammo: true, score: true },
     dropBarrier: true, openDoor: true, hud: 'GO TO THE NEXT DOOR',
     cues: [{ text: 'GO TO THE NEXT ROOM', slot: 'mid', arrow: 'none',
       hand: 'none', pulse: false, on: 'enter', off: 'advance' }],
@@ -571,28 +466,28 @@ export const STEPS = [
   // The teaching is over. Each of these is a real fight and a checkpoint: the
   // enemies come from the LEG rather than the step, and dying puts the player
   // back at the start of this area and nowhere further.
-  { id: 'ramp1', label: '10 · Room · 1', advance: { kind: 'crossed' },
+  { id: 'ramp1', label: '8 · Room · 1', advance: { kind: 'crossed' },
     grants: { ...PLAYING }, checkpoint: true, hud: 'CLEAR THE ROOM',
-    cues: RAMP_CUES.map((c) => ({ ...c })) },
+    cues: [] },
   // ...and from here on the reminders are once each, per area. The trigger
   // prompt starts after the first hallway with anybody in it, which is where
   // a player who has been shooting without being told has proved they do not
   // need it and one who has not is overdue.
-  { id: 'ramp2', label: '11 · Hall · 1', advance: { kind: 'crossed' },
+  { id: 'ramp2', label: '9 · Hall · 1', advance: { kind: 'crossed' },
     grants: { ...PLAYING }, checkpoint: true, hud: 'CLEAR THE HALLWAY',
-    cues: rem(false) },
-  { id: 'ramp3', label: '12 · Room · 2', advance: { kind: 'crossed' },
+    cues: REMIND_SHOOT() },
+  { id: 'ramp3', label: '10 · Room · 2', advance: { kind: 'crossed' },
     grants: { ...PLAYING }, checkpoint: true, hud: 'CLEAR THE ROOM',
-    cues: rem(true) },
-  { id: 'ramp4', label: '13 · Hall · 2', advance: { kind: 'crossed' },
+    cues: REMIND_SHOOT() },
+  { id: 'ramp4', label: '11 · Hall · 2', advance: { kind: 'crossed' },
     grants: { ...PLAYING }, checkpoint: true, hud: 'CLEAR THE HALLWAY',
-    cues: rem(true) },
-  { id: 'ramp5', label: '14 · Room · 3', advance: { kind: 'crossed' },
+    cues: REMIND_SHOOT() },
+  { id: 'ramp5', label: '12 · Room · 3', advance: { kind: 'crossed' },
     grants: { ...PLAYING }, checkpoint: true, hud: 'CLEAR THE ROOM',
-    cues: rem(true) },
-  { id: 'ramp6', label: '15 · Hall · 3', advance: { kind: 'crossed' },
+    cues: REMIND_SHOOT() },
+  { id: 'ramp6', label: '13 · Hall · 3', advance: { kind: 'crossed' },
     grants: { ...PLAYING }, checkpoint: true, hud: 'CLEAR THE HALLWAY',
-    cues: rem(true) },
+    cues: REMIND_SHOOT() },
   // ...AND IT LETS THE GAME SPAWN. `PLAYING` holds the spawn queue, because
   // a training area's bodies come from the LEG rather than the queue — but
   // `done` is entered on crossing into the FIRST REAL LEG, whose wave has
@@ -704,7 +599,6 @@ function normalise(steps) {
     dropBarrier: !!s.dropBarrier,
     openDoor: !!s.openDoor,
     raiseGun: !!s.raiseGun,
-    startMeter: !!s.startMeter,
     hardFreeze: !!s.hardFreeze,
     checkpoint: !!s.checkpoint,
     divider: !!s.divider,
