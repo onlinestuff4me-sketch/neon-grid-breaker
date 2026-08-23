@@ -2,9 +2,11 @@
 
 ## The opening ramp
 
-Four dials decide what the first forty doors feel like. There is a published
-reference for this — the shape, the staggering, and the whole table — at the
-artifact linked from the README; this is the source of truth it is generated
+Four dials decide how many men stand behind a door, a fifth — the **speed
+staircase** — decides how fast their rounds travel, and the staircase in turn
+decides the door slow time is unlocked on and the ten-door **school** that
+teaches it. There is a published reference for the first four at the artifact
+linked from the README; this file is the source of truth all of it is generated
 from, and `/tool` → **RAMP** is where the numbers are actually moved.
 
 ### The shape every dial moves on
@@ -71,58 +73,161 @@ Three seconds means every round is its own event rather than a room going off at
 once, which is exactly what the opening doors are teaching. Measured in *world*
 seconds, not real ones, so it stretches with everything else in bullet time.
 
-### Two things that are not bands
+### Bullet speed is a staircase, not a slope
 
-**Bullet speed** ramps linearly, not in steps: `RAMP.bulletFloor` (0.34) of
-the reference 16 m/s on door 1, reaching full at door 19. That opening
-speed is about 5.4 m/s, which crosses a 16 m room in three seconds:
-a round you can watch coming and walk out of, before anybody has been given a
-way to slow it down. Steps would be wrong here — the player is learning a
-*timing*, and a timing that jumps is a timing relearned.
+It used to be a line — `floor + range x diffT`, a new speed on every single
+door. Nobody acclimatises to a number that never sits still: each door was a
+little faster than the one before it and no speed was ever *the* speed you had
+learned. It steps now, and each tread is wide enough to stand on.
 
-**Corridors only, until door 4.** A vault, an atrium or a gallery is a
-second thing to read on a door whose whole job is the four beats — see him,
-watch the round leave, step out of it, shatter him. `forced()` pins the form.
+| doors | m/s | why |
+|---|---|---|
+| 1–5 | 5.4 | crosses a 16 m room in three seconds — a round you watch coming and walk out of |
+| 6–10 | 5.8 | one tread up, held just as long: the smallest change worth noticing |
+| 11 onward | +0.2 every 2 doors | a tread every couple of doors |
+| the door it reaches 12.0 | 12.0 | **slow time unlocks**, and the staircase stops |
+| ...and 10 doors after it | 12.0 | the school (below). One new thing at a time |
+| then | +0.2 every 2 doors, to 21.6 | climbing again, with the power in hand |
+
+`SPEED` in `src/balance.js`, read by `speedAt(door)`.
+
+### The door the power lands on is solved, not typed
+
+Slow time is not unlocked on a door number somebody picked. It is unlocked by
+the **speed reaching `SPEED.unlockM`** — the point at which walking out of a
+round stops being enough — and `unlockDoor()` solves the staircase for the door
+that happens on. On the shipped numbers that is **door 71**. Everything keys off
+that one answer: the button, the meter, the STAND HERE corridor that teaches it,
+and the school that follows. Move any tread and the whole lesson moves with it,
+because none of them carries a number of its own.
+
+There used to be a hand-typed `TIME.unlockDoor` here, and it could — and did —
+drift out of step with the speed it was supposed to be answering.
+
+**Door 71 is a long way in.** It is what the shipped treads add up to: 31 steps
+of 0.2 from 5.8, two doors each. If that is further than the power should be
+held back, the dial to move is `stepDoors` (1 instead of 2 puts it at door 41)
+or `stepM` (0.4 does the same). `/tool` → **RAMP** prints the solved door above
+the table and moves it as you drag.
+
+### The slow-time school — the ten doors after the unlock
+
+A power you are never made to want is a button you never press. For seventy
+doors the answer to a round is to walk out of it, and that answer keeps
+working — handing over the time button changes nothing on its own. So the doors
+right after it are built to ask the question:
+
+* **they fire in volleys.** Several men at once is the one shape a sidestep
+  cannot solve, because there is no side that is out of all of them. Two on the
+  unlock door, three by four doors in (`SCHOOL.volley`, `volleyBuild`).
+  A volley's telegraphs are *started* together — removing the gap between shots
+  was not enough, and measuring said so: the rounds still arrived 0.9–1.8 s
+  apart, evenly, because the gap only governs when a telegraph *ends*. The
+  rounds then leave `volleySpread` (0.18 s) apart rather than on one frame, so
+  it reads as three men and not as one noise. Measured rhythm: **0.2, 0.2,
+  2.45**, repeating.
+* **the men in a volley stand together** (`clusterM`, 4.5 m). The answer to a
+  volley — slow time, sweep across the group — has to pay for itself. A volley
+  spread down forty metres of corridor costs a full tank and returns one kill.
+* **the meter is cheap here.** Drain at 0.45x, kills paying 2x
+  (`drainMul`, `bonusMul`). The lesson is what the power is *for*, not what it
+  costs.
+* **the speed holds flat** at 12.0 for all ten doors. One new thing at a time.
+
+And it has a **mercy rule**. Running the bank dry in a room that only volleys is
+a hole you cannot climb out of: no meter, no answer, and the next volley arrives
+anyway. So an empty bank calms the room — back to one round in the air at a
+time, the metronome from the opening doors, which is survivable by walking and
+gives the kills back. It is hysteretic on purpose: dry at 0.35 s left
+(`dryAt`), and not volleying again until the bank is back to 2.5 s (`wetAt`).
+A single threshold flapped on the frame a kill paid out, which reads as a room
+that cannot make up its mind.
+
+Three lines of coach text ride on those states, in the onboarding's own slots:
+*TAP TO SLOW TIME* when a volley telegraphs and the button has gone untouched,
+*TAP AGAIN TO RESUME* when time is slow and the tank is nearly out, and
+*SHATTER THEM TO REFILL YOUR METER* while the room is calm.
+
+The lesson that introduces all of this is a second tutorial course — see
+docs/TUTORIAL.md.
+
+### A gap only works if a man will actually wait that long
+
+`shotGap()` says three seconds for the opening doors. He would wait `0.6`.
+
+The turn-taking rule holds a man at the end of his telegraph while somebody
+else's round is still the room's most recent event, with a ceiling so a crowd
+cannot deadlock each other into never firing. That ceiling was a flat 0.6 s —
+**shorter than the gap for every door up to about 20**. Measured at door 8,
+where the gap says three seconds: real intervals of 1.95, 0.4, 0.05, 0.05, 0.2,
+0.3. Two rounds five hundredths of a second apart is precisely the "one loud
+event you cannot parse" the floor exists to prevent, happening on the doors
+written to prevent it.
+
+The ceiling is now `gap + OPENING.holdSlack`, so the gap decides and the slack
+is only the deadlock guard it was always meant to be. Same door, after:
+3.03, 2.0, 0.1, 2.95, 2.2, 0.45, 2.65. **This makes the middle doors
+meaningfully slower than they have been playtested at** — it is the behaviour
+the numbers always claimed, but it is a change, and `holdSlack` is the dial to
+revert it with.
+
+### Corridors only, until door 4
+
+A vault, an atrium or a gallery is a second thing to read on a door whose whole
+job is the four beats — see him, watch the round leave, step out of it, shatter
+him. `forced()` pins the form.
 
 ### The whole curve
 
-| door | legs | bodies | split | alive | bullet m/s | shot gap | notes |
+| door | legs | bodies | split | alive | m/s | gap | volley |
 |---|---|---|---|---|---|---|---|
-| **1** | 1 | 1 | `1` | 1 | 5.4 | 3.00 | corridors only |
-| 2 | 1 | 1 | `1` | 1 | 5.8 | 3.00 | corridors only |
-| **3** | 1 | 2 | `2` | 1 | 6.2 | 3.00 | corridors only |
-| **4** | 1 | 2 | `2` | 2 | 6.6 | 3.00 | **slow motion unlocks** |
-| **5** | 2 | 2 | `1+1` | 2 | 7 | 3.00 |  |
-| **6** | 2 | 3 | `1+2` | 2 | 7.4 | 3.00 |  |
-| 7 | 2 | 3 | `1+2` | 2 | 7.8 | 3.00 |  |
-| **8** | 2 | 3 | `1+2` | 3 | 8.2 | 3.00 |  |
-| 9 | 2 | 3 | `1+2` | 3 | 8.6 | 3.00 |  |
-| **10** | 3 | 4 | `1+1+2` | 3 | 9 | 3.00 |  |
-| 11 | 3 | 4 | `1+1+2` | 3 | 9.4 | 2.82 |  |
-| 12 | 3 | 4 | `1+1+2` | 3 | 9.8 | 2.64 |  |
-| **13** | 3 | 4 | `1+1+2` | 4 | 10.2 | 2.46 |  |
-| 14 | 3 | 4 | `1+1+2` | 4 | 10.6 | 2.27 |  |
-| **15** | 3 | 5 | `1+2+2` | 4 | 11 | 2.09 |  |
-| **16** | 4 | 5 | `1+1+1+2` | 4 | 11.4 | 1.91 |  |
-| 17 | 4 | 5 | `1+1+1+2` | 4 | 11.8 | 1.73 |  |
-| 18 | 4 | 5 | `1+1+1+2` | 4 | 12.2 | 1.55 |  |
-| **19** | 4 | 5 | `1+1+1+2` | 5 | 12.6 | 1.37 |  |
-| 20 | 4 | 5 | `1+1+1+2` | 5 | 12.6 | 1.19 |  |
-| **21** | 4 | 6 | `1+1+2+2` | 5 | 12.6 | 1.01 |  |
-| 22 | 4 | 6 | `1+1+2+2` | 5 | 12.6 | 0.82 |  |
-| **23** | 5 | 6 | `1+1+1+1+2` | 5 | 12.6 | 0.64 |  |
-| 24 | 5 | 6 | `1+1+1+1+2` | 5 | 12.6 | 0.46 |  |
-| 25 | 5 | 6 | `1+1+1+1+2` | 5 | 12.6 | 0.28 |  |
-| **26** | 5 | 6 | `1+1+1+1+2` | 6 | 12.6 | 0.28 |  |
-| 27 | 5 | 6 | `1+1+1+1+2` | 6 | 12.6 | 0.28 |  |
-| **28** | 5 | 7 | `1+1+1+2+2` | 6 | 12.6 | 0.28 |  |
-| 29 | 5 | 7 | `1+1+1+2+2` | 6 | 12.6 | 0.28 |  |
-| 30 | 5 | 7 | `1+1+1+2+2` | 6 | 12.6 | 0.28 |  |
-| **35** | 5 | 7 | `1+1+1+2+2` | 7 | 12.6 | 0.28 |  |
-| **40** | 5 | 8 | `1+1+2+2+2` | 7 | 12.6 | 0.28 |  |
+| **1** | 1 | 1 | `1` | 1 | 5.4 | 3.00 |  |
+| 2 | 1 | 1 | `1` | 1 | 5.4 | 3.00 |  |
+| **3** | 1 | 2 | `2` | 1 | 5.4 | 3.00 |  |
+| **4** | 1 | 2 | `2` | 2 | 5.4 | 3.00 |  |
+| **5** | 2 | 2 | `1+1` | 2 | 5.4 | 3.00 |  |
+| **6** | 2 | 3 | `1+2` | 2 | 5.8 | 3.00 |  |
+| 7 | 2 | 3 | `1+2` | 2 | 5.8 | 3.00 |  |
+| **8** | 2 | 3 | `1+2` | 3 | 5.8 | 3.00 |  |
+| 9 | 2 | 3 | `1+2` | 3 | 5.8 | 3.00 |  |
+| **10** | 3 | 4 | `1+1+2` | 3 | 5.8 | 3.00 |  |
+| **11** | 3 | 4 | `1+1+2` | 3 | 6.0 | 2.82 |  |
+| 12 | 3 | 4 | `1+1+2` | 3 | 6.0 | 2.64 |  |
+| **13** | 3 | 4 | `1+1+2` | 4 | 6.2 | 2.46 |  |
+| 14 | 3 | 4 | `1+1+2` | 4 | 6.2 | 2.27 |  |
+| **15** | 3 | 5 | `1+2+2` | 4 | 6.4 | 2.09 |  |
+| **16** | 4 | 5 | `1+1+1+2` | 4 | 6.4 | 1.91 |  |
+| **17** | 4 | 5 | `1+1+1+2` | 4 | 6.6 | 1.73 |  |
+| 18 | 4 | 5 | `1+1+1+2` | 4 | 6.6 | 1.55 |  |
+| **19** | 4 | 5 | `1+1+1+2` | 5 | 6.8 | 1.37 |  |
+| 20 | 4 | 5 | `1+1+1+2` | 5 | 6.8 | 1.19 |  |
+| **21** | 4 | 6 | `1+1+2+2` | 5 | 7.0 | 1.01 |  |
+| 22 | 4 | 6 | `1+1+2+2` | 5 | 7.0 | 0.82 |  |
+| **23** | 5 | 6 | `1+1+1+1+2` | 5 | 7.2 | 0.64 |  |
+| 24 | 5 | 6 | `1+1+1+1+2` | 5 | 7.2 | 0.46 |  |
+| **25** | 5 | 6 | `1+1+1+1+2` | 5 | 7.4 | 0.28 |  |
+| **26** | 5 | 6 | `1+1+1+1+2` | 6 | 7.4 | 0.28 |  |
+| **27** | 5 | 6 | `1+1+1+1+2` | 6 | 7.6 | 0.28 |  |
+| **28** | 5 | 7 | `1+1+1+2+2` | 6 | 7.6 | 0.28 |  |
+| **29** | 5 | 7 | `1+1+1+2+2` | 6 | 7.8 | 0.28 |  |
+| 30 | 5 | 7 | `1+1+1+2+2` | 6 | 7.8 | 0.28 |  |
+| **35** | 5 | 7 | `1+1+1+2+2` | 7 | 8.4 | 0.28 |  |
+| **40** | 5 | 8 | `1+1+2+2+2` | 7 | 8.8 | 0.28 |  |
+| **50** | 5 | 9 | `1+2+2+2+2` | 8 | 9.8 | 0.28 |  |
+| **60** | 5 | 10 | `2+2+2+2+2` | 9 | 10.8 | 0.28 |  |
+| **70** | 5 | 11 | `2+2+2+2+3` | 10 | 11.8 | 0.28 |  |
+| **71** | 5 | 15 | `3+3+3+3+3` | 10 | 12.0 | 2.40 | 2 |
+| 72 | 5 | 15 | `3+3+3+3+3` | 10 | 12.0 | 2.40 | 2 |
+| **73** | 5 | 20 | `4+4+4+4+4` | 10 | 12.0 | 2.40 | 3 |
+| **80** | 5 | 20 | `4+4+4+4+4` | 11 | 12.0 | 2.40 | 3 |
+| **81** | 5 | 12 | `2+2+2+3+3` | 11 | 12.2 | 0.28 |  |
+| **90** | 5 | 12 | `2+2+2+3+3` | 12 | 13.0 | 0.28 |  |
+| **100** | 5 | 13 | `2+2+3+3+3` | 12 | 14.0 | 0.28 |  |
+| **120** | 5 | 15 | `3+3+3+3+3` | 14 | 16.0 | 0.28 |  |
 
-Bold doors are the ones where a dial moved. (Every door 1–30 is listed; past 30
-it is every fifth, because nothing but the bands changes.)
+Bold doors are the ones where something moved. (Every door 1–30, then samples.)
+Doors 71–80 are the school: the body counts there are the school's floor
+(a volley plus a spare per leg), not the ramp's own answer.
 
 ### What it replaced, and what it costs
 
@@ -132,33 +237,49 @@ bodies, the approach worth one last group — with a hard-coded table for doors
 door 5's leg wanted twenty-four**, with charging rushers. That cliff is the one
 thing this ramp exists to remove.
 
-What it costs: the deep game is much less dense than it was. Door 40 is nine
-bodies across five legs where the old curve capped at thirty in one. Depth is
-now long before it is crowded. If that is the wrong trade, `OPENING` in
-`src/balance.js` is four numbers and a cap — and `/tool` → RAMP shows what any
-change to them does to all forty doors before you play one.
+What it costs, and it is worth saying plainly:
+
+* **The deep game is much less dense than it was.** Door 40 is eight bodies
+  across five legs where the old curve capped at thirty in one. Depth is now
+  long before it is crowded.
+* **Door 81 is a drop.** The school holds twenty bodies a door; the ramp resumes
+  at twelve. That is deliberate — it reads as relief on the far side of the
+  hardest stretch in the game, with a new power in hand — but it is a step
+  down, not up.
+* **The telegraph ramp and the speed staircase no longer finish together, and
+  by a long way.** `RAMP.rampWaves` is 18, so an enemy raises his arm as fast
+  as he ever will by door 19 — where the round he then fires is still doing
+  6.8 m/s. Before the staircase this was one curve and the two moved as one.
+  It is not obviously wrong: "he shoots sooner, but the round is still
+  walkable" is a coherent way to spend the middle game. But it is now a
+  separate decision that nobody has made on purpose, and the dial is
+  **Telegraph · full heat by** in the RAMP pane.
+
+If either is the wrong trade, `/tool` → **RAMP** shows what any change does to
+every door before you play one.
 
 ### Where to change it
 
 | what | where |
 |---|---|
-| the numbers, with sliders and a live forty-door table | `/tool` → **RAMP** |
-| the numbers, in source | `OPENING` and `RAMP` in `src/balance.js` |
-| the reading of them | `doorLegs` / `doorBodies` / `doorAlive` / `legShare` / `shotGap` in `src/main.js` — all thin reads, none of them decides anything |
+| the numbers, with sliders and a live table to door 96 | `/tool` → **RAMP** |
+| the numbers, in source | `OPENING`, `SPEED`, `SCHOOL`, `RAMP` in `src/balance.js` |
+| the reading of them | `doorLegs` / `doorBodies` / `doorAlive` / `legShare` / `shotGap` / `enemyBulletSpeed` / `schoolVolley` / `schoolGap` in `src/main.js` — all thin reads, none of them decides anything |
 | a published reference to send somebody | the artifact linked from `README.md` |
 
 The tool's RAMP pane writes into the same override channel the balance sliders
 use, so an export carries it as a `ramp` block shaped like the balance module's
 own keys — a patch to paste, not a format to translate.
 
-## Slow motion is unlocked, not taught
+## Slow motion is unlocked, then taught
 
-`TIME.unlockDoor` (4). Before it the button and the meter are not drawn and
+Before the unlock door the button and the meter are not drawn and
 `setTimeLocked` refuses — there is nothing to discover early and nothing to
-miss. On the door it unlocks, the headline is the unlock rather than the
-corridor's shape, and the button makes the entrance the onboarding used to give
-it. See docs/TUTORIAL-GOALS.md §5 for why it is deferred at all.
-
+miss. On the door it unlocks, the run does not simply hand it over with a
+banner: it drops the player into a **second tutorial course**, with the same
+corner, barrier and STAND HERE the onboarding used, and teaches the button, the
+drain and the resume before letting the school have them. See
+docs/TUTORIAL.md and docs/TUTORIAL-GOALS.md §5.
 
 <!-- GENERATED FILE — do not edit by hand.
      Source of truth: src/balance.js
@@ -227,10 +348,6 @@ him, watch the round leave, step out of it, shatter him — has to be learnable
 once before it is asked for twice. See docs/PILLARS.md section 3.
 
 ```js
-oneBodyDoors     : 2
-twoBodyDoors     : 4
-soloDoors        : 3
-twoAliveDoors    : 4
 gunnerOnlyDoors  : 5
 oneRoundDoors    : 5
 ```
@@ -299,19 +416,24 @@ it is a real decision — which is the whole point of collecting on foot.
 
 ## Difficulty ramp
 
-`diffT` runs 0 → 1 across **11 waves** (full heat at wave
-12). In Rush Hour the wave number is replaced by
-`1 + rushT / 25`, so it ramps on the run clock instead.
+`diffT` runs 0 → 1 across **18 waves** (full heat at wave
+19) and drives the telegraph and the slow-mo cost. **Bullet
+speed is not on it** — it is the staircase in `SPEED`, stepped by door, and
+the column below is `speedAt(door)`. In Rush Hour the wave number is replaced
+by `1 + rushT / 25`, so everything ramps on the run clock instead.
 
 | | Bullet speed (m/s) | Telegraph scale | Slow-mo cost |
 |---|---|---|---|
-| wave 1 | 8.8 | 1.15× | 0.55× |
-| wave 6 | 12.073 | 0.864× | 0.755× |
-| wave 12 | 16 | 0.52× | 1× |
+| door 1 | 5.4 | 1.15× | 0.55× |
+| door 6 | 5.8 | 0.975× | 0.675× |
+| door 10 | 5.8 | 0.835× | 0.775× |
+| door 19 | 6.8 | 0.52× | 1× |
+| door 71 | 12 | 0.52× | 1× |
 
-Past wave 12, speed creeps 2 % per
-wave to a hard cap of 1.35× base. Rush Hour drains the bank at
-a flat 0.4×. An enemy must be in view for
+Slow time unlocks on **door 71**, where the staircase reaches
+12 m/s; it holds there for the 10-door
+school and then climbs again to a ceiling of 21.6 m/s. Rush Hour
+drains the bank at a flat 0.4×. An enemy must be in view for
 **0.45 s** before its telegraph may begin.
 
 ## Visibility, and the FOG condition

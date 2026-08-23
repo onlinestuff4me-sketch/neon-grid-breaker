@@ -47,23 +47,67 @@ export const DROPS = {
   pickupR: 2.0,        // walk this close and it is yours
 };
 
-// The difficulty ramp. diffT() runs 0 -> 1 across `rampWaves`, and bullet
-// speed, telegraph length and slow-mo cost all read from it.
+// ---------------------------------------------------------------------------
+// BULLET SPEED IS A STAIRCASE, NOT A SLOPE.
+//
+// It used to be a line: floor + range x diffT, a new speed every single wave.
+// Nobody acclimatises to a number that never sits still — each door was a
+// little faster than the one before it and no speed was ever the speed you
+// had learned. So it steps instead, and each tread is wide enough to stand
+// on: five doors at 5.4, five at 5.8, then a tread every couple of doors.
+//
+// The staircase also decides WHEN THE POWER ARRIVES. Slow time is not handed
+// out on a door number picked by hand — it is unlocked by the speed reaching
+// `unlockM`, the point at which walking out of a round stops being enough.
+// Then the staircase STOPS for `schoolDoors` while that is taught (see
+// SCHOOL below), and starts climbing again on the far side.
+export const SPEED = {
+  openM: 5.4,          // m/s for the opening doors. Crosses a 16 m room in
+                       // three seconds: a round you watch coming and walk out
+                       // of, before anybody has been given a way to slow it.
+  openDoors: 5,
+  holdM: 5.8,          // ...one tread up, held just as long
+  holdDoors: 5,
+  stepM: 0.2,          // ...then a tread this tall
+  stepDoors: 2,        // ...every this many doors
+  // WHERE THE POWER LANDS. Not a door number — a speed. `unlockDoor()` below
+  // solves for the door the staircase reaches it on, and the STAND HERE
+  // corridor, the time button and the meter all key off that one answer, so
+  // dragging any tread above moves the whole lesson with it.
+  unlockM: 12,
+  schoolDoors: 10,     // ...and the staircase holds there for this many doors
+                       // while slow time is taught. See SCHOOL.
+  capM: 21.6,          // hard ceiling. Superhot runs 19-34 m/s while you move;
+                       // we deliberately do NOT match that. The power fantasy
+                       // depends on rounds you can still read.
+};
+
+// The door the staircase first reaches `unlockM` on — and so the door the
+// slow-time lesson stands in. Derived, never typed.
+export function unlockDoor(S = SPEED) {
+  const first = S.openDoors + S.holdDoors + 1;
+  const treads = Math.max(1, Math.ceil((S.unlockM - S.holdM) / S.stepM));
+  return first + (treads - 1) * S.stepDoors;
+}
+
+// Enemy bullet speed in m/s on door `d`. The only reader of SPEED.
+export function speedAt(d, S = SPEED) {
+  const first = S.openDoors + S.holdDoors + 1;
+  const gate = unlockDoor(S);
+  if (d <= S.openDoors) return S.openM;
+  if (d < first) return S.holdM;
+  if (d < gate) return S.holdM + S.stepM * (Math.floor((d - first) / S.stepDoors) + 1);
+  if (d < gate + S.schoolDoors) return S.unlockM;
+  const n = Math.floor((d - gate - S.schoolDoors) / S.stepDoors) + 1;
+  return Math.min(S.capM, S.unlockM + S.stepM * n);
+}
+
+// The difficulty ramp. diffT() runs 0 -> 1 across `rampWaves`, and telegraph
+// length and slow-mo cost read from it. Bullet speed does NOT — see SPEED.
 export const RAMP = {
   rampWaves: 18,       // waves until full heat. Was 11 — the opening now runs
-                       // on far fewer bodies, so the speed has room to take
+                       // on far fewer bodies, so the rest has room to take
                        // longer over the same distance.
-  // Superhot runs these at 19-34 m/s while you move; we deliberately do NOT
-  // match that. This is a nudge (+27%), not a conversion — the power
-  // fantasy depends on rounds you can still read and walk out of.
-  bulletBase: 16,      // reference enemy bullet speed, m/s
-  bulletFloor: 0.34,   // fraction of reference on wave 1. 16 x 0.34 = 5.4 m/s,
-                       // which crosses a 16 m room in three seconds: a round
-                       // you can watch coming and walk out of, before anybody
-                       // has been given a way to slow it down.
-  bulletRange: 0.45,   // added across the ramp
-  bulletCap: 1.35,     // hard ceiling including the late-game creep
-  lateCreep: 0.02,     // per wave past the ramp
   aimBase: 1.15,       // telegraph/cooldown scale on wave 1
   aimRange: 0.63,      // subtracted across the ramp
   drainFloor: 0.55,    // slow-mo cost on wave 1
@@ -128,11 +172,71 @@ export const OPENING = {
   gapFrom: 3.0,
   gapTo: 0.28,
   gapBy: 25,           // ...and all the way down by this door
+  // HOW LONG A MAN WILL ACTUALLY WAIT HIS TURN, past the gap, before firing
+  // anyway. There has to be a ceiling — without one a crowd can hold each
+  // other into never firing at all — but it used to be a flat 0.6 s, which is
+  // SHORTER THAN THE GAP for every door up to about 20. Measured at door 8,
+  // where the gap says three seconds: real intervals of 1.95, 0.4, 0.05, 0.05,
+  // 0.2, 0.3. Two rounds five hundredths apart is the "one loud event you
+  // cannot parse" this floor exists to prevent, on the doors written to
+  // prevent it. The ceiling is the gap plus this, so the gap is what decides
+  // and this is only the deadlock guard it was always meant to be.
+  holdSlack: 0.6,
 };
 
 export const EARLY = {
   gunnerOnlyDoors: 5,  // no other type may debut before this door
   oneRoundDoors: 5,    // and only one enemy round may be in the air at once
+};
+
+// ---------------------------------------------------------------------------
+// THE SLOW-TIME SCHOOL — the doors that follow the unlock.
+//
+// A power you are never made to want is a button you never press. For the
+// first seventy doors the answer to a round is to walk out of it, and that
+// answer keeps working; handing over the time button changes nothing on its
+// own. So the doors right after it are built to ASK the question:
+//
+//   * they fire in VOLLEYS — several men at once, which is the one shape a
+//     sidestep cannot solve, because there is no side that is out of all of
+//     them;
+//   * the men in a volley stand CLOSE TOGETHER, so the answer to it — slow
+//     time, swing across the group, shatter them — refills the meter it cost;
+//   * and the meter is CHEAP here, because the lesson is "this is what it is
+//     for", not "this is what it costs".
+//
+// And it has a mercy rule. Running the bank dry in a room that only volleys
+// is a hole you cannot climb out of: no meter, no answer, and the next volley
+// arrives anyway. So an empty bank CALMS THE ROOM — back to one round in the
+// air at a time, the rhythm from the opening doors, which is survivable by
+// walking and gives the kills back. When the bank is worth spending again the
+// volleys return, and the reminder comes with them.
+export const SCHOOL = {
+  volley: 3,           // men who fire together once the school is in session
+  volleyBuild: 4,      // ...reached over this many doors, from 2
+  volleyGap: 2.4,      // world seconds between one volley and the next
+  // ...AND THE SPACING INSIDE ONE. Not zero. The school starts the telegraphs
+  // of a volley on the same frame, so with no floor at all they finished on
+  // the same frame too and three rounds left three muzzles simultaneously —
+  // one loud event you cannot parse, which is the exact thing the room's shot
+  // floor exists to prevent. A fifth of a second apart still reads as one
+  // volley and reads as three men.
+  volleySpread: 0.18,
+  clusterM: 4.5,       // how close a volley stands: a group you can sweep
+  spare: 1,            // ...plus this many, so a leg always holds a volley AND
+                       // somebody left to shoot once it has been answered
+  drainMul: 0.45,      // slow time costs this fraction of normal here
+  bonusMul: 2,         // ...and a kill pays back this much more
+  // THE MERCY RULE, in seconds left on the bank.
+  dryAt: 0.35,         // at or below this, the room calms to single rounds
+  wetAt: 2.5,          // ...and does not volley again until it is back to this
+  calmGap: 3.0,        // the calm room's gap: the opening doors' metronome
+  // VOLLEYS SURVIVED WITHOUT TOUCHING THE BUTTON before the reminder comes
+  // back. The counter starts PRIMED at this value, so the first volley of the
+  // school — and the first one after a dry spell — is spoken to; using the
+  // button zeroes it, which buys this many quiet volleys before the game says
+  // anything again.
+  remindAfter: 1,
 };
 
 // Wave size and mix.
@@ -502,13 +606,13 @@ export const SHATTER = {
 
 // The slow-mo bank.
 export const TIME = {
-  // THE CONTROL IS UNLOCKED, NOT TAUGHT. The onboarding never mentions it: a
-  // player who has just been handed a corridor and a gun wants to shoot
-  // something, not to learn a resource. It arrives at this door, with a name
-  // and a banner, as a new power — by which point they have cleared three
-  // doors of one or two men at a bullet speed they can walk out of, and know
-  // exactly what it is going to be useful for.
-  unlockDoor: 4,
+  // THE CONTROL IS UNLOCKED, NOT TAUGHT — and not on a door number either.
+  // It arrives when the STAIRCASE says it should: the door bullet speed first
+  // reaches SPEED.unlockM, the point at which walking out of a round stops
+  // being enough. `unlockDoor()` in this file is the only answer to "which
+  // door", and main.js asks it rather than carrying a number of its own.
+  // (There used to be a hand-typed `unlockDoor: 4` here. It could — and did —
+  // drift out of step with the speed it was supposed to be answering.)
   base: 5,             // seconds at wave start (and the floor each wave)
   bonus: 2,            // seconds refunded per kill
   cap: 10,             // bank ceiling

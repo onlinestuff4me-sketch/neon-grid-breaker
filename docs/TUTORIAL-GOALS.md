@@ -39,7 +39,7 @@ death rewinds to the start of the current area and nothing further back.
 
 ---
 
-## The fifth goal, added after the first real playtests
+## Two more goals, added after the first real playtests
 
 ### 5. Let them play before you teach them a system
 
@@ -56,24 +56,52 @@ than a walk can answer.
 So: **the onboarding never mentions slow motion.** Move, look, walk to the
 mark, get out of the way of three rounds, take the gun, shatter three men, go
 through the door. The button and the meter are not on the screen and the
-control is inert. Slow motion arrives **at door 4** with a banner and its own
-entrance animation — as a thing you unlock rather than a fifth thing to read.
+control is inert.
 
 The freeze in the dodge lesson is *not* that mechanic being introduced early.
 It is the game buying the player a moment to read three words, and the thing
 that releases it is the only control they have: their thumb.
 
-**The lesson that teaches it is kept, whole, and switched off.** `DEFERRED` in
-`src/tutorial.js` holds four complete steps — the button-released freeze, the
-move that answers it, the meter demo, and the per-area reminder loop — off the
-running order but *in the spec*. That means the machinery they drive
-(`hardFreeze` released by the button, `startMeter`, the `resumed` advance, the
-`meter`/`low`/`resume`/`ready` cue events, `tutorRefusesResume`) has a live
-consumer, `slowlesson.js` plays all four through on every run of the suite, the
-tool lists and edits them, and turning them back on is `deferred: false` rather
-than an excavation. That is the difference between machinery that is kept and
-machinery that rots — and the reason it matters is `tutorFired = true`, a
-leftover name from a deleted lesson that silently broke shooting for months.
+**It is deferred, not deleted — and it is taught, not just handed over.** The
+four slow-time steps used to sit in a `DEFERRED` list that nothing walked into;
+they are now the **second course**, entered mid-run on the door the speed
+staircase unlocks the power on. Same machinery, different list:
+
+| | course |
+|---|---|
+| `STEPS` in `src/tutorial.js` | the onboarding — move, look, corners, stand, dodge, shoot, exit, six training areas |
+| `DEFERRED` in `src/tutorial.js` | slow time — stand here (again), the button, the move that answers it, the meter, practice, handover |
+
+`tutorCourse` in `main.js` says which list `tutorOrder()` and `tutorLegsOf()`
+point at, and nothing below that line knows or cares which lesson it is running:
+the same freeze, the same cues, the same retry, the same authored legs, the same
+`marksFromPlan`. `deferred: true` no longer means "off" — it means "belongs to
+the second course".
+
+Two properties this preserves, and both of them were bought the hard way:
+`slowlesson.js` plays every step of the slow course through on every run of the
+suite, and the tool lists and edits them. A name that nothing reads is a name
+the next change can take — `tutorFired = true`, a leftover from a deleted
+lesson, silently broke shooting for months.
+
+### 6. Teach a power on the door it becomes necessary
+
+The unlock is not a door number somebody picked. Bullet speed climbs a
+staircase (`SPEED` in `src/balance.js`), and slow time arrives on the door that
+staircase reaches `unlockM` on — **the speed at which walking out of a round
+stops being enough**. On the shipped numbers that is door 71.
+
+What happens there is a lesson, not a banner. The corridor on the far side of
+that door is authored: one corner, a barrier, `STAND HERE` — the same furniture
+as onboarding lesson 4, and deliberately so. A player seeing it for the second
+time in a run already knows what it means, and that recognition is the cheapest
+possible way to say *stop and read this*. The gun stays in their hands; the only
+thing the lesson takes away is the button it is about to give them.
+
+Then ten doors of **school**, built to make the power wanted rather than merely
+available: volleys instead of single rounds, standing close enough together that
+sweeping them refills the meter the sweep cost, a cheap drain, and a mercy rule
+that calms the room whenever the bank runs dry. See `docs/BALANCE.md`.
 
 ---
 

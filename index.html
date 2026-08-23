@@ -306,6 +306,13 @@
      point of it is that the two halves of the glass do different jobs. */
   #tutor { position:fixed; inset:0; z-index:11; pointer-events:none; display:none; }
   body.tutoring #tutor { display:block; }
+  /* ...and the SLOW-TIME SCHOOL borrows the same overlay long after the
+     onboarding is over. It is the coach text and nothing else — no dotted
+     line, no hidden crosshair, no hidden gun: the player is playing the game,
+     they are just being reminded what the new button is for. */
+  body.coaching #tutor { display:block; }
+  body.coaching #timebtn.hint::after { animation:tteach 1.15s ease-out infinite;
+                                       opacity:1; }
   #tutorline { position:absolute; left:50%; top:0; bottom:0; width:0;
                border-left:2px dashed rgba(22,24,29,.30); opacity:0;
                transition:opacity .45s ease; }

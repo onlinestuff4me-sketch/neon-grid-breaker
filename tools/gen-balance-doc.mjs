@@ -4,21 +4,21 @@
 //
 //   node tools/gen-balance-doc.mjs
 //
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
   WEAPONS, TYPE_INTRO, TYPE_SHARE, TYPE_DROP, DROPS, RAMP, COMP, LEG, PACING, TIME,
-  SHATTER, SCARCITY, CONDITION_TAX, EARLY, VIS, SIMPLE, scarcity,
+  SHATTER, SCARCITY, CONDITION_TAX, EARLY, VIS, SIMPLE, SPEED, scarcity,
+  speedAt, unlockDoor,
 } from '../src/balance.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const n = (v) => (v === Infinity ? '∞' : String(Math.round(v * 1000) / 1000));
 
 const diffT = (w) => Math.min((w - 1) / RAMP.rampWaves, 1);
-const speed = (w) => RAMP.bulletBase * Math.min(
-  RAMP.bulletFloor + RAMP.bulletRange * diffT(w) +
-  Math.max(0, w - (RAMP.rampWaves + 1)) * RAMP.lateCreep, RAMP.bulletCap);
+// Speed is no longer on diffT — it is the staircase in SPEED, read by door.
+const speed = (w) => speedAt(w);
 const aim = (w) => RAMP.aimBase - RAMP.aimRange * diffT(w);
 const drain = (w) => RAMP.drainFloor + RAMP.drainRange * diffT(w);
 
@@ -43,8 +43,9 @@ const enemyRows = Object.keys(TYPE_INTRO).map((k) => {
   return `| ${k} | ${TYPE_INTRO[k]} | ${sh ? sh[0] : '—'} | ${sh ? sh[1] : '—'} | ${TYPE_DROP[k] || '—'} | ${ROLES[k] || ''} |`;
 }).join('\n');
 
-const rampRows = [1, Math.ceil((RAMP.rampWaves + 1) / 2), RAMP.rampWaves + 1]
-  .map((w) => `| wave ${w} | ${n(speed(w))} | ${n(aim(w))}× | ${n(drain(w))}× |`).join('\n');
+const rampRows = [1, SPEED.openDoors + 1, Math.ceil((RAMP.rampWaves + 1) / 2),
+  RAMP.rampWaves + 1, unlockDoor()]
+  .map((w) => `| door ${w} | ${n(speed(w))} | ${n(aim(w))}× | ${n(drain(w))}× |`).join('\n');
 
 const md = `# TIME SHATTER — balance reference
 
@@ -153,16 +154,19 @@ it is a real decision — which is the whole point of collecting on foot.
 ## Difficulty ramp
 
 \`diffT\` runs 0 → 1 across **${RAMP.rampWaves} waves** (full heat at wave
-${RAMP.rampWaves + 1}). In Rush Hour the wave number is replaced by
-\`1 + rushT / 25\`, so it ramps on the run clock instead.
+${RAMP.rampWaves + 1}) and drives the telegraph and the slow-mo cost. **Bullet
+speed is not on it** — it is the staircase in \`SPEED\`, stepped by door, and
+the column below is \`speedAt(door)\`. In Rush Hour the wave number is replaced
+by \`1 + rushT / 25\`, so everything ramps on the run clock instead.
 
 | | Bullet speed (m/s) | Telegraph scale | Slow-mo cost |
 |---|---|---|---|
 ${rampRows}
 
-Past wave ${RAMP.rampWaves + 1}, speed creeps ${n(RAMP.lateCreep * 100)} % per
-wave to a hard cap of ${n(RAMP.bulletCap)}× base. Rush Hour drains the bank at
-a flat ${n(RAMP.rushDrain)}×. An enemy must be in view for
+Slow time unlocks on **door ${unlockDoor()}**, where the staircase reaches
+${n(SPEED.unlockM)} m/s; it holds there for the ${SPEED.schoolDoors}-door
+school and then climbs again to a ceiling of ${n(SPEED.capM)} m/s. Rush Hour
+drains the bank at a flat ${n(RAMP.rushDrain)}×. An enemy must be in view for
 **${n(RAMP.sightGrace)} s** before its telegraph may begin.
 
 ## Visibility, and the FOG condition
@@ -316,5 +320,24 @@ within **${n(SIMPLE.tapMagnetPx)} px** of a body takes the body.
 
 `;
 
-writeFileSync(join(root, 'docs/BALANCE.md'), md);
-console.log('docs/BALANCE.md regenerated from src/balance.js');
+// THE PROSE ABOVE THE MARKER IS NOT GENERATED, AND MUST SURVIVE.
+// docs/BALANCE.md opens with a hand-written account of the opening ramp, the
+// speed staircase and the slow-time school — the WHY, which no generator can
+// produce — and the generated tables follow it. This script used to write the
+// whole file, so running it would have silently deleted two hundred lines of
+// reasoning and left a header claiming the file was generated. Keep whatever
+// stands above the marker and regenerate only what is below it.
+const OUT = join(root, 'docs/BALANCE.md');
+const MARK = '<!-- GENERATED FILE';
+let prelude = '';
+if (existsSync(OUT)) {
+  const cur = readFileSync(OUT, 'utf8');
+  const at = cur.indexOf(MARK);
+  // Only the FIRST occurrence counts, and only if there is prose before it —
+  // a file that begins with the marker has no prelude to keep.
+  if (at > 0) prelude = cur.slice(0, at).replace(/#\s*TIME SHATTER — balance reference\n*/, '');
+}
+writeFileSync(OUT, prelude ? `# TIME SHATTER — balance reference\n\n${prelude.trim()}\n\n${md.replace(/^# TIME SHATTER — balance reference\n*/, '')}` : md);
+console.log(prelude
+  ? 'docs/BALANCE.md regenerated (hand-written prelude kept)'
+  : 'docs/BALANCE.md regenerated from src/balance.js');

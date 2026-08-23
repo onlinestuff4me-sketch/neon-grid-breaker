@@ -178,7 +178,17 @@ export function marksFromPlan(plan) {
     // STAND HERE sign is allowed to appear, small, in the distance.
     finalRun: turns.length ? turns[turns.length - 1].at : 0,
     forkEnd: n,   // ...the end of the walk, unless a side lane rejoins sooner
+    // WHERE THE BARRIER STANDS. The onboarding's leg ends in a fork, and the
+    // barrier belongs just past where it rejoins — so `forkEnd` was the
+    // anchor and, for that leg, still is. A leg with NO fork has forkEnd at
+    // the very end of the walk, which put the slab three cells past the last
+    // cell of the corridor: inside the door, with nowhere for the man who is
+    // supposed to shoot at you over it to stand. Without a fork the anchor is
+    // the last corner instead, so the barrier is the first thing you see when
+    // you round it and the rest of the run is the lesson's stage.
+    barrierAt: 0,
   };
+  marks.barrierAt = marks.finalRun;
   // The rejoin is the one mark the moves alone cannot state, because the fork's
   // second lane is `extra` cells hanging off the spine. It is the furthest cell
   // of the walked path that any of them touches.
@@ -193,7 +203,7 @@ export function marksFromPlan(plan) {
         }
       }
     }
-    if (best > 0) marks.forkEnd = best;
+    if (best > 0) { marks.forkEnd = best; marks.barrierAt = best; }
   }
   return marks;
 }
@@ -523,17 +533,22 @@ export const STEPS = [
 ];
 
 // ---------------------------------------------------------------------------
-// DEFERRED — the slow-time lessons, kept whole and kept OFF
+// DEFERRED — THE SECOND COURSE, not an off switch
 //
-// These four steps taught the time button and the meter, and they worked. They
-// are not in the running order because the onboarding no longer introduces
-// slow motion at all: a first-time player wants to shoot something, not to
-// learn a resource, so the control is unlocked several doors into the real run
-// instead (docs/TUTORIAL-GOALS.md §5, `TIME.unlockDoor`).
+// `deferred: true` used to mean "kept in the spec, never walked into". It now
+// means "belongs to the OTHER lesson". These steps teach the time button and
+// the meter, and they run in the middle of a real run — on the door the speed
+// staircase unlocks the power on (`unlockDoor()` in src/balance.js), which is
+// the door bullet speed first reaches the point where walking out of a round
+// stops being enough.
 //
-// They live HERE rather than in git history because the plan is to bring them
-// back — as the coached moment at the unlock door, or as a second onboarding
-// once the player has the button. Kept in the spec means:
+// Why not in the onboarding: a first-time player wants to shoot something, not
+// to learn a resource. See docs/TUTORIAL-GOALS.md §5 and §6.
+//
+// main.js runs both courses on one machine — `tutorCourse` points
+// `tutorOrder()` and `tutorLegsOf()` at this list and at SCHOOL_LEGS above,
+// and nothing below that line knows which lesson it is running. So everything
+// that was true of these steps while they were switched off is still true:
 //
 //   * the machinery that drives them (`hardFreeze` released by the button,
 //     `startMeter`, the `resumed` advance, the `meter`/`low`/`resume`/`ready`
@@ -541,11 +556,50 @@ export const STEPS = [
 //     quietly broken by a change to something else;
 //   * `slowlesson.js` plays them through, every run of the suite;
 //   * the tool lists them, so they can be read and edited;
-//   * and turning them on is `deferred: false`, not an excavation.
+//   * and each is one `deferred` flag away from moving between the courses.
 //
-// `loadTutorial` filters `deferred` steps out of the sequence the game walks.
-// Everything else — normalise, the tool, the override channel — sees them.
+// `loadTutorial` normalises both lists; `tutorOrder()` in main.js is what
+// splits them into the onboarding's running order and this one.
+// --- THE SLOW-TIME LESSON'S OWN CORRIDOR ------------------------------------
+// The onboarding's teaching leg is nine cells of walking before anything
+// happens, because at that point the player is learning to walk. This one is
+// not: it is played by somebody seventy doors in who has just been told a new
+// power exists. One corner, so the barrier arrives as a thing you turn into
+// rather than a thing you were already looking at, then the run it stands in.
+const SLOW_MOVES = [
+  ['f', 5],
+  ['r', 3],    // the corner. The barrier is in frame the moment you round it.
+  ['f', 12],   // the run the whole lesson happens in
+];
+export const SCHOOL_LEGS = [
+  {
+    id: 'slowteach', form: 'corridor', barrier: true, countsAsDoor: false,
+    note: 'The slow-time lesson. One corner, the barrier, the button, the '
+      + 'meter — then a room to use all three in.',
+    plan: { moves: SLOW_MOVES, approach: 4 },
+  },
+  { id: 'slowroom', form: 'vault', kind: 'room',
+    note: 'Practice. Three of them, taking turns, with the meter running.',
+    plan: { moves: [['f', 10]], extra: room(1, 1, 8), approach: 3 },
+    enemies: [{ x: -1, z: 5, type: 'gunner' }, { x: 1, z: 5, type: 'gunner' },
+      { x: 0, z: 8, type: 'gunner' }], fireOrder: 'turns' },
+];
+
 export const DEFERRED = [
+  // --- A. THE MARK --------------------------------------------------------
+  // Same furniture as the onboarding's lesson 4, and deliberately so: a player
+  // who is seeing a barrier and the words STAND HERE for the second time in a
+  // run already knows what they mean, and that recognition is the cheapest
+  // possible way to say "this is a lesson, stop and read it".
+  {
+    id: 'slowStand', label: '@ · Stand here (again)', deferred: true,
+    hud: 'GO TO THE BARRIER',
+    advance: { kind: 'atBarrier' },
+    grants: { ...PLAYING, timebtn: false, meter: false, spawns: false },
+    buildBarrier: true,
+    cues: [{ text: 'STAND HERE', slot: 'world', arrow: 'none', hand: 'none',
+      pulse: true, on: 'enter', off: 'advance' }],
+  },
   {
     id: 'slowIntro', label: 'A · Slow time', deferred: true,
     advance: { kind: 'froze' },
@@ -597,9 +651,20 @@ export const DEFERRED = [
         pulse: true, on: 'ready', off: 'shot', once: true },
     ],
   },
+  // --- E. HANDOVER --------------------------------------------------------
+  // The onboarding's `done` in miniature, and it exists for the same reason:
+  // something has to be the last step, or `tutorAfter` walks off the end of
+  // the list and hands the player back a step it has already played.
+  {
+    id: 'slowDone', label: 'E · Back to the run', deferred: true,
+    advance: { kind: 'none' },
+    grants: { ...PLAYING, timebtn: true, meter: true, bank: true, spawns: true },
+    hud: '',
+    cues: [],
+  },
 ];
 
-export const DEFAULT_SPEC = { TUTOR, LEGS, STEPS: [...STEPS, ...DEFERRED] };
+export const DEFAULT_SPEC = { TUTOR, LEGS, SCHOOL_LEGS, STEPS: [...STEPS, ...DEFERRED] };
 
 // --- the tool's channel ----------------------------------------------------
 // The level tool writes an edited spec here and opens the game in an iframe.
@@ -619,6 +684,7 @@ export function previewing(search) {
 // still boots: anything it does not mention keeps the shipped value.
 export function loadTutorial(search) {
   const spec = { TUTOR: { ...TUTOR }, LEGS: normaliseLegs(LEGS),
+    SCHOOL_LEGS: normaliseLegs(SCHOOL_LEGS),
     STEPS: normalise([...STEPS, ...DEFERRED]) };
   if (!previewing(search)) return spec;
   let raw = null;
@@ -628,6 +694,9 @@ export function loadTutorial(search) {
     const o = JSON.parse(raw);
     if (o && o.TUTOR) Object.assign(spec.TUTOR, o.TUTOR);
     if (o && Array.isArray(o.LEGS) && o.LEGS.length) spec.LEGS = normaliseLegs(o.LEGS);
+    if (o && Array.isArray(o.SCHOOL_LEGS) && o.SCHOOL_LEGS.length) {
+      spec.SCHOOL_LEGS = normaliseLegs(o.SCHOOL_LEGS);
+    }
     if (o && Array.isArray(o.STEPS) && o.STEPS.length) spec.STEPS = normalise(o.STEPS);
   } catch (err) {
     console.warn('[tutorial] override ignored:', err && err.message);

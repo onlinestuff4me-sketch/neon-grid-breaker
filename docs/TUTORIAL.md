@@ -1,4 +1,8 @@
-# The onboarding
+# The tutorials
+
+**Two courses, one machine.** The onboarding is the first level; the slow-time
+lesson is a second one, seventy doors in. Everything below describes the
+machinery, which is shared, and then each course's own shape.
 
 A scripted first level. Not captions over a procedural corridor — a hallway
 built for it, with furniture placed by the script and every round in it fired
@@ -50,8 +54,58 @@ build does.
 | `ramp1`–`ramp6` | room/hall/room/hall/room/hall with 1,1,2,2,3,3 enemies. One reminder only: `TAP ANYWHERE TO SHOOT`, once per area, spent when they fire | they cross each door |
 
 **There is no time button anywhere in it, and no meter.** The slow-motion
-control is deferred past the whole onboarding and unlocks at door 4 — see
-`docs/TUTORIAL-GOALS.md` §5, and `docs/BALANCE.md` for the unlock itself.
+control is deferred past the whole onboarding — see `docs/TUTORIAL-GOALS.md`
+§5, and the second course below.
+
+## The second course — slow time
+
+Entered mid-run, on the door the speed staircase unlocks the power on
+(`unlockDoor()` in `src/balance.js`; door 71 on the shipped numbers). Six steps,
+in `DEFERRED` in `src/tutorial.js`:
+
+| step | what the player sees | ends when |
+|---|---|---|
+| `slowStand` | one corner, then a barrier with `STAND HERE` on it — the same furniture as onboarding lesson 4, so it reads instantly as *stop and read this* | they reach the barrier |
+| `slowIntro` | a gunner fires and the world stops. `DODGE THE BULLET` / `TAP HERE TO SLOW TIME`, arrow down at the button, which arrives with its entrance animation | **the button** is pressed — moving does not release this one, which is the whole point |
+| `slowMove` | `DRAG TO MOVE`, a thumb swaying under it | they dodge one round with time slow |
+| `meter` | the meter appears full, `YOUR METER DRAINS / WHILE TIME IS SLOW`. An early tap to resume is refused; at the knee, `TAP AGAIN TO RESUME` | they resume |
+| `slowPractice` | a room of three, taking turns, with four `once` reminders: slow, running out, resume, shoot | they cross |
+| `slowDone` | nothing — it exists so the course has an end | immediately |
+
+Two legs of its own (`SCHOOL_LEGS`): `slowteach`, the corner and the barrier,
+and `slowroom`, a vault with three gunners in it.
+
+### How one machine runs two courses
+
+`tutorCourse` — `'open'` or `'slow'` — is the whole of it.
+
+```js
+const tutorOrder   = () => (tutorCourse === 'slow' ? SLOW_ORDER : TUTOR_ORDER);
+const tutorLegsOf  = () => (tutorCourse === 'slow' ? SCHOOL_LEGS : OPEN_LEGS);
+```
+
+Everything that used to read `TUTOR_ORDER` or `TUTOR_LEGS` directly asks for
+the current one instead. Below that line nothing knows which lesson is running:
+the freeze, the cues, the retry, the anchors, the barrier, `marksFromPlan` and
+the grants are all the same code.
+
+Three things the split needed:
+
+* **`tutorAfter` ends at the end of a COURSE**, not at the end of the step
+  list. Walking off the end of one flat order dropped the player into the other
+  course's first step.
+* **`tutorJumpTo` switches course to match the step it lands on**, and replays
+  only the furniture of that course — otherwise a jump to a slow-time step
+  built the onboarding's barrier in a corridor that already had its own.
+* **the lesson is armed when the door OPENS, not when it is crossed.** The
+  corridor on the far side is composed by `forced()` while the door opens, so
+  arming on the crossing would be one leg too late and the player would walk
+  into a generated corridor with a lesson running in it. `armSlowLesson` runs
+  in `openHallDoor`; `startSlowLesson` runs in `crossHallDoor`.
+
+Marked with `timeshard_slowtaught`, which is separate from
+`timeshard_taught` — a tester jumping straight to a slow-time step must not
+come back to a game that thinks it has taught them to walk.
 
 ## The legs
 
@@ -63,9 +117,17 @@ a lesson whose point is that the player knows what is coming.
 
 The teaching leg is 148 m: seven cells straight, right, four, left, four,
 right, three, the fork's five, then fourteen for the barrier, the dodging, the
-shooting and the door. Its marks (`firstCorner`, `secondRun`, `forkEnd`) are
-**derived from the move list**, so lengthening the first hallway in the tool
-moves the lessons with it instead of silently breaking them.
+shooting and the door. Its marks (`firstCorner`, `secondRun`, `forkEnd`,
+`barrierAt`) are **derived from the move list**, so lengthening the first
+hallway in the tool moves the lessons with it instead of silently breaking them.
+
+`barrierAt` is the one that had to be added for the second course. The barrier
+used to be anchored on `forkEnd`, which on a leg that *has* a fork is the
+rejoin — right. On a leg with no fork `forkEnd` is the last cell of the walk,
+so the slab landed three cells past the end of the corridor with nowhere for
+the man who is supposed to shoot over it to stand. Without a fork the anchor is
+the **last corner** instead: the barrier is the first thing you see when you
+round it, and the run after it is the lesson's stage.
 
 The ramp legs carry their own `enemies` and a `fireOrder`, because it is the
 *room* that is "the room with two in it" — a step cannot own them, or the

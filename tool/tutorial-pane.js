@@ -116,18 +116,22 @@ function validate() {
         + 'to fire one.');
     }
   }
-  // THE LAST STEP OF THE RUNNING ORDER, not the last in the list. Deferred
-  // steps (the slow-time lessons, kept whole and switched off) live at the end
-  // of the spec and are never walked into, so the one that has to end on
-  // `none` is the last one that is not deferred.
-  const live = S.filter((x) => !x.deferred);
-  if (live.length && live[live.length - 1].advance.kind !== 'none') {
-    out.push('<b>The last step ends on a condition.</b> There is nothing after it, so '
-      + 'the onboarding will sit on it rather than handing over to the game.');
+  // ONE CHECK PER COURSE. The spec holds two running orders — the onboarding
+  // (the steps that are not deferred) and the slow-time lesson (the ones that
+  // are) — and each of them is walked to its end, so each of them needs a last
+  // step that ends on `none`. Checking only the first left the second able to
+  // sit on its final beat forever with nothing on screen to say why.
+  for (const [name, order] of [['onboarding', S.filter((x) => !x.deferred)],
+    ['slow-time lesson', S.filter((x) => x.deferred)]]) {
+    if (order.length && order[order.length - 1].advance.kind !== 'none') {
+      out.push(`<b>The last step of the ${name} ends on a condition.</b> There is `
+        + 'nothing after it, so it will sit on that step rather than handing over '
+        + 'to the game.');
+    }
   }
 
   // 4. a named threshold that this leg has no mark for
-  const MARKS = ['firstCorner', 'secondRun', 'finalRun', 'forkEnd'];
+  const MARKS = ['firstCorner', 'secondRun', 'finalRun', 'forkEnd', 'barrierAt'];
   for (const st of S) {
     const nd = st.advance.need;
     if (typeof nd === 'string' && nd && !MARKS.includes(nd)) {
@@ -399,8 +403,9 @@ function stepCard(st, i) {
     const flag = document.createElement('div');
     flag.className = 'warn';
     flag.style.margin = '0 0 8px';
-    flag.textContent = 'DEFERRED — kept in the spec, off the running order. '
-      + 'The game never reaches this step; `slowlesson.js` plays it.';
+    flag.textContent = 'SLOW-TIME COURSE — the second lesson, entered mid-run on '
+      + 'the door the speed staircase unlocks the power on, not during the '
+      + 'onboarding. Its legs are SCHOOL_LEGS.';
     bd.appendChild(flag);
   }
   const bodyRow = document.createElement('div'); bodyRow.className = 'grid2';

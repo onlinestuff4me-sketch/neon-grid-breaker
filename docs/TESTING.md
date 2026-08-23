@@ -156,8 +156,11 @@ existing state and costs nothing — but nothing in `src/` may depend on it.
 | `fixbatch.js` | the wedges: the meter beat's early tap, the long press on the freeze, the retry's clock, the barrier after END RUN, six bodies in six places |
 | `signwalk.js` / `four.js` | STAND HERE as an object — hidden round the corners, and width × distance constant down the straight |
 | `pastbar.js` | the men past the barrier stand where they are put, and a death rebuilds the fight behind a shut door |
-| `slowlesson.js` | the DEFERRED slow-time lessons, played through — the button-released freeze, the meter demo that cannot wedge, and the per-area reminders. This is what stops "kept" turning into "rotted" |
-| `ramppane.js` | the tool's RAMP pane: every dial has a slider, the forty-door table matches the code, moving a dial recomputes it, and the export carries it |
+| `slowlesson.js` | the slow-time course, played beat by beat — the button-released freeze, the meter demo that cannot wedge, and the per-area reminders |
+| `schoolflow.js` | the numbers: each tread of the speed staircase holds for the doors it claims, the unlock door is where it reaches 12 m/s, the button is not on screen a door earlier, volleys build, and the mercy rule is hysteretic |
+| `shotrhythm.js` | what the rounds actually DO, measured in world seconds off `lastEnemyShotAt`: door 8 is a metronome with no double-taps, and a school door repeats spread-spread-quiet. Every other test asks what the code *says* the gap is — for a long time those were different things |
+| `schoolentry.js` | the door: standing on the last leg before the unlock, opening it and stepping through has to produce the lesson's own corridor, its barrier, `STAND HERE`, and the button taken away until `slowIntro` hands it over |
+| `ramppane.js` | the tool's RAMP pane: every dial has a slider, the table matches the code out to door 96, moving a dial recomputes it, and the export carries the speed and school blocks |
 | `newflow.js` | the opening as it is now: no slow-motion control anywhere in it, the round dodged by MOVING, the gun and the squad together, and a magazine that never runs down |
 | `handover.js` | one banner at the end, door 1 with somebody in it, and the opening ramp against the table in balance.js |
 | `ramp.js` | the TRAINING line at the top of the screen, and the pause button surviving a retry |

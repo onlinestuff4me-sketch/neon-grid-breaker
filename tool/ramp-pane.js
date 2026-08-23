@@ -13,10 +13,10 @@
 // before it. That is the opposite of a curve that compounds, and it is why the
 // old rule had a cliff — one body at door 4, twenty-four at door 5.
 // ---------------------------------------------------------------------------
-import { OPENING, RAMP, TIME, ramp } from '../src/balance.js';
+import { OPENING, RAMP, SPEED, SCHOOL, ramp } from '../src/balance.js';
 
 const $ = (id) => document.getElementById(id);
-const DOORS = 40;
+const DOORS = 96;   // far enough to show the unlock and the school
 
 // The live values. Seeded from balance.js, edited here, handed back by read().
 let V = null;
@@ -30,15 +30,47 @@ function seed() {
     legsCap: OPENING.legsCap,
     corridorDoors: OPENING.corridorDoors,
     gapDoors: OPENING.gapDoors,
+    holdSlack: OPENING.holdSlack,
     gapFrom: OPENING.gapFrom,
     gapTo: OPENING.gapTo,
     gapBy: OPENING.gapBy,
-    bulletBase: RAMP.bulletBase,
-    bulletFloor: RAMP.bulletFloor,
-    bulletRange: RAMP.bulletRange,
     rampWaves: RAMP.rampWaves,
-    unlockDoor: TIME.unlockDoor,
+    // the speed staircase
+    openM: SPEED.openM, openDoors: SPEED.openDoors,
+    holdM: SPEED.holdM, holdDoors: SPEED.holdDoors,
+    stepM: SPEED.stepM, stepDoors: SPEED.stepDoors,
+    unlockM: SPEED.unlockM, schoolDoors: SPEED.schoolDoors, capM: SPEED.capM,
+    // the school
+    volley: SCHOOL.volley, volleyBuild: SCHOOL.volleyBuild,
+    volleyGap: SCHOOL.volleyGap, volleySpread: SCHOOL.volleySpread, clusterM: SCHOOL.clusterM, spare: SCHOOL.spare,
+    drainMul: SCHOOL.drainMul, bonusMul: SCHOOL.bonusMul, calmGap: SCHOOL.calmGap,
   };
+}
+
+// THE DOOR THE POWER LANDS ON IS NOT A DIAL. It is wherever the staircase
+// first reaches `unlockM` — the same solve balance.js does, so the pane and
+// the game can never disagree about it.
+export function unlockDoorOf(v = V) {
+  const first = v.openDoors + v.holdDoors + 1;
+  const treads = Math.max(1, Math.ceil((v.unlockM - v.holdM) / v.stepM));
+  return first + (treads - 1) * v.stepDoors;
+}
+export function speedOf(d, v = V) {
+  const first = v.openDoors + v.holdDoors + 1;
+  const gate = unlockDoorOf(v);
+  if (d <= v.openDoors) return v.openM;
+  if (d < first) return v.holdM;
+  if (d < gate) return v.holdM + v.stepM * (Math.floor((d - first) / v.stepDoors) + 1);
+  if (d < gate + v.schoolDoors) return v.unlockM;
+  const n = Math.floor((d - gate - v.schoolDoors) / v.stepDoors) + 1;
+  return Math.min(v.capM, v.unlockM + v.stepM * n);
+}
+// A volley on school door `d`, and the body floor that goes with it.
+export function volleyOf(d, v = V) {
+  const k = d - unlockDoorOf(v);
+  if (k < 0 || k >= v.schoolDoors) return 0;
+  const t = Math.min(1, k / Math.max(1, v.volleyBuild));
+  return Math.max(2, Math.round(2 + (v.volley - 2) * t));
 }
 
 // --- the curve, computed exactly the way main.js computes it ---------------
@@ -52,12 +84,17 @@ export function doorRow(d, v = V) {
   const extra = bodies - base * legs;
   const split = Array.from({ length: legs }, (_, i) => base + (i >= legs - extra ? 1 : 0));
   const t = Math.max(0, Math.min(1, (d - v.gapDoors) / Math.max(1, v.gapBy - v.gapDoors)));
-  const gap = v.gapFrom + (v.gapTo - v.gapFrom) * t;
-  const diffT = Math.max(0, Math.min(1, (d - 1) / Math.max(1, v.rampWaves)));
-  const speed = v.bulletBase * Math.min(v.bulletFloor + v.bulletRange * diffT, RAMP.bulletCap);
-  return { d, legs, bodies, alive, split, gap, speed,
+  const volley = volleyOf(d, v);
+  // The school overrides the ramp's own answers wherever it is in session.
+  const gap = volley ? v.volleyGap : v.gapFrom + (v.gapTo - v.gapFrom) * t;
+  const floor = volley ? volley + v.spare : 0;
+  const split2 = split.map((n) => Math.max(n, floor));
+  return { d, legs,
+    bodies: volley ? split2.reduce((a, x) => a + x, 0) : bodies,
+    alive: Math.max(alive, floor), split: split2, gap, volley,
+    speed: speedOf(d, v),
     form: d <= v.corridorDoors ? 'corridor' : 'any',
-    slow: d >= v.unlockDoor };
+    slow: d >= unlockDoorOf(v) };
 }
 
 // --- what each dial is FOR, in the pane rather than only in the docs -------
@@ -92,17 +129,71 @@ const DIALS = [
     'The door at which the gap has reached its final value.'],
   ['gapTo', 'Shot gap · to', 0.1, 3, 0.02,
     'What it closes to — the reflex gap the deep game runs on.'],
-  ['bulletFloor', 'Bullet speed · door 1', 0.1, 1, 0.01,
-    'Fraction of the reference speed on door 1. At 0.34 a round crosses a 16 m '
-    + 'room in three seconds: something you can watch coming and walk out of, '
+  ['holdSlack', 'Shot gap · deadlock slack', 0.1, 3, 0.05,
+    'How long past the gap a man will wait his turn before firing anyway. '
+    + 'There has to be a ceiling or a crowd can hold each other into never '
+    + 'firing — but it used to be a flat 0.6 s, which is SHORTER than the gap '
+    + 'for every door up to about 20, so the gap never actually applied. '
+    + 'Lower this to make the middle doors fire as loosely as they used to.'],
+  // --- THE SPEED STAIRCASE -------------------------------------------------
+  ['openM', 'Speed · opening tread', 3, 12, 0.1,
+    'Enemy bullet speed in m/s for the first doors. At 5.4 a round crosses a '
+    + '16 m room in three seconds: something you watch coming and walk out of, '
     + 'before anybody has been given a way to slow it down.'],
-  ['rampWaves', 'Bullet speed · full by', 4, 40, 1,
-    'Doors until the round reaches reference speed. Longer means the opening '
-    + 'has more room to teach the timing before it tightens.'],
-  ['unlockDoor', 'Slow motion unlocks at', 1, 20, 1,
-    'The door the time button and the meter arrive on. Before it neither is '
-    + 'drawn and the control is inert: nothing to discover early, nothing to '
-    + 'miss. See docs/TUTORIAL-GOALS.md §5 for why it is deferred at all.'],
+  ['openDoors', 'Speed · hold it for', 1, 20, 1,
+    'How many doors stay on the opening tread. Wide treads are the whole point '
+    + 'of a staircase: nobody acclimatises to a number that never sits still.'],
+  ['holdM', 'Speed · second tread', 3, 14, 0.1,
+    'The first step up, held just as long as the opening one — the smallest '
+    + 'change the player is ever asked to notice.'],
+  ['holdDoors', 'Speed · hold that for', 1, 20, 1,
+    'Doors on the second tread before the staircase starts climbing.'],
+  ['stepM', 'Speed · tread height', 0.05, 1, 0.05,
+    'How much faster each tread is than the one below it.'],
+  ['stepDoors', 'Speed · tread width', 1, 10, 1,
+    'Doors per tread once it is climbing. THIS IS THE DIAL THAT MOVES THE '
+    + 'UNLOCK: halve it and the power arrives twice as early.'],
+  ['unlockM', 'Speed · power arrives at', 6, 20, 0.2,
+    'The speed at which walking out of a round stops being enough — and so '
+    + 'the moment slow time is worth having. The unlock DOOR is solved from '
+    + 'this rather than typed, so it can never drift out of step with it.'],
+  ['schoolDoors', 'School · doors', 0, 30, 1,
+    'How long the staircase stops while slow time is taught. The speed holds '
+    + 'flat here on purpose: one new thing at a time.'],
+  ['rampWaves', 'Telegraph · full heat by', 4, 90, 1,
+    'Doors until telegraphs and cooldowns reach their tightest. This is NOT '
+    + 'bullet speed any more — the staircase above owns that — it is only how '
+    + 'long an enemy takes to raise his arm.'],
+  // --- THE SCHOOL ----------------------------------------------------------
+  ['volley', 'School · volley size', 2, 8, 1,
+    'How many fire together once the school is in session. A volley is the one '
+    + 'shape a sidestep cannot answer, which is what makes the button wanted.'],
+  ['volleyBuild', 'School · built over', 1, 20, 1,
+    'Doors taken to grow from two firing together to the full volley.'],
+  ['volleyGap', 'School · between volleys', 0.5, 6, 0.1,
+    'World seconds of quiet between one volley and the next.'],
+  ['volleySpread', 'School · inside a volley', 0.02, 1, 0.02,
+    'World seconds between the rounds OF one volley. Not zero: the school '
+    + 'starts a volley\u2019s telegraphs on the same frame, so with no floor '
+    + 'they finished on the same frame too and three rounds left three muzzles '
+    + 'simultaneously. A fifth of a second still reads as one volley, and reads '
+    + 'as three men.'],
+  ['clusterM', 'School · how close they stand', 2, 12, 0.5,
+    'Metres. A volley spread down forty metres of corridor costs a full tank '
+    + 'and returns one kill; a group you can sweep pays for itself.'],
+  ['spare', 'School · bodies over a volley', 0, 4, 1,
+    'How many more than a volley a room holds, so there is still somebody left '
+    + 'to shoot once it has been answered.'],
+  ['drainMul', 'School · slow time costs', 0.1, 1, 0.05,
+    'Multiplier on the drain here. Cheap on purpose: this lesson is about what '
+    + 'the power is FOR, not what it costs.'],
+  ['bonusMul', 'School · kills pay', 1, 4, 0.25,
+    'Multiplier on the seconds a kill returns, so sweeping a cluster refills '
+    + 'what the sweep spent.'],
+  ['calmGap', 'School · the mercy gap', 1, 6, 0.1,
+    'When the bank runs dry the room drops back to one round at a time, at '
+    + 'this gap — the opening doors\u2019 metronome — until the meter is worth '
+    + 'spending again.'],
 ];
 
 function renderDials() {
@@ -140,16 +231,28 @@ function renderDials() {
 function renderTable() {
   const host = $('ramptable');
   if (!host) return;
+  // THE ANSWER, ABOVE THE TABLE. Every speed dial moves the unlock door, and
+  // scrolling seventy rows to find out where it landed is not a readout.
+  const head = $('rampsolve');
+  if (head) {
+    const u = unlockDoorOf();
+    head.innerHTML = `<b>Slow time unlocks on door ${u}</b> — the first door at `
+      + `${V.unlockM.toFixed(1)} m/s. The school runs doors ${u}–${u + V.schoolDoors - 1}, `
+      + `then the staircase climbs again to ${V.capM.toFixed(1)} m/s.`;
+  }
   const rows = [];
   let prev = null;
   for (let d = 1; d <= DOORS; d++) {
     const r = doorRow(d);
     // A ROW IS INTERESTING WHEN SOMETHING CHANGED. Forty identical-looking
     // lines is not a curve you can read; the doors where a dial moves are.
-    const key = `${r.legs}|${r.bodies}|${r.alive}|${r.form}|${r.slow}`;
+    // SPEED IS DELIBERATELY NOT IN THIS KEY. It steps every two doors, so
+    // including it marked half the table and the marker stopped meaning
+    // anything. The m/s column reads as a staircase on its own.
+    const key = `${r.legs}|${r.bodies}|${r.alive}|${r.form}|${r.slow}|${r.volley}`;
     const stepped = key !== prev;
     prev = key;
-    rows.push(`<tr class="${stepped ? 'step' : ''}">
+    rows.push(`<tr class="${stepped ? 'step' : ''}${r.volley ? ' school' : ''}">
       <td>${d}</td>
       <td>${r.legs}</td>
       <td>${r.bodies}</td>
@@ -158,12 +261,14 @@ function renderTable() {
       <td class="dim">${r.form === 'corridor' ? 'corridor' : '—'}</td>
       <td>${r.speed.toFixed(1)}</td>
       <td>${r.gap.toFixed(2)}</td>
+      <td class="dim">${r.volley || ''}</td>
       <td class="dim">${r.slow ? '●' : ''}</td>
     </tr>`);
   }
   host.innerHTML = `<table class="ramp">
     <thead><tr><th>door</th><th>legs</th><th>bodies</th><th>split</th>
-      <th>alive</th><th>form</th><th>m/s</th><th>gap</th><th>slow-mo</th></tr></thead>
+      <th>alive</th><th>form</th><th>m/s</th><th>gap</th><th>volley</th>
+      <th>slow-mo</th></tr></thead>
     <tbody>${rows.join('')}</tbody></table>`;
 }
 
@@ -174,9 +279,16 @@ export function read() {
     OPENING: { legsEvery: V.legsEvery, bodiesEvery: V.bodiesEvery,
       aliveEvery: V.aliveEvery, legsCap: V.legsCap,
       corridorDoors: V.corridorDoors, gapDoors: V.gapDoors,
-      gapFrom: V.gapFrom, gapTo: V.gapTo, gapBy: V.gapBy },
-    RAMP: { bulletFloor: V.bulletFloor, rampWaves: V.rampWaves },
-    TIME: { unlockDoor: V.unlockDoor },
+      gapFrom: V.gapFrom, gapTo: V.gapTo, gapBy: V.gapBy,
+      holdSlack: V.holdSlack },
+    RAMP: { rampWaves: V.rampWaves },
+    SPEED: { openM: V.openM, openDoors: V.openDoors, holdM: V.holdM,
+      holdDoors: V.holdDoors, stepM: V.stepM, stepDoors: V.stepDoors,
+      unlockM: V.unlockM, schoolDoors: V.schoolDoors },
+    SCHOOL: { volley: V.volley, volleyBuild: V.volleyBuild,
+      volleyGap: V.volleyGap, volleySpread: V.volleySpread,
+      clusterM: V.clusterM, spare: V.spare,
+      drainMul: V.drainMul, bonusMul: V.bonusMul, calmGap: V.calmGap },
   };
 }
 

@@ -169,7 +169,15 @@
      ramp table. */
   body.rampmode #main, body.rampmode #tutmain,
   body.rampmode #map, body.rampmode #hud { display:none }
-  #rampmain{display:none;position:absolute;inset:0;top:var(--hdr);
+  /* `top:var(--hdr)` USED TO BE HERE AND `--hdr` WAS NEVER DEFINED. An
+     unresolved var makes the declaration invalid at computed-value time, so
+     `top` fell back to `auto` against `bottom:0` — the pane was sized by its
+     content and hung off the bottom of its area. It also sat inside the
+     LEVELS grid's middle column, which left the ten-column table in half the
+     window. Ramp mode gives the whole row to the pane instead, the way
+     tutorial mode already narrows the rail for the preview. */
+  body.rampmode{grid-template-columns:0 1fr 0}
+  #rampmain{display:none;position:absolute;inset:0;
        grid-template-columns:380px 1fr}
   body.rampmode #rampmain{display:grid}
   #rampleft{overflow-y:auto;padding:14px 15px;border-right:1px solid var(--line);
@@ -191,6 +199,17 @@
      curve you can read, and these are the ones worth looking at */
   table.ramp tr.step td{background:rgba(255,45,26,.10);color:var(--ink)}
   table.ramp tr.step td:first-child{box-shadow:inset 2px 0 0 var(--red)}
+  /* the slow-time school: the doors where the staircase stops and the rooms
+     fire in volleys, so the block is visible as a block */
+  table.ramp tr.school td{background:rgba(90,170,255,.09)}
+  table.ramp tr.school.step td{background:rgba(90,170,255,.20);color:var(--ink)}
+  table.ramp tr.school td:first-child{box-shadow:inset 2px 0 0 #5aaaff}
+  /* THE ANSWER, ABOVE THE TABLE. Every speed dial moves the unlock door, and
+     scrolling seventy rows to find where it landed is not a readout. */
+  #rampsolve{font-size:12px;line-height:1.6;color:var(--dim);margin:0 0 12px;
+       padding:9px 11px;border:1px solid var(--line);border-radius:5px;
+       background:rgba(90,170,255,.07)}
+  #rampsolve b{color:var(--ink)}
 </style>
 </head>
 <body>
@@ -284,10 +303,17 @@
         The four are on four different schedules <b>on purpose</b>. "More
         rooms", "more bodies", "more of them at once" and "they shoot sooner"
         must never arrive on the same door: one change per step is the idea.
+        <br><br>
+        <b>Bullet speed is a staircase, not a slope.</b> It holds a value for
+        several doors, steps up, and holds the next one — nobody acclimatises
+        to a number that never sits still. The staircase also decides
+        <b>when the power arrives</b>: slow time is unlocked by the speed
+        reaching a threshold, not by a door number somebody typed, and the
+        blue rows are the school that follows it.
       </div>
       <div id="rampdials"></div>
     </div>
-    <div id="rampright"><div id="ramptable"></div></div>
+    <div id="rampright"><div id="rampsolve"></div><div id="ramptable"></div></div>
   </div>
   <canvas id="map"></canvas>
   <div id="hud"></div>
