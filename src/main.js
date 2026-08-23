@@ -3472,6 +3472,13 @@ function schoolVolley() {
 // once it has been answered. Zero anywhere else, so it can only ever raise a
 // floor and never lower the ramp's own answer.
 function schoolFloor(door) {
+  // THE MODE GATE HAS TO BE HERE TOO. `schoolDoor()` refuses outside the
+  // tunnel, but this does not go through it — it is a pure function of the
+  // door number — so gating only `schoolDoor` left the school's BODY FLOOR
+  // still raising the leg budget in corridor duel and stand still: four bodies
+  // a leg in modes that have no way to slow time. Caught by modes.js, which
+  // had been a zero-byte file reported green.
+  if (game.mode !== 'hall' || tutorStep !== null) return 0;
   const v = schoolVolleyAt(door);
   return v ? v + SCHOOL.spare : 0;
 }

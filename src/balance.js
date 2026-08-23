@@ -140,8 +140,16 @@ export function speedAt(d, S = SPEED, school = true) {
   if (n <= v.openDoors) return v.openM;
   if (n < first) return v.holdM;
   if (n < gate) return v.holdM + v.stepM * (Math.floor((n - first) / v.stepDoors) + 1);
-  if (n < gate + hold) return v.unlockM;
-  const past = Math.floor((n - gate - hold) / v.stepDoors);
+  // THE UNLOCK SPEED OCCUPIES A TREAD LIKE ANY OTHER, and the school extends
+  // that tread rather than replacing it. Getting this wrong is an off-by-one
+  // in either direction: count the plateau as `hold` exactly and the door
+  // AFTER the school repeats the unlock speed (a twelve-door plateau where the
+  // dial says ten); add one unconditionally and a school of zero doors makes
+  // `speedAt(gate)` come out a tread ABOVE unlockM, so the door the unlock is
+  // solved from is not the door that has the speed. One `max` answers both.
+  const plateau = Math.max(hold, v.stepDoors);
+  if (n < gate + plateau) return v.unlockM;
+  const past = Math.floor((n - gate - plateau) / v.stepDoors) + 1;
   return Math.min(v.capM, v.unlockM + v.stepM * past);
 }
 
