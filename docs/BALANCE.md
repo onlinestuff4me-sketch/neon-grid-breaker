@@ -138,8 +138,10 @@ him, watch the round leave, step out of it, shatter him — has to be learnable
 once before it is asked for twice. See docs/PILLARS.md section 3.
 
 ```js
-oneBodyDoors     : 4
-soloDoors        : 4
+oneBodyDoors     : 2
+twoBodyDoors     : 4
+soloDoors        : 3
+twoAliveDoors    : 4
 gunnerOnlyDoors  : 5
 oneRoundDoors    : 5
 ```
@@ -351,4 +353,24 @@ the door approach, in line of sight of the slab, so the door opens in view.
 | `drain` | 1 | seconds spent per second frozen, before ramp scaling |
 | `slowScale` | 0.05 | world speed while standing still |
 | `moveScale` | 0.3 | world speed at full stick |
+
+## The simplified modes
+
+One movement mechanic, no look axis, no time button — and therefore no bank,
+which is why each of the two owns time by a different rule. See
+`docs/MODES.md` for what each rule is for.
+
+Shared: a straight strip **3 cells wide**, a tap
+within **64 px** of a body takes the body.
+
+| Knob | Corridor duel | Stand still |
+|---|---|---|
+| Leg length | 6 cells (24 m) | 9 cells (36 m) |
+| World speed, idle | 1 | 0.02 (thumb still) |
+| World speed, engaged | 0.13 (round inbound) | 1 (full drag) |
+| What moves time | an enemy round in the air | your thumb, and your trigger |
+| Inbound window | 1.1 s out, within 2.6 m | — |
+| Cost of a shot | — | 0.17 s of world time at 1× |
+| Ease onto target | 9 /s | 14 /s (TIME_EASE) |
+| March to the open door | 6.5 m/s | you walk it yourself |
 

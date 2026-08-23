@@ -523,3 +523,57 @@ export const TIME = {
   slowScale: 0.05,     // world speed while standing still
   moveScale: 0.3,      // world speed at full stick
 };
+
+// ---------------------------------------------------------------------------
+// THE SIMPLIFIED MODES — one movement mechanic, no look, no time button.
+//
+// Two prototypes that ask the same question in two different ways: if the
+// player only ever drags to dodge and taps to shoot, is the four-beat rhythm
+// (see him, watch the round leave, step out of it, shatter him) still there?
+// They differ in exactly one rule — WHO OWNS TIME — so playing one after the
+// other is a controlled comparison and not two unrelated games:
+//
+//   CORRIDOR DUEL  the world slows itself, whenever a round is in the air
+//   STAND STILL    the world moves at your thumb's speed, and nothing else's
+//
+// Neither has a time bank, so neither can price the freeze the way the tunnel
+// does (docs/PILLARS.md §1, §2). What replaces the price is different in each
+// and is the thing being tested — see docs/MODES.md.
+// ---------------------------------------------------------------------------
+export const SIMPLE = {
+  legWide: 1,           // cells either side of the spine: 1 = a 12 m strip
+  strafeEase: 11,       // how sharply the body answers the thumb (vs MOVE_EASE)
+  tapMagnetPx: 64,      // a tap this close to a body on screen takes the body
+  duel: {
+    // Time is not the player's here. It drops on its own the moment a round
+    // is on its way and comes back when the air is clear, so the rhythm of
+    // the fight is set by the enemy firing rather than by a button.
+    slow: 0.13,         // world speed while a round is inbound
+    ease: 9,            // crossing between slow and full (per second)
+    lead: 1.1,          // a round counts as inbound this many seconds out
+    miss: 2.6,          // ...and only if it passes within this many metres
+    // SHORTER THAN THE TUNNEL'S, because you never walk it while it matters.
+    // The strip is the arena, not a journey: its length is the range the
+    // fight opens at, and everything past the last body is a corridor you
+    // are marched down with nothing to do. Six cells is 24 m, which is just
+    // inside the 26 m an enemy opens fire at — so they arrive already
+    // shooting — and about three seconds of march at the far end.
+    legCells: 6,
+    walkSpeed: 6.5,     // the corridor walks you to the open door, m/s
+  },
+  stop: {
+    still: 0.02,        // world speed with the thumb still
+    full: 1,            // ...and at full drag
+    curve: 0.85,        // <1 opens the low end up: a nudge is a real nudge
+    // SHOOTING IS NOT FREE. Standing still stops the world, so without this
+    // a player could stand in one spot and empty a magazine into a frozen
+    // room at no cost, which is not a game. Every shot buys the world a
+    // slice of full-speed time — the bullets you did not dodge get closer.
+    shotTime: 0.17,     // seconds of world time a shot costs
+    shotRate: 1,        // ...spent at this world speed
+    // Longer than the duel's: here you walk the leg yourself, at whatever
+    // speed you are willing to let the world run at, and that walk IS the
+    // mode. Nine cells is 36 m of deciding when to move.
+    legCells: 9
+  },
+};

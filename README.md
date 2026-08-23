@@ -17,6 +17,25 @@ Everything runs off holds, drags, and taps — one thumb works, two thumbs sing:
 | **Tap** | Fire at the crosshair — tap repeatedly to work through a whole squad in one freeze |
 | **Tap a dropped gun** | Auto-sprint to it and equip it, one tap |
 
+## Modes
+
+Five — the main game first, then the rest in the order they were built.
+Listed in-game under **SETTINGS → MODES**, with the alternates also one tap
+from the title screen:
+
+| Mode | What you do |
+|---|---|
+| **THE TUNNEL** | Door to door, deeper each time. The main game; PLAY starts it. |
+| **CITY STREETS** | Endless waves in the white city — the original arena. |
+| **RUSH HOUR** | Freeze the crowd, find the one face that matters, walk out. |
+| **CORRIDOR DUEL** | They come to you. Drag to sidestep, tap them to shatter. |
+| **STAND STILL** | Time only moves while you do. Stand still and the world waits. |
+
+The last two are **simplified-control prototypes**: no look axis and no time
+button, so the whole scheme is *drag to move, tap to shoot* and the table
+above does not apply to them. They own time by two different rules — see
+[`docs/MODES.md`](docs/MODES.md). The list itself is `src/modes.js`.
+
 ## Features
 
 - **First-person 3D** (Three.js, vendored — no CDN, works offline) tuned for a tall portrait viewport
@@ -31,7 +50,12 @@ Everything runs off holds, drags, and taps — one thumb works, two thumbs sing:
 - **Rotating arenas**: the cover layout changes every 3 waves (scattered cover → pillar court → corridors)
 - Synthesized sound effects (WebAudio, no assets), haptic feedback, kill-word flashes, best-wave tracking (localStorage)
 
-## Run it
+## Play it
+
+**On your phone:** https://onlinestuff4me-sketch.github.io/timeshard/
+(deployed automatically from `main` by GitHub Pages)
+
+## Run it locally
 
 It's a static page — serve the folder and open it on a phone (or a mobile
 emulation viewport in desktop devtools):

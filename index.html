@@ -55,6 +55,9 @@
      STAND HERE and under TAP HERE TO SLOW TIME. Goal 3: it arrives with the
      thing it aims. `body.armed` is set the moment the gun is granted. */
   body.tutoring:not(.armed) #crosshair { display:none; }
+  /* The simplified modes aim with the thumb, not with the lens: a sight
+     that is not where your shot lands is worse than no sight at all. */
+  body.simple #crosshair { display:none; }
   /* (`body.tutoring:not(.armed) #pausebtn { opacity:0 }` used to be here, on
      the principle that the onboarding owns the screen. It hid the pause button
      for the first eight lessons — and the death screen of a FAILED lesson has
@@ -126,6 +129,37 @@
   .setpill { justify-self:start; padding:7px 20px; border:2px solid rgba(22,24,29,.4);
                 border-radius:999px; font-size:11px; font-weight:900; letter-spacing:.2em; }
   .setpill.on { border-color:#ff2d1a; color:#ff2d1a; }
+
+  /* ---- MODES, in Settings -----------------------------------------------
+     A catalogue, not a menu of buttons: every mode the game can start —
+     the main game first, then the rest oldest to newest — each with the one
+     line that says what you DO in it. Rendered from src/modes.js, which is
+     also where that ordering is argued. See docs/PILLARS.md §7.
+
+     A row is tappable only when Settings was opened from the MAIN MENU. Mid
+     run the same list is a reference: tapping a mode there would mean
+     abandoning the run you paused, which is what END RUN is for. */
+  #settings .htpcard { max-height:86vh; overflow-y:auto; }
+  .setsec { width:230px; margin:14px 0 2px; text-align:left;
+            font-size:9.5px; font-weight:800; letter-spacing:.3em; color:#9aa0a9; }
+  .setsec .secnote { display:block; margin-top:3px; letter-spacing:.14em;
+                     font-weight:600; color:#b3b8c0; text-transform:none; }
+  .moderow2 { width:230px; text-align:left; padding:9px 10px; margin:0 -10px;
+              border-radius:12px; }
+  .moderow2 b { display:block; font-size:11.5px; font-weight:900;
+                letter-spacing:.18em; color:#16181d; }
+  .moderow2 span { display:block; margin-top:3px; font-size:11px; font-weight:600;
+                   letter-spacing:.02em; line-height:1.35; color:#6b7078; }
+  /* the one you are playing, or would play with PLAY */
+  .moderow2.cur b { color:#ff2d1a; }
+  /* live rows say so by looking pressable; the reference list stays flat */
+  #modelist.live .moderow2 { background:rgba(22,24,29,.05); }
+  #modelist.live .moderow2 + .moderow2 { margin-top:6px; }
+  /* Tapping a row mid-run cannot start it, and the banner that would say so
+     lives at z-index 10 — under this card. So the answer is given inside the
+     card, on the line that already explains the list. */
+  @keyframes setsecnudge { 0%,100% { color:#b3b8c0; } 30% { color:#ff2d1a; } }
+  .setsec .secnote.nudge { animation:setsecnudge .9s ease; }
 
   /* button-mode time control: 96px hit zone, 64px visual — misses forgive.
      Tap toggles bullet time; press-and-hold slows only while held. */
@@ -684,10 +718,7 @@
   <div class="go btn btn-1">PLAY</div>
   <div id="altwrap">
     <span class="mlabel">OTHER MODES</span>
-    <div class="mrow">
-      <div class="btn btn-2" id="rushlink">RUSH HOUR</div>
-      <div class="btn btn-2" id="citylink">CITY STREETS</div>
-    </div>
+    <div class="mrow" id="altrow"></div>
   </div>
   <div class="mdiv"></div>
   <div id="scores"></div>
@@ -773,6 +804,8 @@
     <div class="setrow"><span>TIME</span><div id="modelink" class="setpill on">BUTTON</div></div>
     <div class="setrow"><span>TEST</span><div id="condlink" class="setpill">OFF</div></div>
     <div class="setrow"><span>TUTORIAL</span><div id="tutlink" class="setpill">OFF</div></div>
+    <div class="setsec">MODES<span class="secnote" id="modenote">the main game first, then oldest to newest</span></div>
+    <div id="modelist"></div>
     <div class="htpclose">TAP OUTSIDE TO CLOSE</div>
   </div>
 </div>

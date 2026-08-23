@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
   WEAPONS, TYPE_INTRO, TYPE_SHARE, TYPE_DROP, DROPS, RAMP, COMP, LEG, PACING, TIME,
-  SHATTER, SCARCITY, CONDITION_TAX, EARLY, VIS, scarcity,
+  SHATTER, SCARCITY, CONDITION_TAX, EARLY, VIS, SIMPLE, scarcity,
 } from '../src/balance.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -293,6 +293,26 @@ the door approach, in line of sight of the slab, so the door opens in view.
 | \`drain\` | ${n(TIME.drain)} | seconds spent per second frozen, before ramp scaling |
 | \`slowScale\` | ${n(TIME.slowScale)} | world speed while standing still |
 | \`moveScale\` | ${n(TIME.moveScale)} | world speed at full stick |
+
+## The simplified modes
+
+One movement mechanic, no look axis, no time button — and therefore no bank,
+which is why each of the two owns time by a different rule. See
+\`docs/MODES.md\` for what each rule is for.
+
+Shared: a straight strip **${SIMPLE.legWide * 2 + 1} cells wide**, a tap
+within **${n(SIMPLE.tapMagnetPx)} px** of a body takes the body.
+
+| Knob | Corridor duel | Stand still |
+|---|---|---|
+| Leg length | ${n(SIMPLE.duel.legCells)} cells (${n(SIMPLE.duel.legCells * LEG.cellM)} m) | ${n(SIMPLE.stop.legCells)} cells (${n(SIMPLE.stop.legCells * LEG.cellM)} m) |
+| World speed, idle | ${n(1)} | ${n(SIMPLE.stop.still)} (thumb still) |
+| World speed, engaged | ${n(SIMPLE.duel.slow)} (round inbound) | ${n(SIMPLE.stop.full)} (full drag) |
+| What moves time | an enemy round in the air | your thumb, and your trigger |
+| Inbound window | ${n(SIMPLE.duel.lead)} s out, within ${n(SIMPLE.duel.miss)} m | — |
+| Cost of a shot | — | ${n(SIMPLE.stop.shotTime)} s of world time at ${n(SIMPLE.stop.shotRate)}× |
+| Ease onto target | ${n(SIMPLE.duel.ease)} /s | ${n(14)} /s (TIME_EASE) |
+| March to the open door | ${n(SIMPLE.duel.walkSpeed)} m/s | you walk it yourself |
 
 `;
 

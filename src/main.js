@@ -13,13 +13,37 @@
 
 import * as THREE from '../lib/three.module.min.js';
 import { WEAPONS, TYPE_INTRO, TYPE_SHARE, TYPE_DROP, DROPS, RAMP, COMP, PACING, TIME, LEG, SHATTER,
-  VIS, GRIND, EARLY, OPENING, ramp, scarcity, condTax } from './balance.js';
+  VIS, GRIND, EARLY, SIMPLE, OPENING, ramp, scarcity, condTax } from './balance.js';
 import { composeProtocol, newRunMemory, enemyRoster, ELEMENTS } from './protocols.js';
 // The corridor generator lives in its own module so the level tool at /tool
 // draws the real layouts rather than a second implementation of them.
 import { HALL, genHallLeg } from './genleg.js';
+// Every mode the game can start: the main game first, then the rest in the
+// order they were built. The menu row and the MODES section in Settings are
+// both rendered from it.
+import { MODES, modeById, isSimple } from './modes.js';
 import { loadTutorial, previewing as tutorPreviewing, NO_GRANTS } from './tutorial.js';
 import { haptic, persist, hydrateStorage, shellSetup, isNative } from './native.js';
+
+// ---------------------------------------------------------------------------
+// THE DOOR-TO-DOOR MODES.
+//
+// Three modes are built out of the same corridor: the tunnel, and the two
+// simplified prototypes that reuse its legs, its doors, its checkpoints and
+// its spawn pacing. `inHall()` is the test every one of those systems asks —
+// "am I in a corridor?" — as distinct from `game.mode`, which says WHICH
+// corridor game is being played and therefore who owns time and what a thumb
+// on the glass means.
+//
+// Written this way round on purpose: a simplified mode is the tunnel with
+// rules REMOVED, so it inherits by default and states its differences, and
+// a change to corridor behaviour cannot reach one and miss the others
+// (docs/PILLARS.md §7).
+// ---------------------------------------------------------------------------
+const HALLISH = new Set(['hall', 'duel', 'stop']);
+function inHall() { return HALLISH.has(game.mode); }
+// One movement mechanic, no look axis, no time button: 'duel' | 'stop' | null.
+function simple() { return isSimple(game.mode) ? game.mode : null; }
 
 // ---------------------------------------------------------------------------
 // LIFETIME PROGRESS — every door ever passed, and every element ever met.
@@ -884,7 +908,7 @@ function shiftWorld(ax, d) {
   for (const s2 of shells) { s2.pos[ax] += d; s2.prev[ax] += d; s2.mesh.position[ax] += d; }
 }
 function recenterWorld() {
-  if (game.mode === 'hall') return;   // the hallway is not periodic
+  if (inHall()) return;   // the hallway is not periodic
   for (const ax of ['x', 'z']) {
     if (Math.abs(player.pos[ax]) > PERIOD / 2) shiftWorld(ax, -Math.sign(player.pos[ax]) * PERIOD);
   }
@@ -2744,7 +2768,7 @@ function spawnEnemy(type = 'gunner') {
   // the wave attacks from one flank: spawn in an arc around the wave bearing
   // so the fight stays in front of you instead of whipping side to side
   let x = 0, z = 0, placed = false, holdZ;
-  if (game.mode === 'hall' && hall) {
+  if (inHall() && hall) {
     const L = hall.legs[hall.cur], C = HALL.cell;
     // The wave's last few stage on the door approach: you fight them with
     // the door in frame, so the opening lands as visible payoff and you are
@@ -3186,7 +3210,7 @@ function killEnemy(i, impulseDir) {
     // kills buy time — but they buy LESS of it as you go deeper, which is
     // what turns the freeze from a habit into a decision
     slowBank = Math.min(SLOWMO.cap,
-      slowBank + SLOWMO.bonus * scarcity('timeGain', game.mode === 'hall' ? game.wave : 1)
+      slowBank + SLOWMO.bonus * scarcity('timeGain', inHall() ? game.wave : 1)
         * condTax(legCondition(), 'timeGain'));
   }
   if (game.state !== 'menu') vibrate(15);   // every kill lands in the thumb
@@ -3206,7 +3230,7 @@ function killEnemy(i, impulseDir) {
   // change only what you could see, which makes them a lighting effect; what
   // makes them conditions is that they change what you can afford. A fog leg
   // at door 6 pays the door-6 rate AND the fog rate.
-  const door = game.mode === 'hall' ? game.wave : 1;
+  const door = inHall() ? game.wave : 1;
   const cond = legCondition();
   // EVERY TRAINING BODY LEAVES A CLIP. Scarcity is the lever the whole game
   // hangs off, and it is not a lever a player can feel before they know what
@@ -3252,7 +3276,7 @@ let worldT = 0;
 // you have to answer, and waiting on it would stall the fight.
 const _vFlight = new THREE.Vector3();
 function earlyRoundInFlight() {
-  if (game.mode !== 'hall' || game.wave > EARLY.oneRoundDoors) return false;
+  if (!inHall() || game.wave > EARLY.oneRoundDoors) return false;
   for (const b of bullets) {
     if (b.fromPlayer) continue;
     _vFlight.set(player.pos.x - b.pos.x, 0, player.pos.z - b.pos.z);
@@ -3349,7 +3373,7 @@ const doorAlive = (d) => Math.min(doorBodies(d), ramp(d, OPENING.aliveEvery));
 // one of them pulls a trigger. Three seconds for the opening doors — long
 // enough that every round is its own event — closing to the deep game's gap.
 function shotGap() {
-  if (game.mode !== 'hall') return OPENING.gapTo;
+  if (!inHall()) return OPENING.gapTo;   // every corridor mode, not just the tunnel
   const d = hall ? hall.doorsPassed + 1 : 1;
   const t = Math.max(0, Math.min(1,
     (d - OPENING.gapDoors) / Math.max(1, OPENING.gapBy - OPENING.gapDoors)));
@@ -3470,7 +3494,7 @@ function updateEnemy(e, sdt) {
       e.strafeT -= sdt;
       if (e.strafeT <= 0) { e.strafe *= -1; e.strafeT = 1 + Math.random() * 2; }
       // in the tunnel, walk the corridor graph; elsewhere press straight in
-      const flow = game.mode === 'hall' ? hallSteer(e) : null;
+      const flow = inHall() ? hallSteer(e) : null;
       const strafeDir = _v2.set(-toPlayer.z, 0, toPlayer.x)
         .multiplyScalar(e.strafe * (flow ? 0.12 : 0.55));
       const dir = _v3.copy(flow || toPlayer).add(strafeDir).normalize();
@@ -3706,11 +3730,16 @@ const _dir = new THREE.Vector3();
 // tap buffering: a tap that lands during the fire cooldown is BANKED for a
 // beat instead of dropped, so rapid tapping fires at the weapon's full rate
 let pendingFireUntil = 0;
-function playerFire() {
+let pendingFireAim = null;
+function playerFire(aimAt = null) {
   if (!player.alive || game.state !== 'play') return;
   if (tutorHoldsPlayerFire()) return;   // no weapon on screen yet, no round
   if (player.reloadT > 0) return;                       // hands are busy
-  if (player.fireCd > 0) { pendingFireUntil = performance.now() + 300; return; }
+  if (player.fireCd > 0) {
+    pendingFireUntil = performance.now() + 300;
+    pendingFireAim = aimAt;   // a banked tap keeps the target it was aimed at
+    return;
+  }
   const spec = WEAPONS[player.weapon];
   if (spec.melee) { knifeStrike(spec); return; }
   if (player.mag <= 0) { startReload(); return; }       // dry: rack a new mag
@@ -3725,7 +3754,9 @@ function playerFire() {
   // bullet doesn't hang in front of the lens when time is frozen
   camera.updateMatrixWorld();
   const origin = muzzle.getWorldPosition(new THREE.Vector3());
-  const aimPoint = camera.position.clone().addScaledVector(_dir, 30);
+  // 30 m out along the lens, or wherever the thumb said — cloned either way,
+  // because the next line turns this vector into the direction of travel.
+  const aimPoint = aimAt ? aimAt.clone() : camera.position.clone().addScaledVector(_dir, 30);
   const baseDir = aimPoint.sub(origin).normalize();
   for (let p = 0; p < spec.pellets; p++) {
     const d = baseDir.clone();
@@ -3775,6 +3806,12 @@ function playerFire() {
       }, k * spec.burstGap * 1000);
     }
   }
+  // SHOOTING IS NOT FREE IN STAND STILL. The world is stopped whenever the
+  // thumb is still, so without a price a player could stand in one place and
+  // empty the magazine into a frozen room. Every round spends a slice of
+  // full-speed world time instead — the shots you did not dodge get closer
+  // while you take yours. See SIMPLE.stop.shotTime.
+  if (game.mode === 'stop') stopDebt += SIMPLE.stop.shotTime;
   player.mag--;
   updateAmmoHud();
   if (player.mag <= 0) {
@@ -4093,6 +4130,29 @@ function onPointerDown(ev) {
         setTutorArmed(!tutorArmed);
         vibrate(12);
       }
+      // MODES: tapping a row from the MAIN MENU starts that mode. From the
+      // pause menu the list is a reference — see renderModeList.
+      const mrow = ev.target.closest && ev.target.closest('#modelist [data-mode]');
+      if (mrow) {
+        // Mid run the list is a reference and a tap cannot start anything.
+        // Say so ON THE CARD: showBanner draws at z-index 10, underneath this
+        // modal, so a banner here would be an answer nobody ever sees.
+        if (game.state !== 'menu' || tutorStep !== null) {
+          if (el.modenote) {
+            el.modenote.textContent = tutorStep !== null
+              ? 'not during the lesson' : 'end the run first to switch modes';
+            el.modenote.classList.remove('nudge');
+            void el.modenote.offsetWidth;   // restart the flash on a re-tap
+            el.modenote.classList.add('nudge');
+          }
+          return;
+        }
+        el.settings.style.display = 'none';
+        game.mode = mrow.dataset.mode;
+        vibrate(12);
+        advanceFromOverlay();
+        return;
+      }
       if (ev.target.closest && ev.target.closest('#modelink')) {
         // NOT DURING THE LESSON. The onboarding only starts in button mode,
         // and lesson 5 waits on the time BUTTON being pressed — switch to
@@ -4224,13 +4284,13 @@ function onPointerDown(ev) {
       }
       if (ev.target.closest('#scores') || ev.target.closest('.rules')) return;   // reading
     }
-    if (game.state === 'menu' && ev.target && ev.target.closest && ev.target.closest('#rushlink')) {
-      game.mode = 'rush';
-      advanceFromOverlay();
-      return;
-    }
-    if (game.state === 'menu' && ev.target && ev.target.closest && ev.target.closest('#citylink')) {
-      game.mode = 'wave';
+    // OTHER MODES: one handler for the whole row, whatever is in it, because
+    // the row is rendered from the registry rather than written out in the
+    // markup. A mode is added in src/modes.js and nowhere else.
+    const mbtn = game.state === 'menu' && ev.target && ev.target.closest
+      && ev.target.closest('#altrow [data-mode]');
+    if (mbtn) {
+      game.mode = mbtn.dataset.mode;
       advanceFromOverlay();
       return;
     }
@@ -4338,7 +4398,11 @@ function movePointer(p, cx, cy) {
     // where it landed — two-handed play shouldn't care about screen halves
     let hasMove = false;
     for (const q of input.pointers.values()) if (q !== p && q.role === 'move') hasMove = true;
-    p.role = hasMove ? 'look' : (p.sx < window.innerWidth * 0.5 ? 'move' : 'look');
+    // ONE MOVEMENT MECHANIC. In the simplified modes there is no look axis to
+    // give a finger to, so the first thumb down steers and any other is inert
+    // — it can still tap to shoot, which is the whole of the second input.
+    p.role = simple() ? (hasMove ? 'aim' : 'move')
+      : hasMove ? 'look' : (p.sx < window.innerWidth * 0.5 ? 'move' : 'look');
     p.ox = p.x; p.oy = p.y;         // the stick anchors where the drag begins
     if (p.role === 'move') sprintTo = null;   // manual move cancels a sprint
     // apply the couple of pixels that assigned the role, so even the very
@@ -4464,7 +4528,10 @@ function releasePointer(ev, isTapEligible) {
   // real tap almost always has one. Net displacement is the honest test.
   if (isTapEligible && performance.now() - p.downT < TAP_MS &&
       Math.hypot(p.x - p.sx, p.y - p.sy) <= TAP_PX) {
-    playerFire();   // a tap is always a shot: weapons are collected on foot
+    // a tap is always a shot: weapons are collected on foot. Where the shot
+    // GOES is the crosshair everywhere except the simplified modes, which
+    // have no look axis to point it with — there it goes to the thumb.
+    playerFire(simple() ? tapAim(p.x, p.y) : null);
   }
   input.pointers.delete(ev.pointerId);
   let stillMoving = false;
@@ -5602,7 +5669,9 @@ const SLOWMO = { base: TIME.base, bonus: TIME.bonus, cap: TIME.cap, drain: TIME.
 // is inert, so there is nothing to discover early and nothing to miss.
 function timeUnlocked() {
   if (tutorStep !== null) return tutorMay('timebtn');
-  if (game.mode !== 'hall') return true;         // the other modes are not a ramp
+  // The simplified modes have no time button at all (see updateModeUI), and
+  // rush is not a ramp — the unlock is the tunnel's, and only the tunnel's.
+  if (game.mode !== 'hall') return true;
   return !hall || hall.doorsPassed + 1 >= SLOWMO.unlockDoor;
 }
 let slowBank = SLOWMO.base;
@@ -5693,9 +5762,46 @@ function beginNewGame(i, withTutorial) {
   startRunFromMenu();
 }
 
+// ---------------------------------------------------------------------------
+// THE MODE LISTS. Both of them, from one registry.
+//
+// The menu's OTHER MODES row is the shortcut; the MODES section in Settings
+// is the catalogue that says what each one actually is. Neither knows what
+// modes exist — src/modes.js does.
+// ---------------------------------------------------------------------------
+function renderAltRow() {
+  if (!el.altrow) return;
+  // PLAY already starts the main mode, so it does not need a button here.
+  el.altrow.innerHTML = MODES.filter((m) => !m.main)
+    .map((m) => `<div class="btn btn-2" data-mode="${m.id}">${m.name}</div>`).join('');
+}
+
+// `live` = opened from the main menu, where a tap can start a run. From the
+// pause menu the same list is a reference card: starting a different mode
+// would silently throw away the run behind it, and the button for that is
+// END RUN.
+function renderModeList(live) {
+  if (!el.modelist) return;
+  // On the menu the "current" mode is whatever PLAY would start — read off
+  // the registry, not written out here, so the two cannot disagree.
+  const cur = live ? (MODES.find((m) => m.main) || {}).id : game.mode;
+  el.modelist.classList.toggle('live', !!live);
+  el.modelist.innerHTML = MODES.map((m) => {
+    const on = m.id === cur ? ' cur' : '';
+    return `<div class="moderow2${on}" data-mode="${m.id}"><b>${m.name}</b><span>${m.line}</span></div>`;
+  }).join('');
+  if (el.modenote) {
+    el.modenote.classList.remove('nudge');
+    el.modenote.textContent = live
+      ? 'tap one to play — the main game first, then oldest to newest'
+      : 'the main game first, then oldest to newest';
+  }
+}
+
 function openSettings() {
   updateCondPill();
   updateTutPill();
+  renderModeList(game.state === 'menu');
   const v = sfx.vols();
   el.setmusic.value = v.music;
   el.setsfx.value = v.sfx;
@@ -5717,13 +5823,19 @@ function updateModeUI() {
   // The onboarding hides the button and the meter until it has taught the
   // rest of the controls, and updateModeUI runs from several places that
   // would otherwise hand them straight back.
-  const on = timeMode === 'toggle' && inRun && timeUnlocked();
+  // THE SIMPLIFIED MODES SHOW NEITHER. No bank means no meter, and no
+  // freeze means no button; the crosshair goes too, because with no look
+  // axis it points down the corridor rather than at anything, and a sight
+  // that is not where your shot lands is worse than no sight at all.
+  document.body.classList.toggle('simple', !!simple());
+  // ...and the tunnel shows them from the door slow motion is UNLOCKED on.
+  const on = timeMode === 'toggle' && inRun && !simple() && timeUnlocked();
   el.timebtn.style.display = (on && tutorMay('timebtn')) ? 'flex' : 'none';
   // during the lesson the bar only appears once the meter beat has started,
   // even on a step that grants it: it is introduced, not just switched on
   el.slowmeter.style.display =
     (on && tutorMay('meter')) ? 'block' : 'none';
-  el.gtime.style.display = timeMode === 'toggle' ? '' : 'none';
+  el.gtime.style.display = (timeMode === 'toggle' && !simple()) ? '' : 'none';
 }
 function updateSlowMeter() {
   el.slowfill.style.width = Math.max(0, Math.min(1, slowBank / SLOWMO.cap)) * 100 + '%';
@@ -6186,7 +6298,7 @@ function tutorNoteTurnDodged(b) {
 }
 
 function tutorBuildBarrier() {
-  if (tutorBar || game.mode !== 'hall' || !hall) return;
+  if (tutorBar || !inHall() || !hall) return;
   // the leg says whether it has one — the tool's per-leg toggle
   const legSpec = TUTOR_LEGS[tutorLegIx];
   if (legSpec && !legSpec.barrier) return;
@@ -6875,6 +6987,9 @@ function noteTimeUse() {
   hideTimeTip();
 }
 function showTimeTip() {
+  // THERE IS NO BUTTON TO POINT AT. The simplified modes have no time
+  // control at all, and this tip is called from every door crossing.
+  if (simple()) return;
   if (timeMode !== 'toggle' || timeUses >= 6) return;
   el.timetip.classList.add('show');
   el.timebtn.classList.add('hint');
@@ -6945,13 +7060,18 @@ const el = {
   archmeta: document.getElementById('archmeta'),
   menurow: document.getElementById('menurow'),
   moderow: document.getElementById('moderow'),
-  rushlink: document.getElementById('rushlink'),
-  citylink: document.getElementById('citylink'),
+  altrow: document.getElementById('altrow'),
+  modelist: document.getElementById('modelist'),
+  modenote: document.getElementById('modenote'),
   altwrap: document.getElementById('altwrap'),
   timetip: document.getElementById('timetip'),
   reloadbar: document.getElementById('reloadbar'),
   reloadfill: document.getElementById('reloadfill'),
 };
+
+// The menu is already on screen at boot — showMenu() only runs on the way
+// BACK to it — so the OTHER MODES row is filled in once here as well.
+renderAltRow();
 
 // ---------------------------------------------------------------------------
 // THE ARCHIVE
@@ -7070,6 +7190,7 @@ function showMenu() {
   el.menurow.style.display = 'flex';
   el.moderow.style.display = 'flex';
   el.altwrap.style.display = '';
+  renderAltRow();
   for (const d of document.querySelectorAll('.mdiv')) d.style.display = '';
   setEnvironment('city');
   renderScores();
@@ -7206,6 +7327,11 @@ const LEG_HEADLINES = {
   spiral: 'NO STRAIGHT LINE OUT',
 };
 function legHeadline(proto) {
+  // A SIMPLIFIED LEG IS ALWAYS THE SAME SHAPE, so the composer's names for
+  // it are all lies: every one of them describes geometry (tight turns, a
+  // gallery, a vault) that simpleLegPlan does not build. The door number is
+  // the only true thing left to say about it.
+  if (simple()) return `DOOR ${hall ? hall.doorsPassed + 1 : 1}`;
   const pick = (e) => e && LEG_HEADLINES[e.id];
   const line = pick(proto && proto.condition)
     || (proto && proto.measures || []).map(pick).find(Boolean)
@@ -7283,7 +7409,7 @@ function startWave(n, quiet = false) {   // quiet: the clear card already announ
 function maxAlive() {
   // how many can be ON you at once — the dial that decides whether a fight
   // is a queue or a swarm, so it is the one that moves least
-  if (game.mode === 'hall') {
+  if (inHall()) {
     // A condition thins the crowd as well as the loot: two bodies met
     // separately are two searches, where a clump is one problem solved once.
     return Math.max(1, Math.round(doorAlive(game.wave)
@@ -7368,8 +7494,9 @@ function hitPlayer(ended = false) {
     r.innerHTML = (game.mode === 'rush'
       ? `<div class="stats">RUSH HOUR · ${markPips} ${markPips === 1 ? 'MARK' : 'MARKS'} · ` +
         `${game.kills} SHATTERED · ${Math.round(runPlayT)}S</div>`
-      : game.mode === 'hall'
-      ? `<div class="stats">TUNNEL · ${hall ? hall.doorsPassed : 0} ` +
+      : inHall()
+      ? `<div class="stats">${(modeById(game.mode) || {}).name || 'TUNNEL'} · ` +
+        `${hall ? hall.doorsPassed : 0} ` +
         `${hall && hall.doorsPassed === 1 ? 'DOOR' : 'DOORS'} · ${game.kills} SHATTERED</div>`
       : `<div class="stats">${game.wave} ${game.wave === 1 ? 'WAVE' : 'WAVES'} · ` +
         `${game.kills} SHATTERED · BEST ${bestWave} ${bestWave === 1 ? 'WAVE' : 'WAVES'}</div>`) + filed;
@@ -7379,7 +7506,7 @@ function hitPlayer(ended = false) {
     el.moderow.style.display = 'none';   // keep the stats line's row clear
     const goEl = el.overlay.querySelector('.go');
     goEl.textContent = game.mode === 'rush' ? 'RETRY RUSH HOUR'
-      : game.mode === 'hall' ? 'RETRY FROM LAST DOOR' : 'RETRY WAVE';
+      : inHall() ? 'RETRY FROM LAST DOOR' : 'RETRY WAVE';
     goEl.classList.add('long');
     el.menubtn.style.display = 'inline-block';
     el.overlay.classList.remove('hidden');
@@ -7453,7 +7580,7 @@ function advanceFromOverlay() {
     setWeapon('pistol');
     sfx.flush();   // a fresh run starts silent, whatever the last one was doing
     if (game.mode === 'rush') initRush();
-    else if (game.mode === 'hall') initHall();
+    else if (inHall()) initHall();
     else { startWave(1); showGuide(); }
   } else {   // retry current wave
     clearField();
@@ -7470,7 +7597,7 @@ function advanceFromOverlay() {
     sprintTo = null;
     setWeapon('pistol');
     if (game.mode === 'rush') initRush();
-    else if (game.mode === 'hall') retryHall();
+    else if (inHall()) retryHall();
     else startWave(game.wave);
   }
 }
@@ -7862,7 +7989,7 @@ function buildGrinder(cells, startGz) {
 
 // Real time, always: a freeze does not stop the building.
 function updateGrinder(dtReal) {
-  if (game.mode !== 'hall' || !hall) return;
+  if (!inHall() || !hall) return;
   const L = hall.legs[hall.cur];
   const G = L && L.grind;
   if (!G || G.done) return;
@@ -7960,7 +8087,7 @@ function stretchQuota(L, n) {
 // never the finale tail waiting at the door), so the count on the HUD stays
 // honest and pushing forward genuinely trades kills for ground.
 function hallAllowance() {
-  if (game.mode !== 'hall' || !hall) return Infinity;
+  if (!inHall() || !hall) return Infinity;
   const L = hall.legs[hall.cur];
   if (!L || !L.quota) return Infinity;
   const k = playerStretch(L);
@@ -7995,7 +8122,11 @@ function hallWave(n) {
   // why door 5 wanted twenty-four of them the frame after door 4 wanted one.
   // The door has a budget; the legs behind it split it; the leg's length
   // decides where they stand, not how many there are.
-  if (game.mode === 'hall') {
+  //
+  // The simplified modes get the same ramp (inHall, not game.mode): they are
+  // corridor games with the same four beats, and a mode whose whole pitch is
+  // "one round at a time, dodge it" wants the metronome most of all.
+  if (inHall()) {
     const want = legShare(n, hall ? hall.legInDoor : 0);
     const leg = hall && hall.legs[hall.cur];
     if (leg && leg.stretches && leg.stretches.length) {
@@ -8013,6 +8144,16 @@ function hallWave(n) {
   // ...and the CAST is composed the same way it always was — the ramp decides
   // how many, never who. A door that debuts a type still leads with it.
   const sub = { laser: 'rusher', sniper: 'gunner', rocketeer: 'heavy', bomber: 'shotgunner' };
+  // A CORRIDOR DUEL HAS NO BACK. You hold one end of the strip and cannot
+  // give ground, so an enemy whose answer is "retreat" is unanswerable here:
+  // a rusher does not fire, it simply arrives. Everything else stays — a
+  // shotgunner closing to spread range is a fight you can still win by
+  // sidestepping, which is the mode's whole verb.
+  //
+  // `laser` maps to `rusher` above and this map is applied in ONE hop, so it
+  // has to be redirected here too or a laser arrives as the rusher this
+  // line exists to remove.
+  if (game.mode === 'duel') { sub.rusher = 'gunner'; sub.laser = 'gunner'; }
   // Only types this player has actually unlocked may appear — the same two
   // keys the protocols use, so the cast is metered across runs too.
   const roster = n <= EARLY.gunnerOnlyDoors ? new Set(['gunner'])
@@ -8050,7 +8191,10 @@ function initHall() {
   // Decided BEFORE the first leg is composed, because the onboarding shapes
   // its own two legs (a straight hallway, then a room) and `forced` runs
   // during construction.
-  tutorShaping = (!tutorSeen || tutorArmed) && timeMode === 'toggle';
+  // NEVER IN A SIMPLIFIED MODE. The onboarding teaches a left thumb, a right
+  // thumb and a time button, and these modes have none of the three.
+  tutorShaping = (!tutorSeen || tutorArmed) && timeMode === 'toggle' && !simple();
+  resetSimpleState();
   tutorLegsBuilt = 0;
   tutorResetWorld();   // whatever the last run left, gone — teaching or not
   game.wave = 1;
@@ -8093,6 +8237,10 @@ function initHall() {
   if (tutorShaping) {
     tutorPrevX = player.pos.x; tutorPrevZ = player.pos.z; tutorPrevYaw = player.yaw;
     startTutorial();
+  } else if (game.mode === 'duel') {
+    showBanner('THEY COME TO YOU · DRAG TO SIDESTEP', 3000);
+  } else if (game.mode === 'stop') {
+    showBanner('TIME MOVES WHEN YOU DO', 3000);
   } else {
     showBanner('REACH THE RED DOOR', 2600);
     setTimeout(showTimeTip, 2600);
@@ -8102,6 +8250,7 @@ function initHall() {
 
 function retryHall() {
   // back to the last checkpoint: the current leg resets, door shut
+  resetSimpleState();
   const L = hall.legs[hall.cur];
   if (L.door.open) {
     L.door.open = false;
@@ -8141,12 +8290,24 @@ function retryHall() {
 // every real run, which is why it can sit in the composer's path.
 let forcedMeasures = null, forcedCondition;
 function forced(proto) {
-  // ONE SHAPE TO LEARN FIRST. A vault, an atrium or a gallery is a second
-  // thing to read on a door whose whole job is the four-beat rhythm — see
-  // him, watch the round leave, step out of it, shatter him. The opening
-  // doors are corridors, and the first room is a change the player notices.
-  if (game.mode === 'hall' && hall
-      && hall.doorsPassed + 1 <= OPENING.corridorDoors && proto) {
+  // The simplified modes get one shape and only one: a straight, wide strip.
+  // No condition and no measure, because every one of them is a rule stated
+  // in a system these modes have taken away — a blackout you cannot look
+  // around in, a grinder you cannot outrun when the corridor decides your
+  // pace. See simpleLegPlan.
+  if (simple()) {
+    proto.condition = null;
+    proto.measures = [];
+    proto.straight = true;
+    proto.plan = simpleLegPlan();
+    return proto;
+  }
+  // ONE SHAPE TO LEARN FIRST in the tunnel too. A vault, an atrium or a
+  // gallery is a second thing to read on a door whose whole job is the
+  // four-beat rhythm — see him, watch the round leave, step out of it,
+  // shatter him. The opening doors are corridors, and the first room is a
+  // change the player notices.
+  if (inHall() && hall && hall.doorsPassed + 1 <= OPENING.corridorDoors && proto) {
     const corridor = ELEMENTS.find((e) => e.id === 'corridor');
     if (corridor) proto.form = corridor;
   }
@@ -8224,7 +8385,7 @@ const visFloor = () => LEG.spawnMin + VIS.farMargin;
 // The condition the leg you are standing in is under, or null. Read by the
 // visibility rig, the contacts and the drop tax alike, so there is one answer.
 function legCondition() {
-  if (game.mode !== 'hall' || !hall) return null;
+  if (!inHall() || !hall) return null;
   const L = hall.legs[hall.cur];
   return (L && L.proto && L.proto.condition && L.proto.condition.id) || null;
 }
@@ -8318,7 +8479,7 @@ function updateContacts() {
 }
 
 function applyLegVisibility(snap) {
-  if (game.mode !== 'hall' || !hall) return;
+  if (!inHall() || !hall) return;
   const v = legVisibility(hall.legs[hall.cur], timeLocked || timeScale < 0.55);
   fogWant.near = v.near; fogWant.far = v.far; fogWant.amb = v.amb; fogWant.surf = v.surf;
   fogWant.col.setHex(v.col);
@@ -8338,7 +8499,7 @@ function updateFog(dtReal) {
   if (!scene.fog) return;
   // Re-read every frame: a blackout leg's target depends on whether time is
   // stopped, so the torch has to follow the freeze rather than the door.
-  if (game.mode === 'hall' && hall) applyLegVisibility(false);
+  if (inHall() && hall) applyLegVisibility(false);
   const k = 1 - Math.exp(-dtReal / VIS.tau);
   for (const key of ['near', 'far']) {
     const d = fogWant[key] - scene.fog[key];
@@ -8606,6 +8767,145 @@ function hallSteer(e) {
   return _vFlow.set(best[0] * C - e.pos.x, 0, best[1] * C - e.pos.z).normalize();
 }
 
+// ---------------------------------------------------------------------------
+// THE SIMPLIFIED MODES — CORRIDOR DUEL and STAND STILL
+//
+// One movement mechanic and nothing else. There is no look axis, no time
+// button and no bank: you drag to move and you tap to shoot, and that is the
+// entire control scheme. Both are built ON the tunnel — same corridor, same
+// doors, same checkpoints, same spawn pacing (see inHall) — so what is below
+// is only the list of rules they take AWAY, plus the one rule each puts back
+// in place of the time bank.
+//
+// WHAT REPLACES THE BANK. docs/PILLARS.md §1 forbids a mechanic that stops
+// time for free, and a mode with no bank cannot charge for it in seconds. So
+// each mode charges in a different currency, and which one works is the
+// question these two prototypes exist to answer:
+//
+//   CORRIDOR DUEL — time is not yours at all. It drops on its own while a
+//     round is in the air and comes back when the air is clear, so slow
+//     motion is a window the enemy opens, not a resource you hold. You never
+//     advance: they come to you, and the corridor walks you to the door once
+//     the floor is clear.
+//
+//   STAND STILL — time is yours, and it costs movement. The world runs at your
+//     thumb's speed, so standing still stops it; but every SHOT spends a
+//     slice of full-speed world time, which means a frozen room cannot be
+//     cleared for free. You pay in the only thing left: the distance those
+//     bullets travel while you fire.
+//
+// Both keep the four beats (§3) intact — see him, watch the round leave, step
+// out of it, shatter him — which is the thing actually being tested.
+// ---------------------------------------------------------------------------
+
+// A straight strip, three cells wide. Straight because the camera never turns
+// in these modes (§4: it may not move unless the player moved it, and there
+// is no look axis to move it with), so a corner would be a wall you cannot
+// see round. Wide because the whole game is sidestepping here, and one cell
+// is 4 m of corridor minus its walls — not a dodge, a flinch.
+function simpleLegPlan() {
+  const n = SIMPLE[game.mode].legCells, w = SIMPLE.legWide;
+  const extra = [];
+  for (let dz = 0; dz <= n; dz++) {
+    for (let dx = -w; dx <= w; dx++) if (dx !== 0) extra.push([dx, dz]);
+  }
+  return { moves: [['f', n]], extra, approach: 4 };
+}
+
+// Duel state. `walk` is the corridor carrying you to the open door: the mode
+// gives the player no forward control, so progress cannot be theirs to make.
+const duel = { walk: false };
+// Dead-stop state: seconds of full-speed world time owed by shots already
+// fired. See SIMPLE.stop.shotTime.
+let stopDebt = 0;
+
+function resetSimpleState() {
+  duel.walk = false;
+  stopDebt = 0;
+}
+
+// IS A ROUND ON ITS WAY TO ME? Not "is there a bullet" — a round already past
+// you, or one crossing the corridor four metres wide of your shoulder, is not
+// a thing to dodge, and slowing for it would leave the mode permanently in
+// slow motion with nothing to contrast against. So: closing, arriving inside
+// `lead` seconds, and passing within `miss` metres of where you stand.
+function roundInbound() {
+  const px = player.pos.x, pz = player.pos.z;
+  for (const b of bullets) {
+    if (b.fromPlayer) continue;
+    const dx = px - b.pos.x, dz = pz - b.pos.z;
+    const vx = b.vel.x, vz = b.vel.z;
+    const vv = vx * vx + vz * vz;
+    if (vv < 1e-6) continue;
+    // time of closest approach along the round's path
+    const t = (dx * vx + dz * vz) / vv;
+    if (t < 0 || t > SIMPLE.duel.lead) continue;   // past you, or too far out
+    const mx = dx - vx * t, mz = dz - vz * t;
+    if (mx * mx + mz * mz <= SIMPLE.duel.miss * SIMPLE.duel.miss) return true;
+  }
+  return false;
+}
+
+// The world speed each simplified mode wants this frame, and how fast to
+// cross to it. Returned together because the two are one decision: duel eases
+// (a window opening), stand still tracks the thumb almost rigidly (the world
+// is an extension of your hand, and lag there reads as input lag).
+function simpleTime() {
+  const m = simple();
+  if (m === 'duel') {
+    return { target: roundInbound() ? SIMPLE.duel.slow : TIME_FULL, ease: SIMPLE.duel.ease };
+  }
+  const s = Math.min(Math.hypot(input.stickX, input.stickY), 1);
+  let target = SIMPLE.stop.still +
+    (SIMPLE.stop.full - SIMPLE.stop.still) * Math.pow(s, SIMPLE.stop.curve);
+  // a shot already fired is still being paid for: the world runs at full
+  // speed until the debt is worked off, however still the thumb is
+  if (stopDebt > 0) target = Math.max(target, SIMPLE.stop.shotRate);
+  return { target, ease: TIME_EASE };
+}
+
+// TAP TO SHOOT, AND WHAT A TAP MEANS.
+//
+// With no look axis the crosshair is furniture: it points wherever the
+// corridor points, which is not where the man is. So the shot goes where the
+// THUMB went — the one place on screen the player has already told us they
+// are looking — and a tap that lands near a body takes the body rather than
+// the wall behind it.
+//
+// This is aim assist on the SHOT, not on the camera. §4 is about the camera
+// moving on its own, and nothing here moves it: it cannot, there is no look.
+function tapAim(sx, sy) {
+  const w = window.innerWidth, h = window.innerHeight;
+  // magnetism first: the nearest body whose chest is within a thumb's width
+  let best = null, bestD = SIMPLE.tapMagnetPx * SIMPLE.tapMagnetPx;
+  for (const e of enemies) {
+    if (!e.alive) continue;
+    _vTap.set(e.pos.x, SIMPLE_CHEST_Y, e.pos.z).project(camera);
+    if (_vTap.z > 1) continue;                      // behind the lens
+    const ex = (_vTap.x * 0.5 + 0.5) * w, ey = (-_vTap.y * 0.5 + 0.5) * h;
+    const d = (ex - sx) * (ex - sx) + (ey - sy) * (ey - sy);
+    if (d < bestD) { bestD = d; best = e; }
+  }
+  if (best) return new THREE.Vector3(best.pos.x, SIMPLE_CHEST_Y, best.pos.z);
+  // otherwise: straight out through the glass where the thumb landed
+  const v = new THREE.Vector3((sx / w) * 2 - 1, -(sy / h) * 2 + 1, 0.5).unproject(camera);
+  return v.sub(camera.position).normalize().multiplyScalar(30).add(camera.position);
+}
+const SIMPLE_CHEST_Y = 1.25;
+const _vTap = new THREE.Vector3();
+
+// The corridor walks you to the door. Runs on REAL time, not the world clock:
+// in stand still the world may be stopped, and a walk that stopped with it
+// would strand the player in a cleared room with no way to say "go on".
+function updateSimple(dt) {
+  const m = simple();
+  if (!m || !hall) return;
+  if (stopDebt > 0) stopDebt = Math.max(0, stopDebt - dt * timeScale);
+  if (m !== 'duel') return;
+  const L = hall.legs[hall.cur];
+  duel.walk = !!(L && L.door.open && game.state === 'play');
+}
+
 function updateHall(dt) {
   if (!hall) return;
   hall.flowT = (hall.flowT || 0) - dt;
@@ -8719,7 +9019,7 @@ function frame(now) {
       slowBank -= dt * SLOWMO.drain
         * (game.mode === 'rush' ? RAMP.rushDrain
           : (RAMP.drainFloor + RAMP.drainRange * diffT())
-            * scarcity('timeDrain', game.mode === 'hall' ? game.wave : 1));
+            * scarcity('timeDrain', inHall() ? game.wave : 1));
       if (slowBank <= 0) {
         slowBank = 0;
         setTimeLocked(false);   // time rushes back — resume SFX fires as usual
@@ -8729,9 +9029,17 @@ function frame(now) {
     updateSlowMeter();
   }
   let target = TIME_FULL;
+  let timeEase = TIME_EASE;
+  // THE SIMPLIFIED MODES OWN TIME OUTRIGHT. No bank, no button, no hold —
+  // the rule is the mode (see simpleTime), and the block below, which is the
+  // tunnel's whole time economy, is skipped rather than fought with.
+  const simpleT = playing && simple() ? simpleTime() : null;
   // classic: any touch slows time. button mode: only the time button does.
   const slowActive = timeMode === 'toggle' ? timeLocked : input.holding;
-  if (playing && slowActive) {
+  if (simpleT) {
+    target = simpleT.target;
+    timeEase = simpleT.ease;
+  } else if (playing && slowActive) {
     const speedNorm = Math.min(player.vel.length() / MOVE_SPEED, 1);
     target = TIME_SLOW + (TIME_MOVE_MAX - TIME_SLOW) * speedNorm;
     // A FLOOR WHILE A ROUND IS IN THE AIR AND BEING TAUGHT. The ordinary rule
@@ -8744,7 +9052,7 @@ function frame(now) {
   }
   if (game.state === 'dead') target = 0.12;
   if (game.state === 'menu') target = 0.5;   // dreamy half-speed attract mode
-  timeScale += (target - timeScale) * Math.min(dt * TIME_EASE, 1);
+  timeScale += (target - timeScale) * Math.min(dt * timeEase, 1);
   // THE ONBOARDING'S HARD FREEZE. Snapped rather than eased, and applied after
   // the ease so nothing creeps: the arm stops mid-raise and the world waits.
   // The player's own controls keep working — they can look around at the man
@@ -8770,7 +9078,8 @@ function frame(now) {
   if (pendingFireUntil > performance.now() && player.fireCd <= 0 &&
       player.alive && game.state === 'play') {
     pendingFireUntil = 0;
-    playerFire();   // the banked tap fires the instant the cooldown clears
+    const aim = pendingFireAim; pendingFireAim = null;
+    playerFire(aim);   // the banked tap fires the instant the cooldown clears
   }
 
   // movement: stick deflection (or an active sprint) sets a target velocity,
@@ -8785,6 +9094,12 @@ function frame(now) {
       else { tvx = (dx / d) * SPRINT_SPEED; tvz = (dz / d) * SPRINT_SPEED; }
     } else {
       let sx = input.stickX, sy = input.stickY;
+      // THE DUEL IS ONE AXIS. You hold your end of the strip and sidestep;
+      // walking down it is not yours to do, which is what makes the enemy
+      // closing the distance mean something. The forward half of the drag is
+      // dropped rather than clamped, so a diagonal thumb still sidesteps
+      // cleanly instead of feeling like it caught on something.
+      if (game.mode === 'duel') sy = 0;
       const sm = Math.min(Math.hypot(sx, sy), 1);
       if (sm > 0.02) {
         sx /= Math.max(sm, 1e-6); sy /= Math.max(sm, 1e-6);
@@ -8797,6 +9112,11 @@ function frame(now) {
         tvx = dirX * sm * MOVE_SPEED * ghost;
         tvz = dirZ * sm * MOVE_SPEED * ghost;
       }
+      // ...and once the floor is clear, the corridor itself walks you to the
+      // open door. Progress cannot be the player's to make in a mode that
+      // took forward movement away, and a cleared strip with no way to say
+      // "go on" is a dead end.
+      if (duel.walk) tvz = SIMPLE.duel.walkSpeed;
     }
   }
   const mk = 1 - Math.exp(-MOVE_EASE * dt);
@@ -8999,7 +9319,7 @@ function frame(now) {
               extra--;
             } else i++;
           }
-        } else if (game.mode === 'hall') {
+        } else if (inHall()) {
           // corridors fight in clusters: 1-3 round the corner together — but
           // NOT under a condition. A clump in the dark is a single problem
           // you solve with one burst or one knife sweep; the same bodies met
@@ -9014,7 +9334,7 @@ function frame(now) {
         // the fuller the street (a fresh pack fills it fast), the longer
         // until the next arrival
         const fill = enemies.length / maxAlive();
-        if (game.mode === 'hall') {
+        if (inHall()) {
           // A cleared corridor stays quiet only briefly — long enough to
           // breathe and push forward, never long enough to feel empty.
           game.spawnTimer = (enemies.length === 0 ? PACING.hallEmptyGap
@@ -9028,7 +9348,8 @@ function frame(now) {
     for (const e of enemies) updateEnemy(e, sdt);
     updateBullets(sdt);
     if (game.mode === 'rush') updateCrowd(sdt);
-    if (game.mode === 'hall') updateHall(dt);
+    if (inHall()) updateHall(dt);
+    if (simple()) updateSimple(dt);
     updateMarks(sdt);
 
     if (game.mode === 'wave' && game.state === 'play' && game.spawnQueue.length === 0 && enemies.length === 0 &&
@@ -9105,7 +9426,7 @@ function frame(now) {
     ? `TRAINING${SEP}${tutorHud}`
     : game.mode === 'rush'
     ? `RUSH${SEP}${markPips} ${markPips === 1 ? 'MARK' : 'MARKS'}`
-    : game.mode === 'hall' && hall
+    : inHall() && hall
       ? (hall.legs[hall.cur].door.open
           ? `DOOR ${hall.doorsPassed + 1}${SEP}OPEN \u2014 GO`
           : `DOOR ${hall.doorsPassed + 1}${SEP}${left} ${left === 1 ? 'ENEMY' : 'ENEMIES'} LEFT`)
@@ -9283,6 +9604,14 @@ window.__ts = {
   banner: showBanner,
   diff: () => ({ speed: enemyBulletSpeed(), aim: aimSpeedFactor(), t: diffT() }),
   fire: playerFire, setWeapon, spawnEnemy, spawnPickup,
+  // The simplified modes, from the outside: which one is running, whether a
+  // round currently counts as inbound, what the world clock is doing and what
+  // a shot still owes it.
+  simpleState: () => ({ mode: simple(), inbound: simple() === 'duel' ? roundInbound() : null,
+    debt: +stopDebt.toFixed(3), walk: duel.walk, timeScale: +timeScale.toFixed(3),
+    stick: +Math.hypot(input.stickX, input.stickY).toFixed(3) }),
+  tapAim: (x, y) => { const v = tapAim(x, y); return { x: +v.x.toFixed(2), y: +v.y.toFixed(2), z: +v.z.toFixed(2) }; },
+  modes: () => MODES.map((m) => m.id),
   shot: (px, py, pz, dx, dy, dz, fromPlayer) =>
     spawnBullet(new THREE.Vector3(px, py, pz), new THREE.Vector3(dx, dy, dz).normalize(), fromPlayer),
 };
