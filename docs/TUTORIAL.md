@@ -105,7 +105,32 @@ Three things the split needed:
 
 Marked with `timeshard_slowtaught`, which is separate from
 `timeshard_taught` — a tester jumping straight to a slow-time step must not
-come back to a game that thinks it has taught them to walk.
+come back to a game that thinks it has taught them to walk. `beginNewGame`
+clears both when the player asks to be taught: "teach me" means the game, not
+the first ninety seconds of it.
+
+### The lesson is not the only way the button arrives
+
+It is the way it arrives the FIRST time. On every run after that the lesson does
+not run, and the crossing into the unlock door is the entire unlock — so
+`crossHallDoor` calls `tutorRevealButton()` itself whenever `startSlowLesson()`
+reports it did not enter. Forgetting that shipped a build where everybody who
+had already been taught reached the school with no button and no meter, being
+fired on in volleys they had no way to answer.
+
+`startSlowLesson()` returns a boolean for exactly this reason, and it is also
+what undoes an arm that is never entered: it re-asks `slowLessonWanted` on the
+crossing and puts `tutorShaping` back if the answer has changed since the door
+opened.
+
+### What the second course is NOT
+
+The unlock, the school and the coach are `game.mode === 'hall'` only, and
+button-mode only. The simplified modes share the opening ramp — they are
+corridor games with the same four beats — but not this: a volley is unanswerable
+without a way to slow time, and every word the coach says names a button or a
+meter those modes do not have. Classic time mode has the unlock (slow motion is
+gated on the same door) but no coach, because there is no button to point at.
 
 ## The legs
 

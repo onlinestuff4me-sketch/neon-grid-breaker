@@ -85,11 +85,38 @@ learned. It steps now, and each tread is wide enough to stand on.
 | 1–5 | 5.4 | crosses a 16 m room in three seconds — a round you watch coming and walk out of |
 | 6–10 | 5.8 | one tread up, held just as long: the smallest change worth noticing |
 | 11 onward | +0.2 every 2 doors | a tread every couple of doors |
-| the door it reaches 12.0 | 12.0 | **slow time unlocks**, and the staircase stops |
-| ...and 10 doors after it | 12.0 | the school (below). One new thing at a time |
+| the door it reaches 13.0 | 13.0 | **slow time unlocks**, and the staircase stops |
+| ...and 10 doors after it | 13.0 | the school (below). One new thing at a time |
 | then | +0.2 every 2 doors, to 21.6 | climbing again, with the power in hand |
 
 `SPEED` in `src/balance.js`, read by `speedAt(door)`.
+
+Every dial in it arrives from outside — the RAMP pane drives them from sliders
+and its export can be hand-edited and pasted back — so `speedAt` and
+`unlockDoor` clamp before they compute. A tread of zero used to make the unlock
+door `Infinity` and the bullet speed `NaN`; a negative tread sent rounds
+backwards; an `unlockM` at or below `holdM` made the staircase *drop* at the
+unlock. And the solve is done in integers: `ceil((8.4 - 3) / 0.15)` is 37 in
+floating point and 36 in arithmetic, which is the difference between "the door
+it first reaches the speed on" and two doors later.
+
+### The unlock is the tunnel's, and only the tunnel's
+
+Everything below is about `game.mode === 'hall'`. The other four modes do not
+have a staircase, a school or an unlock:
+
+* **Corridor duel** and **Stand still** have no time button at all, so there is
+  nothing to unlock. They share the opening ramp — they are corridor games with
+  the same four beats — but not the school, which is a lesson about a control
+  they do not have. (It used to run in both of them: volleys they cannot answer,
+  and a coach line naming a meter that is not on screen.)
+* **Classic** time mode — hold to slow, no button, no bank — is not a separate
+  mode but it is a separate rule. Slow motion is gated by the same unlock door,
+  but there is no meter and no coach; the school's volleys are simply a fight.
+* **Rush hour** has no doors, so `1 + rushT / 25` stands in for one. It is
+  explicitly told to skip the school plateau: a flat stretch of speed from
+  2000 to 2250 seconds of run clock, for a lesson that mode never runs, is a
+  bug and not a curve.
 
 ### The door the power lands on is solved, not typed
 
@@ -139,7 +166,7 @@ right after it are built to ask the question:
 * **the meter is cheap here.** Drain at 0.45x, kills paying 2x
   (`drainMul`, `bonusMul`). The lesson is what the power is *for*, not what it
   costs.
-* **the speed holds flat** at 12.0 for all ten doors. One new thing at a time.
+* **the speed holds flat** at 13.0 for all ten doors. One new thing at a time.
 
 And it has a **mercy rule**. Running the bank dry in a room that only volleys is
 a hole you cannot climb out of: no meter, no answer, and the next volley arrives

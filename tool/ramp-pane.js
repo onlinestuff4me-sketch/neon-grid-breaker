@@ -13,7 +13,8 @@
 // before it. That is the opposite of a curve that compounds, and it is why the
 // old rule had a cliff — one body at door 4, twenty-four at door 5.
 // ---------------------------------------------------------------------------
-import { OPENING, RAMP, SPEED, SCHOOL, ramp } from '../src/balance.js';
+import { OPENING, RAMP, SPEED, SCHOOL, ramp, speedAt, unlockDoor, volleyAt }
+  from '../src/balance.js';
 
 const $ = (id) => document.getElementById(id);
 const DOORS = 96;   // far enough to show the unlock and the school
@@ -47,31 +48,14 @@ function seed() {
   };
 }
 
-// THE DOOR THE POWER LANDS ON IS NOT A DIAL. It is wherever the staircase
-// first reaches `unlockM` — the same solve balance.js does, so the pane and
-// the game can never disagree about it.
-export function unlockDoorOf(v = V) {
-  const first = v.openDoors + v.holdDoors + 1;
-  const treads = Math.max(1, Math.ceil((v.unlockM - v.holdM) / v.stepM));
-  return first + (treads - 1) * v.stepDoors;
-}
-export function speedOf(d, v = V) {
-  const first = v.openDoors + v.holdDoors + 1;
-  const gate = unlockDoorOf(v);
-  if (d <= v.openDoors) return v.openM;
-  if (d < first) return v.holdM;
-  if (d < gate) return v.holdM + v.stepM * (Math.floor((d - first) / v.stepDoors) + 1);
-  if (d < gate + v.schoolDoors) return v.unlockM;
-  const n = Math.floor((d - gate - v.schoolDoors) / v.stepDoors) + 1;
-  return Math.min(v.capM, v.unlockM + v.stepM * n);
-}
-// A volley on school door `d`, and the body floor that goes with it.
-export function volleyOf(d, v = V) {
-  const k = d - unlockDoorOf(v);
-  if (k < 0 || k >= v.schoolDoors) return 0;
-  const t = Math.min(1, k / Math.max(1, v.volleyBuild));
-  return Math.max(2, Math.round(2 + (v.volley - 2) * t));
-}
+// THE SAME SOLVE, LITERALLY. These used to be byte-for-byte copies of the
+// functions in balance.js, under a comment claiming the pane and the game
+// "can never disagree" — which was true only for as long as nobody edited one
+// of them. balance.js exports all three with an override parameter for exactly
+// this: the pane hands them its edited dials and gets the game's answer.
+export const unlockDoorOf = (v = V) => unlockDoor(v);
+export const speedOf = (d, v = V) => speedAt(d, v);
+export const volleyOf = (d, v = V) => volleyAt(d - unlockDoor(v), v, v);
 
 // --- the curve, computed exactly the way main.js computes it ---------------
 export function doorRow(d, v = V) {

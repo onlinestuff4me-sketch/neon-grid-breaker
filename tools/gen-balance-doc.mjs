@@ -360,18 +360,36 @@ if (prelude) {
     if (around.includes('<!--door-ok-->')) continue;   // an explicit what-if
     if (ok.has(+m[1])) continue;
     const line = prelude.slice(0, m.index).split('\n').length;
-    bad.push([+m[1], line, prelude.slice(Math.max(0, m.index - 70), m.index + 70)
+    bad.push([`door ${m[1]}`, line, prelude.slice(Math.max(0, m.index - 70), m.index + 70)
+      .replace(/\n/g, ' ').trim()]);
+  }
+  // ...AND THE SPEED, WHICH IS THE OTHER HALF OF THE SAME CLAIM. The first
+  // version of this guard checked door numbers only, so moving SPEED.unlockM
+  // from 12 to 13 left three sentences confidently naming 12.0 m/s as the
+  // speed the power arrives at, in the same document whose generated half said
+  // 13. Naming the wrong speed in the row that DEFINES the unlock is exactly
+  // the failure the door check exists to prevent.
+  const speed = SPEED.unlockM;
+  for (const m of prelude.matchAll(/(\d+(?:\.\d+)?)\s*m\/s|\bat\s+\*{0,2}(\d+\.\d)\*{0,2}\b/gi)) {
+    const around = prelude.slice(Math.max(0, m.index - 160), m.index + 160);
+    if (!/\b(unlock|school|the power)\b/i.test(around)) continue;
+    if (around.includes('<!--speed-ok-->')) continue;
+    const v = parseFloat(m[1] || m[2]);
+    if (!isFinite(v) || v === speed) continue;
+    const line = prelude.slice(0, m.index).split('\n').length;
+    bad.push([`${v} m/s`, line, prelude.slice(Math.max(0, m.index - 70), m.index + 70)
       .replace(/\n/g, ' ').trim()]);
   }
   if (bad.length) {
-    console.error('\ndocs/BALANCE.md names a door the code does not agree with.');
-    console.error(`unlockDoor() solves to ${want}; the school is `
-      + `${want}-${want + SPEED.schoolDoors - 1}.\n`);
-    for (const [n, line, ctx] of bad) {
-      console.error(`  line ~${line}, says door ${n}:  ...${ctx}...`);
+    console.error('\ndocs/BALANCE.md names a door or a speed the code does not '
+      + 'agree with.');
+    console.error(`unlockDoor() solves to ${want} at ${SPEED.unlockM} m/s; `
+      + `the school is ${want}-${want + SPEED.schoolDoors - 1}.\n`);
+    for (const [what, line, ctx] of bad) {
+      console.error(`  line ~${line}, says ${what}:  ...${ctx}...`);
     }
     console.error('\nFix the prose, or mark a deliberate what-if with '
-      + '<!--door-ok--> nearby, then run this again.');
+      + '<!--door-ok--> / <!--speed-ok--> nearby, then run this again.');
     process.exit(1);
   }
 }

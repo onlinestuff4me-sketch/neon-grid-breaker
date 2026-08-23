@@ -86,24 +86,63 @@ export const SPEED = {
                        // depends on rounds you can still read.
 };
 
+// THE DIALS, MADE SAFE TO READ. The RAMP pane in /tool drives these from
+// sliders and its export can be hand-edited and pasted back, so every value
+// below arrives from outside. A tread of zero made `unlockDoor()` return
+// Infinity and `speedAt()` return NaN past the gate; a negative tread made
+// rounds travel backwards; an `unlockM` at or below `holdM` collapsed the
+// solve to the first tread and made the staircase DROP at the unlock. None of
+// those is a shape anyone wants — they are just what the arithmetic does with
+// numbers nobody clamped.
+function dials(S) {
+  const stepM = Math.max(0.01, +S.stepM || 0.01);
+  const holdM = Math.max(0.1, +S.holdM || 0.1);
+  return {
+    openM: Math.max(0.1, +S.openM || 0.1),
+    openDoors: Math.max(0, S.openDoors | 0),
+    holdM,
+    holdDoors: Math.max(0, S.holdDoors | 0),
+    stepM,
+    stepDoors: Math.max(1, S.stepDoors | 0),
+    // the unlock must be at least one tread ABOVE the tread it is measured from
+    unlockM: Math.max(holdM + stepM, +S.unlockM || holdM + stepM),
+    schoolDoors: Math.max(0, S.schoolDoors | 0),
+    capM: Math.max(0.1, +S.capM || 0.1),
+  };
+}
+
 // The door the staircase first reaches `unlockM` on — and so the door the
 // slow-time lesson stands in. Derived, never typed.
 export function unlockDoor(S = SPEED) {
-  const first = S.openDoors + S.holdDoors + 1;
-  const treads = Math.max(1, Math.ceil((S.unlockM - S.holdM) / S.stepM));
-  return first + (treads - 1) * S.stepDoors;
+  const v = dials(S);
+  const first = v.openDoors + v.holdDoors + 1;
+  // INTEGER ARITHMETIC, BECAUSE THE FLOAT KIND GETS THIS WRONG. `ceil((13 -
+  // 5.8) / 0.2)` happens to be exactly 36, but `(8.4 - 3) / 0.15` is
+  // 36.00000000000001, which ceils one tread too high and puts the unlock two
+  // doors after the staircase actually reached the speed. Across the pane's
+  // own slider grids that is thousands of reachable combinations answering
+  // "the door it FIRST reaches unlockM on" with a door that is not it. Scale
+  // to integers and the question has an exact answer.
+  const num = Math.round((v.unlockM - v.holdM) * 1e6);
+  const den = Math.round(v.stepM * 1e6);
+  const treads = Math.max(1, Math.ceil(num / den));
+  return first + (treads - 1) * v.stepDoors;
 }
 
 // Enemy bullet speed in m/s on door `d`. The only reader of SPEED.
-export function speedAt(d, S = SPEED) {
-  const first = S.openDoors + S.holdDoors + 1;
+// `school` false skips the plateau — rush hour has no doors and no school.
+export function speedAt(d, S = SPEED, school = true) {
+  const v = dials(S);
+  const n = isFinite(d) ? Math.max(1, d) : 1;
+  const first = v.openDoors + v.holdDoors + 1;
   const gate = unlockDoor(S);
-  if (d <= S.openDoors) return S.openM;
-  if (d < first) return S.holdM;
-  if (d < gate) return S.holdM + S.stepM * (Math.floor((d - first) / S.stepDoors) + 1);
-  if (d < gate + S.schoolDoors) return S.unlockM;
-  const n = Math.floor((d - gate - S.schoolDoors) / S.stepDoors) + 1;
-  return Math.min(S.capM, S.unlockM + S.stepM * n);
+  const hold = school ? v.schoolDoors : 0;
+  if (n <= v.openDoors) return v.openM;
+  if (n < first) return v.holdM;
+  if (n < gate) return v.holdM + v.stepM * (Math.floor((n - first) / v.stepDoors) + 1);
+  if (n < gate + hold) return v.unlockM;
+  const past = Math.floor((n - gate - hold) / v.stepDoors);
+  return Math.min(v.capM, v.unlockM + v.stepM * past);
 }
 
 // The difficulty ramp. diffT() runs 0 -> 1 across `rampWaves`, and telegraph
@@ -215,9 +254,23 @@ export const EARLY = {
 // air at a time, the rhythm from the opening doors, which is survivable by
 // walking and gives the kills back. When the bank is worth spending again the
 // volleys return, and the reminder comes with them.
+// HOW MANY FIRE TOGETHER on school door `d` (0-based into the school), or 0
+// if that door is not one. Exported so main.js and the RAMP pane read the same
+// function rather than each keeping a copy of the ramp.
+export function volleyAt(d, S = SPEED, SC = null) {
+  const C = SC || SCHOOL;
+  if (d < 0 || d >= Math.max(0, S.schoolDoors | 0)) return 0;
+  const t = Math.min(1, d / Math.max(1, C.volleyBuild));
+  return Math.max(2, Math.min(C.volley, 2 + Math.floor((C.volley - 2) * t)));
+}
+
 export const SCHOOL = {
   volley: 3,           // men who fire together once the school is in session
-  volleyBuild: 4,      // ...reached over this many doors, from 2
+  // ...REACHED OVER THIS MANY DOORS, FROM 2 — and it now takes that long.
+  // The ramp was `round(2 + (volley-2) * d/volleyBuild)`, which with volley 3
+  // and volleyBuild 4 rounds up at d = 2, so a dial reading "four doors"
+  // delivered the full volley on the second one.
+  volleyBuild: 4,
   volleyGap: 2.4,      // world seconds between one volley and the next
   // ...AND THE SPACING INSIDE ONE. Not zero. The school starts the telegraphs
   // of a volley on the same frame, so with no floor at all they finished on

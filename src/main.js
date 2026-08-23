@@ -14,7 +14,7 @@
 import * as THREE from '../lib/three.module.min.js';
 import { WEAPONS, TYPE_INTRO, TYPE_SHARE, TYPE_DROP, DROPS, RAMP, COMP, PACING, TIME, LEG, SHATTER,
   VIS, GRIND, EARLY, SIMPLE, OPENING, SPEED, SCHOOL, ramp, scarcity, condTax,
-  speedAt, unlockDoor as speedUnlockDoor } from './balance.js';
+  speedAt, volleyAt, unlockDoor as speedUnlockDoor } from './balance.js';
 import { composeProtocol, newRunMemory, enemyRoster, ELEMENTS } from './protocols.js';
 // The corridor generator lives in its own module so the level tool at /tool
 // draws the real layouts rather than a second implementation of them.
@@ -2766,6 +2766,7 @@ function spawnEnemy(type = 'gunner') {
   const parts = buildEnemyMesh(type);
   const spec = ENEMY_TYPES[type];
   parts.g.scale.set(...spec.scale);
+  const bodyR = bodyRadius(type, parts.g);
   // the wave attacks from one flank: spawn in an arc around the wave bearing
   // so the fight stays in front of you instead of whipping side to side
   let x = 0, z = 0, placed = false, holdZ;
@@ -2835,6 +2836,13 @@ function spawnEnemy(type = 'gunner') {
       const minD = (L.proto && L.proto.form && L.proto.form.id === 'vault')
         ? LEG.vaultSpawnMin : LEG.spawnMin;
       if (d < minD || d > LEG.spawnMax) continue;
+      // NOT INSIDE THE FURNITURE. The city path a hundred lines below has
+      // always checked this; the tunnel path never did. It only ever tested
+      // distance and line of sight, and a vault room's low cover sits 0.2 m
+      // from a floor-cell centre — so with the +/-0.8 m jitter a body could be
+      // born up to 1.1 m inside a solid block, measured at 2-5% of placements
+      // in a vault leg.
+      if (pointInObstacle(px, pz, bodyR)) continue;
       if (!hasLineOfSight(_v2.set(px, 1.4, pz), _v3.set(player.pos.x, EYE_HEIGHT, player.pos.z))) {
         x = px; z = pz; placed = true;   // prefer stepping out from cover
         break;
@@ -2846,9 +2854,15 @@ function spawnEnemy(type = 'gunner') {
       // Last resort: the furthest-ahead cell of THIS spawn's own pool. It
       // used to fall back to the door approach, which is how a whole wave
       // ended up waiting at the exit once the player outwalked its release.
+      // ...preferring one the body FITS in. A floor-cell centre is not
+      // automatically clear: a vault's low cover sits 0.2 m from one.
       let bx = null, bz = -1e9;
-      for (const [cgx, cgz] of pool) {
-        if (cgz * C > bz && cgz * C >= player.pos.z + PACING.aheadMin) { bz = cgz * C; bx = cgx * C; }
+      for (const pass of [true, false]) {
+        for (const [cgx, cgz] of pool) {
+          if (pass && pointInObstacle(cgx * C, cgz * C, bodyR)) continue;
+          if (cgz * C > bz && cgz * C >= player.pos.z + PACING.aheadMin) { bz = cgz * C; bx = cgx * C; }
+        }
+        if (bx !== null) break;
       }
       if (bx !== null) { x = bx; z = bz; }
       else {   // nothing ahead at all: hand it to the approach, clamped short
@@ -2857,6 +2871,14 @@ function spawnEnemy(type = 'gunner') {
         const cap = app ? app[app.length - 1][1] * C : cgz * C;
         x = cgx * C;
         z = Math.min(cap, Math.max(cgz * C, player.pos.z + 6));
+        // Nothing left to choose from, so push out of whatever it landed in
+        // rather than leaving a body standing inside it.
+        for (const o of obstacles) {
+          if (x > o.min.x - bodyR && x < o.max.x + bodyR
+            && z > o.min.z - bodyR && z < o.max.z + bodyR) {
+            x = (x < (o.min.x + o.max.x) / 2) ? o.min.x - bodyR : o.max.x + bodyR;
+          }
+        }
       }
     }
     L.released = (L.released || 0) + 1;   // the stretch budget is spent here
@@ -2950,6 +2972,7 @@ function spawnEnemy(type = 'gunner') {
   enemies.push({
     ...parts,
     type,
+    bodyR,          // how wide this body really is — see bodyRadius()
     speed: spec.speed,
     pos: parts.g.position,
     state: 'assemble',
@@ -3424,20 +3447,23 @@ function legShare(d, i) {
 // volleys at a player with no meter is a hole, not a lesson.
 // ---------------------------------------------------------------------------
 // Which door of the school we are standing in, 0-based; -1 anywhere else.
+// `game.mode === 'hall'`, NOT `inHall()`. inHall() is true for the simplified
+// one-thumb modes too (they are corridors), and the ramp is deliberately shared
+// with them — but the school is not a difficulty curve, it is a lesson about a
+// button those modes do not have. It was running in both of them: volleys they
+// cannot answer, a body floor they never asked for, and a coach line naming a
+// meter that is not on screen. timeUnlocked() already gates on game.mode; this
+// now agrees with it.
 function schoolDoor() {
-  if (!inHall() || !hall || tutorStep !== null) return -1;
+  if (game.mode !== 'hall' || !hall || tutorStep !== null) return -1;
   const d = hall.doorsPassed + 1 - SLOWMO.unlockDoor;
   return d >= 0 && d < SPEED.schoolDoors ? d : -1;
 }
 const inSchool = () => schoolDoor() >= 0;
 // How many fire together. Two on the door the power lands (the smallest thing
 // that is still a volley), widening to SCHOOL.volley over volleyBuild doors.
-function schoolVolleyAt(door) {
-  const d = door - SLOWMO.unlockDoor;
-  if (d < 0 || d >= SPEED.schoolDoors) return 0;
-  const t = Math.min(1, d / Math.max(1, SCHOOL.volleyBuild));
-  return Math.max(2, Math.round(2 + (SCHOOL.volley - 2) * t));
-}
+// The ramp itself lives in balance.js so the RAMP pane reads the same one.
+const schoolVolleyAt = (door) => volleyAt(door - SLOWMO.unlockDoor);
 function schoolVolley() {
   const d = schoolDoor();
   return d < 0 ? 1 : schoolVolleyAt(SLOWMO.unlockDoor + d);
@@ -3506,7 +3532,11 @@ function schoolAiming() {
 }
 function updateSchoolCoach(playing) {
   const want = (() => {
-    if (!playing || tutorStep !== null || !inSchool() || !timeUnlocked()) return '';
+    // EVERY WORD THIS SAYS NAMES THE BUTTON OR THE METER. In classic time mode
+    // there is no button (you hold), and the simplified modes have neither —
+    // so there is nothing here that would be true to say.
+    if (!playing || tutorStep !== null || simple() || timeMode !== 'toggle') return '';
+    if (!inSchool() || !timeUnlocked()) return '';
     if (schoolCalm) return 'SHATTER THEM<br>TO REFILL YOUR METER';
     if (timeLocked) {
       return slowBank <= SLOWMO.low ? 'TAP AGAIN TO RESUME' : '';
@@ -3602,7 +3632,11 @@ function schoolNoteShot() {
 // balance.js; this only decides which tread we are standing on. Rush hour has
 // no doors, so its run clock stands in for one — a tread every ~25 s.
 function enemyBulletSpeed() {
-  return speedAt(game.mode === 'rush' ? 1 + rushT / 25 : game.wave);
+  // Rush hour has no doors and no school, so it must not inherit the school's
+  // ten-door plateau — which on its run clock landed as a flat stretch from
+  // 2000 to 2250 seconds for no reason a player could ever discover.
+  if (game.mode === 'rush') return speedAt(1 + rushT / 25, SPEED, false);
+  return speedAt(game.wave);
 }
 
 // Telegraphs and cooldowns ride the same dial: leisurely on the opening
@@ -3613,8 +3647,45 @@ function aimSpeedFactor() {
 
 // Same slab push-out the player uses: an enemy can never end a frame inside
 // a wall block, no matter what the steering did.
+// HOW WIDE A BODY ACTUALLY IS, measured off its own mesh the first time that
+// type is built, and cached per type. A flat 0.5 was used for the push-out and
+// every enemy is wider than that — a gunner is 0.64 across, a shieldbearer 0.94
+// because of the slab on its arm — so a body pressed against a wall by the
+// separation push had between 0.14 m and 0.44 m of itself inside the masonry.
+// That is the "the two enemies flanking on each side are clipping into the
+// walls" the playtest reported.
+//
+// Measured, not tabulated: a hand-written table of radii is a table that goes
+// stale the first time somebody edits a shoulder. This walks the group's own
+// geometry, rotation-invariantly (max of sqrt(x^2 + z^2) over the corners of
+// each part's bounding box, in group space), and scales by the type's scale.
+const _bodyR = new Map();
+const _bbox = new THREE.Box3();
+const _bv = new THREE.Vector3();
+function bodyRadius(type, g) {
+  if (_bodyR.has(type)) return _bodyR.get(type);
+  let r = 0.5;
+  g.updateMatrixWorld(true);
+  g.traverse((n) => {
+    if (!n.isMesh || !n.geometry) return;
+    if (!n.geometry.boundingBox) n.geometry.computeBoundingBox();
+    _bbox.copy(n.geometry.boundingBox).applyMatrix4(n.matrixWorld);
+    for (const x of [_bbox.min.x, _bbox.max.x]) {
+      for (const z of [_bbox.min.z, _bbox.max.z]) {
+        r = Math.max(r, Math.hypot(x - g.position.x, z - g.position.z));
+      }
+    }
+  });
+  // A CEILING, because the push-out has to fit through the level. The exit
+  // door is 2.0 m clear, so anything past 0.92 could wedge a body in a doorway
+  // it is meant to walk through — a stuck enemy is worse than a clipped one.
+  r = Math.min(0.92, r);
+  _bodyR.set(type, r);
+  return r;
+}
+
 function resolveEnemyCollisions(e) {
-  const r = 0.5;
+  const r = e.bodyR || 0.5;
   const lim = LIVE_BOUND;   // free-roam, but never further than the live zone
   e.pos.x = Math.min(Math.max(e.pos.x, player.pos.x - lim), player.pos.x + lim);
   e.pos.z = Math.min(Math.max(e.pos.z, player.pos.z - lim), player.pos.z + lim);
@@ -3890,6 +3961,14 @@ function updateEnemy(e, sdt) {
       e.shinR.rotation.x += (e.kneeRest - e.shinR.rotation.x) * 0.1;
     }
   }
+  // EVERY STATE, NOT JUST THE TWO THAT MOVE. This used to be called only from
+  // `advance` and `lunge`, so a body that stopped walking — to aim, to fire, to
+  // recover — was no longer being pushed out of anything, and a collider added
+  // underneath a standing enemy (a door sealing behind you, a retry re-closing
+  // one) simply swallowed it. Measured: a centre 0.19 m inside a door slab,
+  // held for 236 frames. It is a cheap loop over the leg's obstacles and it is
+  // the only hard guarantee in here — steering can fail, this cannot.
+  if (e.state !== 'assemble') resolveEnemyCollisions(e);
 }
 
 const MAT_WHITEFLASH = new THREE.MeshBasicMaterial({ color: 0xffffff });
@@ -5728,6 +5807,11 @@ function slotNoteDoor(n) {
   } catch { /* private */ }
 }
 function slotClear(i) {
+  // `timeuses` is in this list and the migration at the top of the file writes
+  // `ts_s0_timeuses` — but the counter itself was read and written at the bare
+  // `timeshard_timeuses`, so both halves of the per-slot design were talking
+  // past each other and this clear had never removed anything. It is a real
+  // slot key now (see slotTimeUses).
   for (const k of ['doors', 'archive', 'best', 'runs', 'rdoor', 'at', 'timeuses']) {
     try { localStorage.removeItem(slotKey(i, k)); } catch { /* private */ }
   }
@@ -5736,6 +5820,7 @@ function slotUse(i) {
   slotIx = i;
   try { persist('ts_slot', String(i)); } catch { /* private */ }
   hydrateFromSlot();
+  timeUses = slotTimeUses();   // the tip counter belongs to the save too
 }
 function fmtSlotWhen(t) {
   if (!t) return 'empty';
@@ -5905,6 +5990,9 @@ function setTimeLocked(v) {
 // --- pause: freezes the whole simulation; settings + end run live inside
 function openPause() {
   if (game.state !== 'play' && game.state !== 'intro' && game.state !== 'clear') return;
+  // The frame loop returns before the coach on a paused frame, so whatever it
+  // last said stays lit — over the PAUSED card, which is only 35% opaque.
+  updateSchoolCoach(false);
   game.pausedFrom = game.state;
   game.state = 'paused';
   sfx.fadeAll(0, 0.16);   // silence: a frozen world must not drone
@@ -5919,6 +6007,11 @@ function closePause() {
   game.state = game.pausedFrom || 'play';
   el.pausemenu.style.display = 'none';
   sfx.fadeAll(1, 0.22);   // and back up as the world resumes
+  // THE HUD IS DECIDED WHILE PAUSED AND APPLIED WHEN RUNNING. Settings > TIME
+  // calls updateModeUI() from inside the pause menu, where `inRun` is false,
+  // so switching to BUTTON mid-run hid the button and the meter and nothing
+  // put them back until the player died. Re-ask now that the run is live.
+  updateModeUI();
 }
 // --- the saves screen -----------------------------------------------------
 // Continue drops you at the deepest door the slot has reached; New Game wipes
@@ -5974,6 +6067,13 @@ function beginNewGame(i, withTutorial) {
   } else {
     tutorSeen = false;
     try { persist('timeshard_taught', ''); } catch { /* private */ }
+    // ...AND THE SECOND COURSE WITH IT. "Teach me" means teach me the game,
+    // not the first ninety seconds of it. This flag was global and untouched
+    // here, so a player who had reached door 81 once on any slot could never
+    // be shown the slow-time lesson again on any other — a brand new save that
+    // had never seen a time button walked into the school without one.
+    slowTaught = false;
+    try { localStorage.removeItem('timeshard_slowtaught'); } catch { /* private */ }
   }
   closeSaves();
   startRunFromMenu();
@@ -6788,14 +6888,28 @@ function armSlowLesson(nextDoor) {
   tutorShaping = true;
   tutorLegsBuilt = 0;
 }
+// Returns true only if it actually entered the lesson on this call.
 function startSlowLesson() {
-  if (tutorCourse !== 'slow' || tutorStep !== null) {
-    // Armed and then not entered — a retry, a mode change, a quit. Put the
-    // shaping back rather than leaving the tunnel authoring itself forever.
+  // ARMED AND NOT ENTERED IS THE CASE THAT MATTERS. The arm happens when a
+  // door OPENS and the entry when it is CROSSED, and between those two the
+  // player can die, retry, quit, or change the time mode in Settings — after
+  // which the lesson must not run, but `tutorShaping` is still true and the
+  // tunnel is still serving authored legs. So this asks again, on the
+  // crossing, whether the lesson is still wanted, and puts the shaping back if
+  // it is not.
+  //
+  // The previous version of this guard could not do that. It read
+  //   if (course !== 'slow' || step !== null) { if (course === 'slow' && step === null) ... }
+  // and the inner test is the exact negation of the outer one, so the recovery
+  // it describes had never executed once. `tutorShaping` stayed true for the
+  // rest of the run and the school's STAND HERE corridor was served as an
+  // ordinary leg of a live run.
+  const wanted = !!hall && slowLessonWanted(hall.doorsPassed + 1);
+  if (tutorCourse !== 'slow' || tutorStep !== null || !wanted) {
     if (tutorCourse === 'slow' && tutorStep === null) {
-      tutorShaping = false; tutorCourse = 'open';
+      tutorShaping = false; tutorCourse = 'open'; tutorLegsBuilt = 0;
     }
-    return;
+    return false;
   }
   // MARKED IN MEMORY, WRITTEN ON COMPLETION. The onboarding writes its flag on
   // the first step on purpose — "no way out but forward" — but this lesson is
@@ -6822,6 +6936,7 @@ function startSlowLesson() {
   tutorShowMeter(false);
   hideTimeTip();
   tutorNext(tutorOrder()[0]);
+  return true;
 }
 
 function endTutorial(taught = true) {
@@ -6856,7 +6971,14 @@ function endTutorial(taught = true) {
     // a player who jumped straight to a slow-time step in the tool would
     // otherwise come back to a game that thinks it has taught them to walk.
     slowTaught = taught;
-    try { persist('timeshard_slowtaught', taught ? '1' : ''); } catch { /* private */ }
+    // REMOVED, not set to empty. An empty string is a sentinel that reads as
+    // false today only because the one reader compares against '1'; the next
+    // reader to do a truthiness check would see a key that exists and believe
+    // the lesson had been taught.
+    try {
+      if (taught) persist('timeshard_slowtaught', '1');
+      else localStorage.removeItem('timeshard_slowtaught');
+    } catch { /* private */ }
     if (taught) setTimeout(() => showBanner('TAP THE DIAL WHEN THEY FIRE TOGETHER', 2600), 60);
     return;
   }
@@ -7460,19 +7582,31 @@ let demoT = 0, demoSpawnT = 0.3, demoKillT = 4;   // menu attract-mode clocks
 // New players were missing the time button entirely. It now re-teaches
 // itself at the start of every wave until it has been used several times.
 let timeUses = 0;
-try { timeUses = parseInt(localStorage.getItem('timeshard_timeuses') || '0', 10) || 0; } catch { /* private */ }
+function slotTimeUses() {
+  try {
+    return parseInt(localStorage.getItem(slotKey(slotIx, 'timeuses'))
+      // one-time read-through for a profile written before the key moved
+      || localStorage.getItem('timeshard_timeuses') || '0', 10) || 0;
+  } catch { return 0; }   /* private */
+}
+try { timeUses = slotTimeUses(); } catch { /* private */ }
 function noteTimeUse() {
   tutorFroze = true;
   schoolVolleys = 0;   // they answered a volley: stop telling them how
   if (timeUses >= 99) return;
   timeUses++;
-  try { localStorage.setItem('timeshard_timeuses', String(timeUses)); } catch { /* private */ }
+  try { persist(slotKey(slotIx, 'timeuses'), String(timeUses)); } catch { /* private */ }
   hideTimeTip();
 }
 function showTimeTip() {
   // THERE IS NO BUTTON TO POINT AT. The simplified modes have no time
   // control at all, and this tip is called from every door crossing.
   if (simple()) return;
+  // ...AND THERE IS NO BUTTON TO POINT AT UNTIL IT IS UNLOCKED. This fired on
+  // every door crossing from door 1, pointing at an empty corner eighty doors
+  // before the control arrives — and it can never stop, because the counter
+  // that retires it only moves when the button is pressed.
+  if (!timeUnlocked()) return;
   // ...AND THE SCHOOL HAS ITS OWN COACH. This tip lives at top:46% and the
   // school's prompt at top:42%, so both up at once is two overlapping lines
   // saying the same thing in different words. The school's is the better one:
@@ -9045,7 +9179,12 @@ function openHallDoor() {
     // corridor is produced by `forced()` during construction — arming it on
     // the crossing would be one leg too late and the player would walk into a
     // generated corridor with a lesson running in it.
-    armSlowLesson(nextDoor);
+    // ...ONLY IF THAT LEG IS THE FIRST OF IT. `nextDoor` is the same number for
+    // every leg behind a door, so arming on it armed the lesson four more
+    // times while the player was already walking through door 81 — and those
+    // arms are never entered, because only the crossing that FINISHES a door
+    // starts the lesson.
+    armSlowLesson(hall.legInDoor + 1 >= hall.legsThisDoor ? nextDoor : 0);
     const proto = forced(composeProtocol(nextDoor, lifetimeDoors, hall.mem));
     hall.legs.push(buildHallLeg(L.endGx, L.endGz + 1, proto));
   }
@@ -9104,17 +9243,30 @@ function crossHallDoor() {
   game.spawnTimer = 0.9;
   slowBank = Math.max(slowBank, SLOWMO.base);
   updateSlowMeter();
+  // Hoisted, because the block that advances the lesson's leg index runs later
+  // in this same function and has to know whether the lesson began on THIS
+  // crossing — see below.
+  let enteredSlow = false;
   if (tutorStep === null) {
+    // EVERY crossing, not just the unlock one: this is what enters the lesson
+    // AND what undoes an arm that is never going to be entered. See
+    // startSlowLesson.
+    const taught = startSlowLesson();
+    enteredSlow = taught;
     // THE NEW POWER GETS THE FRAME TO ITSELF. On the door it unlocks, the
     // headline is what just arrived rather than what the corridor is shaped
     // like — and the button makes the same entrance the onboarding used to
     // give it, because that animation is what says "this is new".
     if (doorDone && hall.doorsPassed + 1 === SLOWMO.unlockDoor) {
-      // The banner names it; the lesson on the other side of this crossing
-      // teaches it. `startSlowLesson` is what makes the next leg a lesson
-      // rather than a corridor with a new button in the corner.
       showBanner('SLOW MOTION UNLOCKED', 2200);
-      startSlowLesson();
+      // THE LESSON IS NOT THE ONLY WAY THE BUTTON ARRIVES, and forgetting that
+      // broke the unlock for everybody who had already been taught. The lesson
+      // takes the button away and hands it back itself, so when it runs there
+      // is nothing to do here. When it does NOT run — which is every run after
+      // the first — this crossing is the entire unlock, and without these two
+      // lines the player reached door 81 with no button and no meter and the
+      // whole school firing volleys at somebody who could not answer them.
+      if (!taught) tutorRevealButton();
     } else {
       showBanner(legHeadline(hall.legs[hall.cur] && hall.legs[hall.cur].proto), 2000);
     }
@@ -9130,12 +9282,28 @@ function crossHallDoor() {
   // handed the player the first leg of the real game with nothing in it and
   // the exit already open.
   if (tutorStep !== null) {
-    tutorLegIx++;
+    // NOT ON THE CROSSING THAT STARTED IT. `startSlowLesson` runs earlier in
+    // this same function and sets tutorLegIx to 0 — the lesson's first leg,
+    // which is the corridor the player has just walked into. Incrementing here
+    // as well left the index one ahead of the leg underfoot for the whole
+    // lesson: marks, the STAND HERE sight gate and the bodies to place were
+    // all read from the NEXT authored leg, and the course ran out of legs one
+    // crossing early. (The barrier survived only by accident of ordering — it
+    // is built inside tutorNext, before this line.)
+    if (!enteredSlow) tutorLegIx++;
     tutorSpineIx = 0;
     tutorCrossedDoor = true;
     if (tutorLegsOf()[tutorLegIx]) {
       game.spawnQueue = [];
       tutorPopulateLeg();
+    } else if (tutorCourse === 'slow') {
+      // OUT OF AUTHORED CORRIDOR IS OUT OF LESSON. The onboarding runs out of
+      // legs exactly when it is finished, so for it this is the handover. The
+      // slow course has two, and if the player is somehow past both with beats
+      // left, the alternative to ending here is a lesson narrating a corridor
+      // it did not build — a barrier measured off marks belonging to a leg
+      // that is not underfoot. End it and give them the run back.
+      endTutorial(true);
     }
     // GOAL 4: each area is its own checkpoint, so a death here costs this
     // area and nothing further back.
@@ -9178,16 +9346,27 @@ function unstickHallEnemies(dt) {
         || !L.stretches || k > body
       ? (L.approach && L.approach.length ? L.approach : L.cells)
       : L.stretches[Math.min(k + LEG.lookahead, body)].cells;
+    // ...AND SOMEWHERE THE BODY FITS. This is a teleport, so the one thing it
+    // must not do is rescue a stuck enemy into a wall — and a floor-cell
+    // centre is not automatically clear (a vault's low cover stands 0.2 m from
+    // one). Prefer clear cells; fall back to any cell rather than leaving him
+    // wedged, which is the failure this whole function exists to prevent.
+    const rr = e.bodyR || 0.5;
     let best = null, bestScore = -1e9;
-    for (const [cgx, cgz] of pool) {
-      const px = cgx * C, pz = cgz * C;
-      if (pz < player.pos.z + 5) continue;
-      const score = -Math.abs(Math.hypot(px - player.pos.x, pz - player.pos.z) - 14);
-      if (score > bestScore) { bestScore = score; best = [px, pz]; }
+    for (const strict of [true, false]) {
+      for (const [cgx, cgz] of pool) {
+        const px = cgx * C, pz = cgz * C;
+        if (pz < player.pos.z + 5) continue;
+        if (strict && pointInObstacle(px, pz, rr)) continue;
+        const score = -Math.abs(Math.hypot(px - player.pos.x, pz - player.pos.z) - 14);
+        if (score > bestScore) { bestScore = score; best = [px, pz]; }
+      }
+      if (best) break;
     }
     if (!best) continue;
     e.pos.x = best[0] + (Math.random() - 0.5) * 1.2;
     e.pos.z = best[1] + (Math.random() - 0.5) * 1.2;
+    resolveEnemyCollisions(e);   // the jitter can still land him in something
     e.stuckT = 0;
     e.bestD = 1e9;
     e.state = 'advance';
@@ -9555,7 +9734,13 @@ function frame(now) {
   // tunnel's whole time economy, is skipped rather than fought with.
   const simpleT = playing && simple() ? simpleTime() : null;
   // classic: any touch slows time. button mode: only the time button does.
-  const slowActive = timeMode === 'toggle' ? timeLocked : input.holding;
+  // EITHER WAY IT HAS TO BE UNLOCKED. `timeLocked` cannot be set before the
+  // unlock because setTimeLocked refuses, but `input.holding` is just a finger
+  // on the glass — so classic mode had slow motion from door 1, free and
+  // unmetered (the bank block below is button-mode only), for the entire
+  // eighty doors the tunnel spends teaching you to walk out of a round.
+  const slowActive = timeUnlocked()
+    && (timeMode === 'toggle' ? timeLocked : input.holding);
   if (simpleT) {
     target = simpleT.target;
     timeEase = simpleT.ease;
@@ -10143,7 +10328,7 @@ window.__ts = {
   killAt: (i) => killEnemy(i, _v1.set(0, 0.5, -1).normalize()),
   banner: showBanner,
   diff: () => ({ speed: enemyBulletSpeed(), aim: aimSpeedFactor(), t: diffT() }),
-  // WALKING TO DOOR 71 TAKES AN HOUR. The staircase, the unlock and the school
+  // WALKING TO THE UNLOCK DOOR TAKES AN HOUR. The staircase, the unlock and the school
   // are all functions of the door number and nothing else, so a harness is
   // allowed to say which door it is standing on.
   warpDoor: (d) => {
@@ -10178,7 +10363,11 @@ window.__ts = {
     shots: schoolShots, volleys: schoolVolleys, gap: shotGap(),
     unlockAt: SLOWMO.unlockDoor, says: schoolSaid,
     floor: schoolFloor(game.wave), coaching: document.body.classList.contains('coaching') }),
-  speedAt: (d) => speedAt(d),
+  // `school` false is the curve RUSH HOUR gets — it has no doors and no
+  // school, so it skips the plateau. A harness measuring the rush curve has to
+  // ask for that one, or it is measuring a function rush does not call.
+  speedAt: (d, school = true) => speedAt(d, SPEED, school),
+  rushSpeedAt: (secs) => speedAt(1 + secs / 25, SPEED, false),
   fire: playerFire, setWeapon, spawnEnemy, spawnPickup,
   // The simplified modes, from the outside: which one is running, whether a
   // round currently counts as inbound, what the world clock is doing and what
