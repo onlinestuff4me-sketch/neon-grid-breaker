@@ -207,6 +207,15 @@ criterion, and it was wrong in five ways at once:
   reported `ok`. `timebtn.js` had been doing exactly that since the time button
   moved behind the unlock door — `boundingBox()` on a `display:none` element
   returns null — executing **zero** assertions for weeks while counted green;
+A grader can also be wrong in the *other* direction, and this one was: the
+pattern for "an assertion printed `PASS ... : false`" used `[^:]*` to stop at
+the assertion's own colon, and `[^:]*` runs happily across `| {"asking"` —
+which contains no colon — so a **passing** assertion whose payload is an
+object with a false field was graded as a failure. The assertion's own colon
+has whitespace before it and a JSON one has a quote, so the character before
+the colon is what tells them apart; and the boolean is the whole word, not the
+head of `false,`.
+
 * so was a file killed by the **timeout** (600s per file — `handover.js` walks the whole onboarding and then five doors at their real pace, about five minutes on an idle box);
 * so was an **empty** file. `modes.js` was zero bytes and sat in the list;
 * four files printed `console.log('   PASS name :', cond)`, where PASS is a
