@@ -86,6 +86,29 @@ export const TUTOR = {
   warnAt: 0.5,          // fraction of the TANK left that trips the reminder
   rampDrain: 0.5,       // multiplier on the bank's drain while a lesson runs
   volleyGap: 2.6,       // seconds between rounds in the three-round lesson
+  // ...BUT ONCE THE ROUND IS PAST, THE BEAT IS SHORT. `volleyGap` also spaces
+  // the FIRST shot of a beat, where the pause is doing work — the player has
+  // just arrived and is reading. After a dodge they are standing there having
+  // already done the thing, and 2.6 s of nothing reads as the lesson being
+  // over. One second: long enough to see the round leave, short enough that
+  // three of them are one exercise rather than three waits.
+  //
+  // 0.4, NOT 1.0, because this is the countdown BEFORE the telegraph and the
+  // player is timing the round. Measured: the arm-raise adds ~0.6 s between
+  // the beat ending and the round existing, so 0.4 puts the next bullet in
+  // the air one second after the last one went past — which is the ask.
+  // (It was 2.6, and with the telegraph that was 3.2 s of standing still.)
+  dodgeGap: 0.4,
+  // THE DODGE PROMPT, OUT IN THE TRAINING ROOMS. Lesson 5 teaches the dodge
+  // against a round that is fired to be dodged; after the barrier the rooms
+  // are real fights, and a player who has not internalised it just stands in
+  // the lane and dies without ever learning why. So the lesson comes back —
+  // but only for somebody who is ABOUT to be hit and is NOT REACTING, and
+  // only once per area, because a prompt that fires on every round is not a
+  // rescue, it is a nag.
+  rescueDist: 5.0,      // metres from the player when the world stops
+  rescueLane: 1.0,      // how near his lane the round has to be to threaten
+  rescueStill: 0.7,     // seconds without a sideways step = not reacting
   reshoot: 3.2,         // ...and the gap before a missed shot is retried
   // THE METER LESSON HAS A FLOOR. It empties at a readable rate to half, then
   // slows to a crawl, and never goes below a quarter: the player is being
@@ -304,6 +327,11 @@ export const MECHANICS = [
 export const NO_GRANTS = {
   gun: false, fire: false, timebtn: false, meter: false,
   bank: false, ammo: false, aiFire: false, spawns: false, score: false,
+  // `rescue` — may this area stop the world for a round that is about to hit
+  // somebody who is not reacting? The teaching beats say no: they fire rounds
+  // ON PURPOSE and have their own freezes, and a second one arriving over the
+  // top of lesson 5 would be the lesson interrupting itself.
+  rescue: false,
 };
 // ...and what the ramp areas grant, which is simply "the game".
 // What a training area grants: the game, MINUS the slow-motion control. That
@@ -311,7 +339,8 @@ export const NO_GRANTS = {
 // it arrives later as something you unlock, not as a fifth thing to read on
 // your first corridor.
 const PLAYING = { gun: true, fire: true, timebtn: false, meter: false,
-  bank: false, ammo: true, aiFire: true, spawns: false, score: true };
+  bank: false, ammo: true, aiFire: true, spawns: false, score: true,
+  rescue: true };
 
 // --- when a cue comes and goes ---------------------------------------------
 export const CUE_EVENTS = [
@@ -384,6 +413,15 @@ export const ADVANCE_KINDS = [
 const REMIND_SHOOT = () => [{
   text: 'TAP ANYWHERE TO SHOOT', slot: 'mid', arrow: 'none', hand: 'none',
   pulse: true, on: 'threat', off: 'shot', once: true,
+}];
+
+// ...AND THE DODGE, when a round is about to land on somebody who is not
+// moving. Same words, same swipe and same divider as lesson 5, because it IS
+// lesson 5 — recognising it is the point. `once` per area: the rescue fires
+// at most one round per room, and answering it retires the prompt there.
+const REMIND_DODGE = () => [{
+  text: 'DODGE THE BULLET', slot: 'mid', arrow: 'none', hand: 'sway',
+  pulse: false, on: 'held', off: 'dodge', once: true, divider: true,
 }];
 
 export const STEPS = [
@@ -466,7 +504,12 @@ export const STEPS = [
     hud: 'DODGE THE ROUNDS',
     // ON `held` — the frame the world stops, which is the frame after the
     // shot. The hand is the instruction: a swipe across, under the words,
-    // over the half of the screen the move stick lives on.
+    // over the half of the screen the move stick lives on — and it now
+    // actually IS on that half. `sway` sat at left:50%, dead centre and
+    // straddling the divider, while this comment claimed otherwise: a swipe
+    // in the middle of the screen tells you to move but not where to put
+    // your thumb. With the divider drawn, the left half is named.
+    divider: true,
     cues: [{ text: 'DODGE THE BULLET', slot: 'mid', arrow: 'none', hand: 'sway',
       pulse: false, on: 'held', off: 'dodge' }],
   },
@@ -503,33 +546,36 @@ export const STEPS = [
   // back at the start of this area and nowhere further.
   { id: 'ramp1', label: '8 · Room · 1', advance: { kind: 'crossed' },
     grants: { ...PLAYING }, checkpoint: true, hud: 'CLEAR THE ROOM',
-    cues: [] },
+    cues: REMIND_DODGE() },
   // ...and from here on the reminders are once each, per area. The trigger
   // prompt starts after the first hallway with anybody in it, which is where
   // a player who has been shooting without being told has proved they do not
   // need it and one who has not is overdue.
   { id: 'ramp2', label: '9 · Hall · 1', advance: { kind: 'crossed' },
     grants: { ...PLAYING }, checkpoint: true, hud: 'CLEAR THE HALLWAY',
-    cues: REMIND_SHOOT() },
+    cues: [...REMIND_SHOOT(), ...REMIND_DODGE()] },
   { id: 'ramp3', label: '10 · Room · 2', advance: { kind: 'crossed' },
     grants: { ...PLAYING }, checkpoint: true, hud: 'CLEAR THE ROOM',
-    cues: REMIND_SHOOT() },
+    cues: [...REMIND_SHOOT(), ...REMIND_DODGE()] },
   { id: 'ramp4', label: '11 · Hall · 2', advance: { kind: 'crossed' },
     grants: { ...PLAYING }, checkpoint: true, hud: 'CLEAR THE HALLWAY',
-    cues: REMIND_SHOOT() },
+    cues: [...REMIND_SHOOT(), ...REMIND_DODGE()] },
   { id: 'ramp5', label: '12 · Room · 3', advance: { kind: 'crossed' },
     grants: { ...PLAYING }, checkpoint: true, hud: 'CLEAR THE ROOM',
-    cues: REMIND_SHOOT() },
+    cues: [...REMIND_SHOOT(), ...REMIND_DODGE()] },
   { id: 'ramp6', label: '13 · Hall · 3', advance: { kind: 'crossed' },
     grants: { ...PLAYING }, checkpoint: true, hud: 'CLEAR THE HALLWAY',
-    cues: REMIND_SHOOT() },
+    cues: [...REMIND_SHOOT(), ...REMIND_DODGE()] },
   // ...AND IT LETS THE GAME SPAWN. `PLAYING` holds the spawn queue, because
   // a training area's bodies come from the LEG rather than the queue — but
   // `done` is entered on crossing into the FIRST REAL LEG, whose wave has
   // just been composed and queued. Holding it there emptied that queue every
   // frame until the onboarding finished ending, and door 1 had nobody in it.
+  // ...AND NO RESCUE. `done` is entered on crossing into the FIRST REAL LEG:
+  // the onboarding is over, and a hand appearing over a round in door 1 would
+  // be the lesson refusing to end.
   { id: 'done', label: 'Done', advance: { kind: 'none' },
-    grants: { ...PLAYING, spawns: true }, cues: [] },
+    grants: { ...PLAYING, spawns: true, rescue: false }, cues: [] },
 ];
 
 // ---------------------------------------------------------------------------
@@ -785,6 +831,13 @@ function normalise(steps) {
       pulse: !!c.pulse,
       // ...shown at most once per area, spent by the action it asked for
       once: !!c.once,
+      // A CUE CAN ASK FOR THE SCREEN DIVIDER. The step-level `divider` hangs
+      // it over the whole beat, which is right for lesson 5 and wrong for the
+      // rescue — that one runs inside a real fight and the line has to come
+      // and go with the words. This normaliser rebuilds a cue field by field,
+      // so a key it does not name is silently dropped: `divider` was set in
+      // the spec, arrived as undefined, and the line never came on.
+      divider: !!c.divider,
       on: c.on || 'enter',
       off: c.off || 'advance',
     })),

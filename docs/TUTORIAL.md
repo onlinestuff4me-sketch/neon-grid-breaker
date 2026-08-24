@@ -12,6 +12,39 @@ Everything here lives behind `tutorStep !== null`. When it is null the game
 does not know the onboarding exists, which is the property `docs/PILLARS.md`
 §7 is protecting: nothing in this file may leak into a normal run.
 
+## The dodge comes back when it is needed
+
+Lesson 5 teaches the dodge against a round fired to be dodged. After the
+barrier the training rooms are real fights, and a player who has not
+internalised it stands in the lane and dies without learning why — so the
+lesson returns as a **rescue**, on three conditions:
+
+* the area grants it (`rescue` in the step's grants — the teaching beats do
+  not, because they fire rounds on purpose and have their own freezes, and
+  `done` does not, because that is door 1 of the real game);
+* a round is genuinely coming — closing, within `TUTOR.rescueDist`, and inside
+  `TUTOR.rescueLane` of the player's own x;
+* they are **not reacting**: no sideways step for `TUTOR.rescueStill` seconds.
+
+It adopts that round as the lesson's own and hands it to the same freeze,
+words and release lesson 5 uses — recognising it is the point. Once per area:
+a prompt on every round is a nag, not a rescue.
+
+> `tutorMay()` answers **true outside the lesson** ("outside the lesson
+> everything is granted"), so the rescue is gated on `tutorStep !== null`
+> first. Asking the grant alone would have armed it for the entire game.
+
+The swipe sits on the **left half** with the divider drawn. It was at
+`left:50%` — dead centre, straddling the divider — while the comment above it
+claimed it was "over the half of the screen the move stick lives on". A swipe
+in the middle of the screen says move, but not which thumb.
+
+`TUTOR.dodgeGap` is the beat after a round goes past, and it is **0.4s, not
+`volleyGap`'s 2.6**: the arm-raise adds ~0.6s, so the next round is in the air
+one second after the last one left — three rounds as one exercise rather than
+three waits. `volleyGap` still spaces the *first* shot of a beat, where the
+pause is doing work.
+
 ## Where it lives
 
 Split in two, deliberately.

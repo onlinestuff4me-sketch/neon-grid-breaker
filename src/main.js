@@ -6792,6 +6792,10 @@ let tutorSpent = new Set();
 // only be spent by the action it asked for if it got as far as asking.
 let tutorShown = new Set();
 let tutorWorldHeld = false;    // ...and right now the world is actually held
+// THE RESCUE: one per area, and only for somebody who is not reacting.
+let tutorRescued = false;     // has this area already stopped a round for them
+let tutorStillT = 0;          // seconds since they last stepped sideways
+let tutorStillX = 0;          // ...measured from here
 let tutorLegIx = 0;          // which entry of tutorLegsOf() the current leg is
 let tutorVolleyT = 0;        // beat between rounds in the three-round lesson
 let tutorSpineIx = 0;        // how far along the leg's spine they have walked
@@ -6930,7 +6934,11 @@ function tutorRenderCues() {
   // and lesson 2 needs both at once or it has not made its point.
   const hands = Object.values(bySlot).map((c) => c.hand).filter((h) => h && h !== 'none');
   tutorHand(hands[0] || null, hands[1] || null);
-  tutorLine(!!sp.divider);
+  // A CUE CAN ASK FOR THE DIVIDER TOO, not just a step. The rescue prompt out
+  // in the training rooms runs inside steps that are real fights, and the
+  // line has to come and go WITH the prompt rather than hang over the whole
+  // room.
+  tutorLine(!!sp.divider || any((c) => c.divider));
 }
 
 // How far the player is from the nearest cell of the leg's walked path. A
@@ -7555,6 +7563,7 @@ function tutorNext(step) {
   tutorShown = new Set();
   tutorSlowedHere = false; tutorResumedHere = false;
   tutorHardFreeze = false;
+  tutorRescued = false; tutorStillT = 0; tutorStillX = player.pos.x;
   const sp = tutorSpecOf(step);
   if (sp) {
     // WHERE TO PUT THEM BACK IF THIS BEAT IS FAILED — every beat, not just the
@@ -7849,6 +7858,42 @@ function updateTutorial(dtReal, movedM, yawDelta) {
   //
   // Released by the button and by nothing else, every round, so the second and
   // the third are the first one practised rather than a new problem.
+  // ARE THEY REACTING? A sideways step resets the clock; standing in the lane
+  // runs it. Measured on the player's own axis and in real time, because this
+  // is about a thumb rather than about the world.
+  if (Math.abs(player.pos.x - tutorStillX) >= TUTOR.dodgeStepM * 0.5) {
+    tutorStillX = player.pos.x; tutorStillT = 0;
+  } else {
+    tutorStillT += dtReal;
+  }
+  // ...AND IF A ROUND IS ABOUT TO LAND ON THEM, THE LESSON COMES BACK. Only
+  // in the training rooms (`rescue` is granted there and nowhere else), only
+  // once per area, and only for a round that is genuinely coming at them:
+  // close, closing, and in their lane. Everything after this is lesson 5's
+  // own machinery — the same freeze, the same words, the same way out.
+  // `tutorStep !== null` FIRST. tutorMay answers TRUE outside the lesson —
+  // "outside the lesson everything is granted" — so asking it alone would arm
+  // the rescue for the entire game, stopping the world on every round anybody
+  // ever failed to sidestep.
+  if (tutorStep !== null && tutorMay('rescue')
+      && !tutorRescued && !tutorRound && !tutorWorldHeld
+      && tutorStillT >= TUTOR.rescueStill) {
+    for (const b of bullets) {
+      if (b.fromPlayer) continue;
+      const dz = b.pos.z - player.pos.z;
+      const closing = b.pos.z - b.prev.z < 0;   // travelling toward him
+      if (!closing || dz <= 0 || dz > TUTOR.rescueDist) continue;
+      if (Math.abs(b.pos.x - player.pos.x) > TUTOR.rescueLane) continue;
+      // ADOPTED WITH A SPAN OF NOTHING, so the shared freeze below fires on
+      // this very frame: the round is already as close as it is going to get
+      // before it is a hit, and 45% of "no distance left" is zero.
+      tutorRound = { b, passedBar: true, counted: false, let: false,
+        from: b.pos.z, span: 1e-6 };
+      tutorHardFreeze = true;
+      tutorRescued = true;
+      break;
+    }
+  }
   if (tutorHardFreeze && tutorRound && !tutorRound.counted && !tutorRound.let
       && bullets.indexOf(tutorRound.b) >= 0) {
     const flown = tutorRound.from - tutorRound.b.pos.z;
@@ -7970,7 +8015,7 @@ function updateTutorial(dtReal, movedM, yawDelta) {
         tutorRound.counted = true;
         tutorDodged++;
         tutorEmit('dodge');
-        tutorSub = TUTOR.volleyGap;   // a beat, then the next one
+        tutorSub = TUTOR.dodgeGap;   // a short beat, then the next one
         // AND THE WORLD RUNS AGAIN, in a lesson that has the button: the next
         // round has to be a fresh beat — arm up, shot away, freeze, tap — and
         // it cannot be if the button is already down and the prompt telling
@@ -8519,6 +8564,13 @@ function killWord() {
   // the flash appears only when the announcer actually speaks the word —
   // first two eligible kills of a wave — so sight and sound always agree
   if (game.state === 'menu') return;
+  // NOT DURING THE ONBOARDING. The announcer speaks TIME on the first
+  // eligible kill of a wave, and in the lesson that lands a beat after the
+  // shatter of the first man a player has ever shot — reported as "a stray
+  // death sound effect after the shattering sound", which is exactly what an
+  // unexplained voice sounds like when nothing has introduced it. The
+  // flourish belongs to the game; the lesson stays quiet.
+  if (tutorStep !== null) return;
   const word = sfx.say();
   if (!word) return;
   const { svg } = buildWordSVG(word, word.length > 5 ? 44 : 58);   // fits SHATTER
@@ -8548,7 +8600,12 @@ const messageQueue = [];
 const LEG_HEADLINES = {
   fog: 'FOG · FREEZE TO SEE',
   blackout: 'BLACKOUT · FREEZE TO SEE',
-  dimStrips: 'LIGHTS AT HALF',
+  // dimStrips has NO HEADLINE. It lights every fourth ceiling panel instead
+  // of every second, which in a white corridor at door 6 is a change nobody
+  // can see — so the banner announced a condition, the corridor looked
+  // identical, and the player was left hunting for a difference that was not
+  // perceptible. A headline has to name something you can ACT on. The
+  // condition and its archive entry stay; only the claim goes.
   flood: 'FLOODED · YOU ARE SLOW',
   deadAir: 'DEAD AIR · YOU WON\'T HEAR THEM',
   oneWaySeal: 'IT SEALS BEHIND YOU',
@@ -8572,7 +8629,11 @@ function legHeadline(proto) {
   const line = pick(proto && proto.condition)
     || (proto && proto.measures || []).map(pick).find(Boolean)
     || pick(proto && proto.form);
-  return line || `DOOR ${hall ? hall.doorsPassed : 1}`;
+  // ...+ 1, LIKE THE HUD. `doorsPassed` is how many you have COMPLETED; the
+  // door you are standing in is the next one. The top bar has always said
+  // `doorsPassed + 1`, so a plain leg announced DOOR 3 in the middle of the
+  // screen while the HUD above it said DOOR 4.
+  return line || `DOOR ${hall ? hall.doorsPassed + 1 : 1}`;
 }
 
 function showBanner(html, dur = 1600) {

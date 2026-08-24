@@ -500,7 +500,11 @@
      instruction is "your thumb, sideways", and a coach forty per cent of the
      screen away from the sentence it illustrates is a second thing to find.
      `#ts-mid` sits at 26%; this sits just below it, on the centre line. */
-  #tutorhand.sway, #tutorhand2.sway { left:50%; top:42%; animation:handsway 1.9s ease-in-out infinite; }
+  /* THE MOVE STICK IS ON THE LEFT, so the swipe that says "step out of the
+     way" is too. At left:50% it straddled the divider and pointed at
+     neither thumb. 25% is the centre of the left half — the same place
+     the opening guide puts MOVE. */
+  #tutorhand.sway, #tutorhand2.sway { left:25%; top:42%; animation:handsway 1.9s ease-in-out infinite; }
   @keyframes handsway { 0%   { transform:translateX(0); opacity:0; }
                         14%  { opacity:.95; }
                         34%  { transform:translateX(-54px); }
