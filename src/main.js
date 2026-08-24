@@ -8788,6 +8788,14 @@ function updateStall(sdt, playing) {
   if (best) {
     best.engageDist = Math.max(best.engageDist || 0, bestD + LEG.stallReachM);
     best.fireCd = Math.min(best.fireCd || 0, 0.2);
+    // ...AND A STAGED BODY IS ARMED HERE TOO. The man reserved for a leg's
+    // feature stretch holds his fire until the player walks into the room —
+    // which is the whole point of him, and which is also a brand new way to
+    // stand in a corridor while nothing happens if the player never gets
+    // there: pushed back by a corner, turned around, or simply not going.
+    // A hold with no way out is the bug this watchdog exists for, and it
+    // does not get an exemption for being one of mine.
+    if (best.stageZ !== undefined) best.stageArm = worldT;
     return;
   }
   // 2. nobody to wake, so the corridor lets one through — see stallRelease(),
@@ -11470,6 +11478,10 @@ window.__ts = {
   // the round was when it stopped the world — the two numbers the rule is.
   // What a leg claims, and whether that claim names somewhere to stand — the
   // two questions hallWave() asks before it decides where the fight is.
+  // The stall watchdog's dials and where it currently stands, so a test can
+  // say "it waited, and it did not dawdle" against the same numbers.
+  stallCfg: () => ({ after: LEG.stallAfter, close: LEG.stallCloseM,
+    reach: LEG.stallReachM, t: +stallT.toFixed(2), owed: stallOwed }),
   legPromise: (proto) => ({ any: legPromises(proto), place: legPromisesPlace(proto),
     line: legHeadline(proto) }),
   tutorRescue: () => {

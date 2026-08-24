@@ -130,8 +130,11 @@ export const TUTOR = {
   // A scripted body does not need a random radius. It cannot move, the script
   // decided where it stands, and turn-taking is enforced separately by
   // tutorTurnHolds() rather than by distance. So the script decides this too,
-  // and it covers the deepest authored placement (33.5 m) with room to spare.
-  engageM: 40,
+  // and it covers the deepest authored placement with room to spare. Measured
+  // from the door plane the player walks through — which is 1.5 m behind the
+  // leg's own spine[0], and most of why 5 cells came out at 21.5 m against a
+  // 19 m floor — the worst is hall3's rear pair at 42.9 m.
+  engageM: 60,
   reshoot: 3.2,         // ...and the gap before a missed shot is retried
   // THE METER LESSON HAS A FLOOR. It empties at a readable rate to half, then
   // slows to a crawl, and never goes below a quarter: the player is being
