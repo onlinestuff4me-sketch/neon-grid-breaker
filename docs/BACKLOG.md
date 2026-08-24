@@ -268,14 +268,18 @@ the pixels.** `LEG.spawnMin` is 9 m and `spawnMax` 40 m, so an 8 m far plane
 puts the *entire* spawn range outside visibility — every enemy is born
 invisible.
 
-Edge arrows do not rescue it. `EDGE_ARROW_MIN` is 0.34 rad ≈ 19.5° of
-bearing, and arrows only appear *beyond* that. The 80° vertical FOV at
-402×874 is ~42° horizontal, so the screen half-width is ~21°: the arrow
-threshold sits just inside the screen edge, by design, so arrows mark
-genuinely off-screen threats. An enemy dead ahead at 12 m in an 8 m blackout
-therefore gets **no arrow and no pixels** — and dead ahead is the common case,
-because the corridor runs forward. Arrows solve flanks, not the axis the game
-is built along.
+Edge arrows do not rescue it. They appear only *beyond* `EDGE_ARROW_SHOW` of
+the camera's own half-frame — ~19.8° of bearing at the 80° vertical FOV on
+402×874, where the screen half-width is ~21°. That sits just inside the screen
+edge by design, so arrows mark genuinely off-screen threats. An enemy dead
+ahead at 12 m in an 8 m blackout therefore gets **no arrow and no pixels** —
+and dead ahead is the common case, because the corridor runs forward. Arrows
+solve flanks, not the axis the game is built along.
+
+> This used to read `EDGE_ARROW_MIN = 0.34` rad, one fixed number. It is a
+> fraction of the live half-frame now, with a second, lower threshold to
+> switch off at, because the FOV narrows to 66° in bullet time and a fixed
+> angle opened a 2.6° band there with the enemy off screen and no arrow.
 
 So blackout is about **light**, not distance. Avoid `#ff2d1a` for emergency
 strips: red means threat in this game, and a corridor lit in the signal

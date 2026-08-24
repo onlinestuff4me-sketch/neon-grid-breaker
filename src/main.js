@@ -171,7 +171,22 @@ const AIM_ASSIST_TAPER = 26;      // ...above this, drive falls off: a sweep PAS
 // speed: proportional by construction, and zero when you are still.
 const AIM_ASSIST_SHARE = 0.5;     // most it may add, as a fraction of your turn
 let assistGain = 0;               // eased drive, so acquiring is not a step
-const EDGE_ARROW_MIN = 0.34;      // bearing (rad) beyond which an enemy gets an arrow
+// THE OFF-SCREEN ARROW APPEARS WHERE THE FRAME ENDS, and the frame does not
+// end in the same place every frame: the camera zooms from 80 degrees to 66
+// in bullet time. This used to be one constant, 0.34 rad, compared once —
+// which was roughly right at the wide FOV and wrong at every narrower one.
+// Under any slow-motion press deep enough to bring the FOV below 75 degrees
+// the arrow switched off while the body was still outside the frame, leaving
+// a band 2.6 degrees wide on each side with an enemy alive, off screen, and
+// nothing pointing at him.
+//
+// One threshold also meant no hysteresis, and a single comparison against a
+// yaw that dithers — look smoothing, aim assist — strobes on and off frame to
+// frame. So there are two now, as fractions of the half-angle the camera
+// actually has: it comes on just BEFORE the body leaves the frame, and does
+// not go off again until he is well back inside it.
+const EDGE_ARROW_SHOW = 0.94;     // ...of the half-frame: arrow on
+const EDGE_ARROW_HIDE = 0.72;     // ...and it stays on until he is this far in
 const FOV_NORMAL = 80;
 const FOV_SLOW = 66;              // bullet-time zoom
 
@@ -5777,14 +5792,31 @@ const sfx = (() => {
     },
     // Airlock: pneumatic hiss, heavy clunk, and the slab running down its
     // track — the sound of somewhere sealed being opened for you.
-    airlock() {
+    //
+    // `far` IS HOW FAR AWAY THE DOOR IS, IN METRES, and it matters because
+    // there is no panner and no distance rolloff anywhere in this graph: a
+    // door seventy-eight metres down a corridor that jogs twice was arriving
+    // at exactly the volume of one at your feet. Killing the last man in a
+    // leg opens that door, so the last shatter of every leg was followed by a
+    // full-volume mechanical hiss-and-clunk for an object nobody could see —
+    // reported, reasonably, as a stray sound.
+    //
+    // Two things go with distance and both are done here: it gets quieter,
+    // and it gets DULLER, because air eats the top end first. A near door is
+    // untouched.
+    airlock(far = 0) {
       if (!ctx || muted) return;
-      noise(0.55, 2600, 0.55, 0.16, 1, 0.25);           // pressure release
-      tone(70, 44, 0.5, 0.55, 'sine', 1, 0.35);         // the clunk
+      // 6 m is "in the room with you". Beyond that an inverse rolloff, floored
+      // so a door at the far end of a long leg is a thud you can just hear
+      // rather than nothing at all — it is still news that it opened.
+      const g = far <= 6 ? 1 : Math.max(0.12, 6 / far);
+      const hiss = far <= 6 ? 2600 : Math.max(700, 2600 * g);
+      noise(0.55, hiss, 0.55, 0.16 * g, 1, 0.25);       // pressure release
+      tone(70, 44, 0.5, 0.55 * g, 'sine', 1, 0.35);     // the clunk
       setTimeout(() => {
         if (!ctx || muted) return;
-        noise(0.85, 420, 0.5, 0.2, 1, 0.3);             // slab on its track
-        tone(150, 96, 0.75, 0.16, 'sawtooth', 1, 0.3);
+        noise(0.85, 420, 0.5, 0.2 * g, 1, 0.3);         // slab on its track
+        tone(150, 96, 0.75, 0.16 * g, 'sawtooth', 1, 0.3);
       }, 130);
     },
     // Death fades the MASTER, which attenuates the output but leaves the
@@ -8582,12 +8614,24 @@ function warnFlash(words) {
 const edgeArrows = [];
 function updateEdgeArrows(playing) {
   const dirs = [];
+  // Half the horizontal field of view, asked of the camera rather than
+  // assumed: `fov` is VERTICAL, so the horizontal one is the vertical one
+  // through the aspect, and in portrait that is a much narrower angle.
+  const halfH = Math.atan(Math.tan(camera.fov * Math.PI / 360) * camera.aspect);
+  const showAt = halfH * EDGE_ARROW_SHOW;
+  const hideAt = halfH * EDGE_ARROW_HIDE;
   if (playing && player.alive) {
     for (const e of enemies) {
       let dYaw = Math.atan2(-(e.pos.x - player.pos.x), -(e.pos.z - player.pos.z)) - player.yaw;
       while (dYaw > Math.PI) dYaw -= Math.PI * 2;
       while (dYaw < -Math.PI) dYaw += Math.PI * 2;
-      if (Math.abs(dYaw) > EDGE_ARROW_MIN) dirs.push(dYaw);
+      // THE LATCH LIVES ON THE BODY, because the arrow is a statement about
+      // one man and there can be six of them at different bearings. A fresh
+      // enemy has no flag and so starts without an arrow.
+      const off = Math.abs(dYaw);
+      if (e.edgeArrow) { if (off < hideAt) e.edgeArrow = false; }
+      else if (off >= showAt) e.edgeArrow = true;
+      if (e.edgeArrow) dirs.push(dYaw);
       if (dirs.length >= 6) break;
     }
   }
@@ -9971,7 +10015,14 @@ function openHallDoor() {
   }
   rebuildHallObstacles();
   showBanner('THE DOOR IS OPEN', 1800);
-  sfx.airlock();   // the door speaks for itself; the VO waits for the crossing
+  // ...AT THE DISTANCE IT ACTUALLY IS. This one fires because the last man in
+  // the leg went down, and the door it belongs to is routinely thirty to
+  // eighty metres away round two corners — so at full volume it was a
+  // mechanical noise stapled to the tail of a shatter with nothing on screen
+  // to pin it to. Every other airlock in the game is something happening
+  // where the player is standing and stays as loud as it was.
+  sfx.airlock(Math.hypot(L.door.x - player.pos.x, L.door.z - player.pos.z));
+  // the door speaks for itself; the VO waits for the crossing
   vibrate(20);
 }
 
