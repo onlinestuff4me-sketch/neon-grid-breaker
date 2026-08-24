@@ -597,39 +597,34 @@
                     letter-spacing:.12em; color:#8a9099; text-align:center;
                     text-shadow:0 0 10px rgba(232,234,238,.95); }
 
-  /* recent-runs score table */
-  #scores { width:min(292px, 82vw); }
-  /* Both leaderboard controls are full-width segmented bars with equal
-     segments, so the active fill reads as one cell of a symmetric whole
-     rather than a dark chip weighting the left edge. */
-  #scores .schead { display:grid; grid-template-columns:1fr 1fr; margin-bottom:8px; }
-  #scores .svtab { font-size:9.5px; font-weight:900; letter-spacing:.2em; color:#7d838c;
-                   padding:8px 0; text-align:center;
-                   border:1px solid rgba(22,24,29,.18); background:transparent; }
-  #scores .svtab:first-child { border-radius:999px 0 0 999px; border-right-width:0; }
-  #scores .svtab:last-child { border-radius:0 999px 999px 0; }
-  /* the whole leaderboard stays quiet: the view tabs are one step stronger
-     than the metric row beneath, but neither reaches button-black */
-  #scores .svtab.active { background:rgba(22,24,29,.17); color:#16181d;
-                          border-color:rgba(22,24,29,.28); }
-  #scores .scpills { display:grid; grid-template-columns:repeat(3, 1fr); margin-bottom:14px; }
-  /* the metric row is the same control, one tier quieter: a hairline bar
-     whose active cell is filled but never darker than the view tabs */
-  #scores .scpill { font-size:9px; font-weight:900; letter-spacing:.18em; color:#9aa0a9;
-                    padding:7px 0; text-align:center;
-                    border:1px solid rgba(22,24,29,.14); background:transparent; }
-  #scores .scpill:first-child { border-radius:999px 0 0 999px; border-right-width:0; }
-  #scores .scpill:last-child { border-radius:0 999px 999px 0; }
-  #scores .scpill:not(:first-child):not(:last-child) { border-right-width:0; }
-  #scores .scpill.active { background:rgba(22,24,29,.12); color:#16181d;
-                           border-color:rgba(22,24,29,.22); }
-  #scores .scrow { display:flex; align-items:baseline; padding:2px 2px;
-                   font-weight:800; text-shadow:0 0 8px rgba(232,234,238,.95); }
-  /* value column sits centered under the first (WAVES) pill */
-  #scores .scval { flex:0 0 92px; display:flex; align-items:baseline; justify-content:center; gap:6px;
-                   font-size:15px; color:#16181d; }
-  #scores .scval em { font-style:normal; font-size:10px; font-weight:800; letter-spacing:.16em; color:#8a9099; }
-  #scores .scdate { margin-left:auto; font-size:11px; font-weight:600; letter-spacing:.04em; color:#8a9099; }
+  /* THE ARCHIVE'S FRONT DOOR — the save's discoveries where the leaderboard
+     stood. One headline stat, then four rows of marks: filled squares are
+     what this save has recovered, hollow ones are the tease. The whole block
+     is a button (it opens the Archive), and its single red element is the
+     link out, so the eye lands on the exit rather than the inventory. */
+  #discover { width:280px; display:flex; flex-direction:column; }
+  #discover .dstat { display:flex; align-items:baseline; gap:8px; justify-content:center;
+                     margin-bottom:16px; }
+  #discover .dstat b { font-weight:900; font-size:28px; line-height:1; color:#16181d;
+                       font-variant-numeric:tabular-nums;
+                       text-shadow:0 0 10px rgba(232,234,238,.95); }
+  #discover .dstat b.sm { font-size:17px; }
+  #discover .dstat span { font-size:9px; font-weight:800; letter-spacing:.22em; color:#9aa0a9; }
+  #discover .dstat em { font-style:normal; color:rgba(22,24,29,.13); }
+  #discover .dhead { display:flex; align-items:baseline; margin-bottom:11px;
+                     font-size:9px; font-weight:800; letter-spacing:.2em; color:#9aa0a9; }
+  #discover .dmore { margin-left:auto; color:#ff2d1a; letter-spacing:.16em;
+                     font-variant-numeric:tabular-nums; }
+  #discover .drow { display:flex; align-items:center; gap:9px; }
+  #discover .drow + .drow { margin-top:9px; }
+  #discover .dlabel { width:86px; font-size:8.5px; font-weight:800; letter-spacing:.12em;
+                      color:#9aa0a9; }
+  #discover .dpips { display:flex; gap:3px; flex:1; }
+  /* GRAY, NOT RED: lit red marks outshone CONTINUE two bands up */
+  #discover .pip { width:8px; height:8px; border-radius:2px; background:#6b717a; }
+  #discover .pip.off { background:transparent; box-shadow:inset 0 0 0 1px rgba(22,24,29,.2); }
+  #discover .dfrac { font-size:9px; font-weight:800; color:#8a9099;
+                     font-variant-numeric:tabular-nums; letter-spacing:.06em; }
 
   /* bottom row: how-to + archive + settings links, and the speaker toggle.
      It wraps: four controls is more than 390px of portrait reliably holds,
@@ -662,22 +657,21 @@
             flex-direction:column; white-space:normal; }
   .btn-1 .gosub { margin-top:6px; font-size:9.5px;
             font-weight:800; letter-spacing:.16em; opacity:.75; }
-  /* ONE WIDTH FOR THE TWO SECOND CHOICES. Stacked under the primary they were
-     131 px and 166 px, and the MODE button's width moved every time the mode
-     did — CORRIDOR DUEL is a lot wider than THE TUNNEL — so the column
-     re-ragged itself as you chose. */
-  #newrun, #modebtn { width:200px; }
-  #newrun { display:none; margin-top:9px; }
-  /* ONE BUTTON, NAMING THE GAME. Five chips laid out on the start screen were
-     five things to read before the one thing to do, and at their full names
-     they were ~760 px wide in a 402 px viewport — so the row had to wrap into
-     three lines of alternatives sitting above the leaderboard. The choice is
-     rare and the answer is short, so it collapses to its own answer and the
-     alternatives live one tap away. */
-  #modebtn { padding:10px 18px; font-size:10px; letter-spacing:.18em;
-            color:#6b717a; border-color:rgba(22,24,29,.3);
-            background:rgba(238,240,243,.5); }
-  #modebtn b { font-weight:900; letter-spacing:.16em; color:#16181d; }
+  /* REAL BUTTONS, REAL TARGETS. As a text link the pair read as a caption on
+     CONTINUE and sat too close to it to hit the one you meant. Bordered
+     pills, ~42 px tall, sharing one width, with clear air from the primary. */
+  #runrow { display:none; gap:9px; margin-top:20px; }
+  .rbtn { width:136px; padding:13px 0; font-size:9.5px; letter-spacing:.2em;
+          color:#6b717a; border:1.5px solid rgba(22,24,29,.2);
+          background:rgba(238,240,243,.55); }
+  /* MODE IS A SETTING, NOT AN ACTION. At the pair's combined width it read as
+     a third button of equal rank; as a hairline auto-width chip it reads as
+     the label of a state — which is what it is — while staying tappable. */
+  .modechip { display:inline-flex; align-items:center; border-radius:999px;
+          padding:9px 15px; font-size:8.5px; font-weight:800; letter-spacing:.2em;
+          color:#9aa0a9; border:1px solid rgba(22,24,29,.13); background:transparent; }
+  .modechip b { color:#6b717a; font-weight:900; margin-left:3px; letter-spacing:.16em; }
+  .modechip .chev { margin-left:6px; color:#9aa0a9; font-weight:700; font-size:11px; }
   .btn-2 { padding:12px 20px; font-size:11px; letter-spacing:.2em;
            color:#16181d; border:2px solid #16181d; background:rgba(238,240,243,.62); }
   .btn-3 { padding:9px 16px; font-size:9.5px; letter-spacing:.22em;
@@ -687,7 +681,8 @@
   .mlabel { font-size:9.5px; font-weight:800; letter-spacing:.3em; color:#9aa0a9;
             text-shadow:0 0 10px rgba(232,234,238,.95); }
   .mdiv { width:min(292px, 82vw); height:1px; background:rgba(22,24,29,.13); }
-  #altwrap { display:flex; flex-direction:column; align-items:center; gap:11px; }
+  #altwrap { display:flex; flex-direction:column; align-items:center; gap:11px;
+             margin-top:11px; }
   /* the picker's rows are the settings catalogue's rows — one look for one
      list, wherever it is opened from */
   /* ONE COLUMN. `.htpcard` is a flex column with no `align-items`, so a child
@@ -807,17 +802,19 @@
   <h1>TIME<br><em>SHATTER</em></h1>
   <div class="sub">STOP TIME. SHOOT. SHATTER.</div>
   <div class="go btn btn-1">PLAY</div>
-  <div class="btn btn-2" id="newrun">LOAD GAME</div>
+  <div id="runrow">
+    <div class="btn rbtn" id="newrun">LOAD GAME</div>
+    <div class="btn rbtn" id="startnew">NEW RUN</div>
+  </div>
   <div id="altwrap">
-    <div class="btn btn-2" id="modebtn">MODE: THE TUNNEL</div>
+    <div id="modebtn" class="modechip">MODE: THE TUNNEL</div>
   </div>
   <div class="mdiv"></div>
-  <div id="scores"></div>
+  <div id="discover"></div>
   <div class="rules"></div>
   <div class="mdiv" id="div2"></div>
   <div id="menurow">
     <div class="btn btn-3" id="howtolink">HOW TO PLAY</div>
-    <div class="btn btn-3" id="archlink">ARCHIVE</div>
     <div class="btn btn-3" id="setlink">SETTINGS</div>
     <div id="sndbtn"></div>
   </div>

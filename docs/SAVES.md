@@ -22,7 +22,7 @@ changes it:
 | what the big button says and starts |
 | whether `LOAD GAME` is offered at all |
 | the list behind `LOAD GAME`, and its title |
-| the leaderboard |
+| the archive teaser under the buttons |
 | the world rendered behind the menu — city for City Streets and Rush Hour, corridor for the other three |
 
 The choice is remembered in `ts_menumode`: somebody who plays the city does not
@@ -183,26 +183,36 @@ and a first launch had four enemies floating in an empty fog void.
 > the top of them — so every tunnel run left its corridor in the scene for the
 > rest of the session. `backdrop.js` §4 is the assertion.
 
-## The board is the game's too
+## The Archive's front door, where the leaderboard stood
 
-Runs are filed **per slot**, and the board is the union of every slot of the
-selected mode, deduped by the run's own `id`. Reading only the most recent
-save's meant **NEW GAME wiped the leaderboard**: a door-40 run still on disk
-under the save next to it simply stopped being on it. "Your best runs in this
-game" is the question, and every save of the game answers it.
+The menu's leaderboard is **gone**. A board of best runs made sense when every
+run started at door 1 and dying was the score; with CONTINUE on the menu your
+depth only ever rises, and the board's rows restated the save list one screen
+over. (`recordRun` still files runs per slot — the data is kept, nothing reads
+it on the menu.)
 
-`recordRun` used to return early unless the mode was `wave` — fine when the
-city was the only place a run meant anything, and the reason **the main game's
-board was permanently empty**. Every mode files its runs now.
+In its place, the save's own account of what it has found:
 
-Each mode declares what one step of progress is **called** — `unit` in
-`src/modes.js`: `DOOR` for the tunnel, `WAVE` for City Streets, `ROUND` for the
-two simplified modes. A board over tunnel runs that ranks people by "WAVES" is
-describing a different game.
+* **A headline** — lifetime `SHATTERED` and doors cleared. `game.kills` resets
+  every run, so `lifetimeShattered` is a new per-slot counter (`ts_s{i}_shat`),
+  scored at both kill sites **during a run only** — the attract fight behind
+  the title shatters somebody every few seconds forever and files nothing.
+* **Four rows of marks** — filled squares are recovered, hollow ones are the
+  tease. `ENEMY TYPES`, `ROOM TYPES`, `WEAPONS`, `PROTOCOLS`: fills-fastest
+  first, emptiest last, so the block closes on the emptiest line. Gray, not
+  red — lit red marks outshone CONTINUE two bands up.
+* **One link out** — `SEE ALL n/35 →`, the block's single red element. The
+  whole block is a button and opens the Archive; the menu row's ARCHIVE link
+  is gone, because two doors to one screen is the mistake the SAVES link
+  already taught us.
 
-`unit: null` (Rush Hour) means the count does not move in that mode, so the
-metric is dropped from the pills rather than ranking every run equal-first, and
-a metric remembered from another game falls back to `ENEMIES`.
+The block reads the save CONTINUE would start (the selected mode's latest), so
+the teaser and the panel behind it agree — and a NEW GAME's teaser starts from
+zero, which is correct: a save is its own journey of discovery.
+
+The Archive itself now has **four sections in the teaser's order**: room forms
+used to hide inside PROTOCOLS, and a start screen advertising ROOM TYPES as
+its own count would have been promising a category the panel didn't have.
 
 ## The door is the resume point, and it is honest about that
 
@@ -317,5 +327,7 @@ the menu.
 | the world behind the menu | `menuBackdrop` / `menuIsCity` / `buildMenuHall` |
 | the attract fight behind the title | `demoMode` / `DEMO_CAST` / `demoCorridor` |
 | the default name of a save | `saveName` |
-| what a run is worth, and what it is called | `recordRun` / `scoreUnit` / `unit` in `src/modes.js` |
+| the archive teaser | `discoverData` / `renderDiscover`, `#discover` in `index.html` |
+| the lifetime shattered counter | `lifetimeShattered`, persisted as `ts_s{i}_shat` |
+| what one step of progress is called | `unitOf` / `unit` in `src/modes.js` |
 | the whole surface, tested | `saves.js` in the harness |

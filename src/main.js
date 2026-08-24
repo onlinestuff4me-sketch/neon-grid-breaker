@@ -55,6 +55,11 @@ function simple() { return isSimple(game.mode) ? game.mode : null; }
 // reached; a `let` further down would still be in its temporal dead zone.
 // ---------------------------------------------------------------------------
 let lifetimeDoors = 0;
+// EVERY ENEMY THIS SAVE HAS EVER SHATTERED. `game.kills` resets each run, so
+// until this existed the menu had no number a player could own — the start
+// screen's headline stat is this counter. Run kills only: the attract fight
+// behind the title is a shop window, not a score.
+let lifetimeShattered = 0;
 let archive = new Set();
 // Progress now lives in a SAVE SLOT. The key names are the only thing that
 // changed: everything downstream still reads `lifetimeDoors` and `archive`.
@@ -75,11 +80,13 @@ try {
     localStorage.setItem('ts_s0_at', String(Date.now()));
   }
   lifetimeDoors = parseInt(localStorage.getItem(_sk('doors')) || '0', 10) || 0;
+  lifetimeShattered = parseInt(localStorage.getItem(_sk('shat')) || '0', 10) || 0;
   archive = new Set(JSON.parse(localStorage.getItem(_sk('archive')) || '[]'));
 } catch { /* private mode */ }
 function saveProgress() {
   try {
     persist(slotKey(slotIx, 'doors'), String(lifetimeDoors));
+    persist(slotKey(slotIx, 'shat'), String(lifetimeShattered));
     persist(slotKey(slotIx, 'archive'), JSON.stringify([...archive]));
     persist(slotKey(slotIx, 'at'), String(Date.now()));
   } catch { /* private mode */ }
@@ -88,6 +95,7 @@ function saveProgress() {
 function hydrateFromSlot() {
   try {
     lifetimeDoors = parseInt(localStorage.getItem(slotKey(slotIx, 'doors')) || '0', 10) || 0;
+    lifetimeShattered = parseInt(localStorage.getItem(slotKey(slotIx, 'shat')) || '0', 10) || 0;
     archive = new Set(JSON.parse(localStorage.getItem(slotKey(slotIx, 'archive')) || '[]'));
     bestWave = Math.max(1, parseInt(localStorage.getItem(slotKey(slotIx, 'best')) || '1', 10) || 1);
   } catch { /* private mode */ }
@@ -3285,6 +3293,11 @@ function killEnemy(i, impulseDir) {
   scene.remove(e.g);
   enemies.splice(i, 1);
   game.kills++;
+  // ...and the save's lifetime count, run kills only — never the menu's
+  // attract fight, which shatters somebody every few seconds forever.
+  if (game.state === 'play' || game.state === 'intro' || game.state === 'clear') {
+    lifetimeShattered++;
+  }
   // the flow: a kill pulls the next spawn forward, so the street never
   // stays empty for long
   if (game.mode !== 'rush' && game.state === 'play') {
@@ -4279,6 +4292,7 @@ function updateBullets(sdt) {
           spawnNPC();
           if (wasMark) {
             game.kills++;
+            lifetimeShattered++;
             markDown();            // the one you were hunting
           } else if (timeMode === 'toggle') {
             slowBank = Math.max(0, slowBank - 2);   // a civilian: the system docks you
@@ -4549,10 +4563,6 @@ function onPointerDown(ev) {
         el.htp.style.display = 'flex';
         return;
       }
-      if (ev.target.closest('#archlink')) {
-        openArchive();
-        return;
-      }
       if (ev.target.closest('#setlink')) {
         openSettings();
         return;
@@ -4597,19 +4607,12 @@ function onPointerDown(ev) {
         beginNewGame(pendingNewSlot, yes);
         return;
       }
-      const pill = ev.target.closest('.scpill');
-      if (pill) {   // re-sort the score table
-        scoreMetric = pill.dataset.m;
-        renderScores();
-        return;
-      }
-      const vtab = ev.target.closest('.svtab');
-      if (vtab) {   // TOP ranks by metric, RECENT lists newest first
-        scoreView = vtab.dataset.v;
-        renderScores();
-        return;
-      }
-      if (ev.target.closest('#scores') || ev.target.closest('.rules')) return;   // reading
+      // THE STATS BLOCK IS THE ARCHIVE'S DOOR — anywhere on it opens the
+      // panel. It replaced both the leaderboard and the menu row's ARCHIVE
+      // link, because two doors to one screen is the mistake the SAVES link
+      // already taught us.
+      if (ev.target.closest('#discover')) { openArchive(); return; }
+      if (ev.target.closest('.rules')) return;   // reading
     }
     // CHOOSE A GAME: the button says which one, and opens the list.
     if (game.state === 'menu' && ev.target && ev.target.closest
@@ -4652,6 +4655,14 @@ function onPointerDown(ev) {
     if (game.state === 'menu' && ev.target && ev.target.closest
         && ev.target.closest('#newrun')) {
       openSaves();
+      return;
+    }
+    // NEW RUN, promoted from the saves page to the menu: starting again is a
+    // first-class act now, and it still asks about the tutorial the way the
+    // saves page's + NEW GAME does — they are the same function.
+    if (game.state === 'menu' && ev.target && ev.target.closest
+        && ev.target.closest('#startnew')) {
+      startNewRun();
       return;
     }
     if (game.state === 'menu' &&
@@ -6080,7 +6091,10 @@ function slotRead(i) {
     born, bornKnown: born > 0,
     id: get('id', '') || saveIdFor(i, born || at),
     best: parseInt(get('best', '1'), 10) || 1,
+    shat: parseInt(get('shat', '0'), 10) || 0,
     resumeDoor: parseInt(get('rdoor', '0'), 10) || 0,
+    archiveList: (() => { try { return JSON.parse(get('archive', '[]')) || []; }
+      catch { return []; } })(),
     filed: (JSON.parse(get('archive', '[]')) || []).length,
   };
 }
@@ -6094,6 +6108,7 @@ function slotNoteDoor(n) {
   try {
     const cur = parseInt(localStorage.getItem(slotKey(slotIx, 'rdoor')) || '0', 10) || 0;
     if (n > cur) persist(slotKey(slotIx, 'rdoor'), String(n));
+    persist(slotKey(slotIx, 'shat'), String(lifetimeShattered));
     slotWriteNow();
   } catch { /* private */ }
 }
@@ -6104,7 +6119,7 @@ function slotClear(i) {
   // past each other and this clear had never removed anything. It is a real
   // slot key now (see slotTimeUses).
   for (const k of ['doors', 'archive', 'best', 'runs', 'rdoor', 'at', 'timeuses',
-    'born', 'id']) {
+    'shat', 'born', 'id']) {
     // `forget`, not removeItem: these keys are mirrored to durable storage in
     // the app, and one removed from localStorage alone comes back on the next
     // launch — a deleted save resurrecting itself.
@@ -6130,8 +6145,6 @@ try { bestWave = Math.max(1, +localStorage.getItem(slotKey(slotIx, 'best')) || 1
 // --- recent-runs table (last 5 runs; a run = menu start until death)
 let runStartAt = 0;
 let runPlayT = 0;   // real seconds actually in combat this run (all retries)
-let scoreMetric = 'w';   // 'w' = wave, 'k' = shards (kills)
-let scoreView = 'top';   // 'top' = ranked by metric, 'recent' = newest first
 
 function loadRuns(i = slotIx) {
   try { return JSON.parse(localStorage.getItem(slotKey(i, 'runs')) || '[]'); } catch { return []; }
@@ -6155,7 +6168,10 @@ function recordRun() {
     runs.unshift({ id: runStartAt, w: game.wave, k: game.kills, d: Math.round(runPlayT), at: Date.now() });
   }
   runs.sort((a, b) => b.at - a.at);
-  try { persist(slotKey(slotIx, 'runs'), JSON.stringify(runs.slice(0, 5))); } catch { /* private mode */ }
+  try {
+    persist(slotKey(slotIx, 'runs'), JSON.stringify(runs.slice(0, 5)));
+    persist(slotKey(slotIx, 'shat'), String(lifetimeShattered));
+  } catch { /* private mode */ }
   slotWriteNow();   // a run was played here: this save is not stale
 }
 
@@ -6165,65 +6181,43 @@ function fmtWhen(t) {
   return `${p(d.getMonth() + 1)}.${p(d.getDate())}.${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
-// What one step of progress is CALLED in the game the menu is showing. A board
-// over a tunnel run that ranks people by "WAVES" is describing a different
-// game; `null` means the count does not move in that mode at all, and the
-// metric is dropped rather than ranking every run equal-first.
-function scoreUnit() { return unitOf(menuMode); }
-function renderScores() {
-  // THE BOARD BELONGS TO THE GAME, NOT TO ONE SAVE OF IT. Runs are stored per
-  // slot, and reading only the most recent save's meant starting a NEW GAME
-  // wiped the board: a door-40 run still on disk under the save next to it
-  // simply stopped being on the leaderboard. "Your best runs in this game" is
-  // the question, so every save of this mode answers it — deduped by `id`,
-  // because that is the run's own identity and a save could in principle be
-  // read twice while the index is being repaired.
-  const seen = new Set();
-  const display = savesByRecent()
-    .flatMap((e) => loadRuns(e.i))
-    // only real, complete runs make the table — no placeholder rows
-    .filter((r) => r && r.w != null && r.k != null && r.at)
-    .filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)));
-  if (!display.length) {   // nothing to show until you've played
-    el.scores.style.display = 'none';
-    return;
-  }
-  const unit = scoreUnit();
-  // A remembered metric can be meaningless in the game just selected, so the
-  // board falls back rather than showing a column of 1s.
-  const metric = (scoreMetric === 'w' && !unit) ? 'k' : scoreMetric;
-  el.scores.style.display = 'block';
-  // TOP ranks by the chosen metric so #1 is your best; RECENT is just the
-  // last few runs in order — two different questions, one table
-  if (scoreView === 'recent') display.sort((a, b) => b.at - a.at);
-  else display.sort((a, b) => ((b[metric] || 0) - (a[metric] || 0)) || (b.at - a.at));
-  const fmtVal = (r) => {
-    if (metric === 'd') {   // survival time as M:SS
-      if (r.d == null) return '—<em></em>';
-      const m = Math.floor(r.d / 60), s = String(r.d % 60).padStart(2, '0');
-      return `${m}:${s}<em>ALIVE</em>`;
-    }
-    const v = r[metric];
-    const word = metric === 'w'
-      ? `${unit}${v === 1 ? '' : 'S'}` : (v === 1 ? 'ENEMY' : 'ENEMIES');
-    return `${v}<em>${word}</em>`;
+// THE ARCHIVE'S FRONT DOOR, where the leaderboard used to stand. A board of
+// best runs made sense when every run started at door 1 and dying was the
+// score; with CONTINUE on the menu your depth only ever rises and the rows
+// just restated the save list. What replaces it is the save's own account of
+// what it has found — a number to be proud of, and four rows of marks whose
+// hollow squares are the tease. It reads the save CONTINUE would start
+// (the selected mode's latest), so the teaser and the panel behind it agree.
+function discoverData() {
+  const last = latestSave();
+  const read = last ? slotRead(last.i) : null;
+  const have = new Set(read ? read.archiveList : []);
+  const secs = ARCH_SECTIONS.map((sec) => {
+    const rows = ELEMENTS.filter((e) => sec.kinds.includes(e.kind));
+    return { title: sec.title, got: rows.filter((e) => have.has(e.id)).length,
+      total: rows.length };
+  });
+  return { shat: read ? read.shat : 0, doors: read ? read.doors : 0, secs,
+    got: secs.reduce((n, x) => n + x.got, 0),
+    total: secs.reduce((n, x) => n + x.total, 0) };
+}
+function renderDiscover() {
+  if (!el.discover) return;
+  const d = discoverData();
+  const pips = (sec) => {
+    let h = '';
+    for (let i = 0; i < sec.total; i++) h += `<i class="pip${i < sec.got ? '' : ' off'}"></i>`;
+    return h;
   };
-  const rows = display.slice(0, 5).map((r) =>
-    `<div class="scrow"><span class="scval">${fmtVal(r)}</span>` +
-    `<span class="scdate">${fmtWhen(r.at)}</span></div>`).join('');
-  el.scores.innerHTML =
-    '<div class="schead">' +
-    `<span class="svtab${scoreView === 'top' ? ' active' : ''}" data-v="top">TOP RUNS</span>` +
-    `<span class="svtab${scoreView === 'recent' ? ' active' : ''}" data-v="recent">RECENT</span>` +
-    '</div>' +
-    // the metric pills only rank TOP; RECENT is already answered by its order
-    (scoreView === 'top'
-      ? `<div class="scpills">` +
-        (unit ? `<span class="scpill${metric === 'w' ? ' active' : ''}" data-m="w">${unit}S</span>` : '') +
-        `<span class="scpill${metric === 'k' ? ' active' : ''}" data-m="k">ENEMIES</span>` +
-        `<span class="scpill${metric === 'd' ? ' active' : ''}" data-m="d">TIME</span>` +
-        `</div>`
-      : '') + rows;
+  el.discover.innerHTML =
+    `<div class="dstat"><b>${d.shat.toLocaleString('en-US')}</b><span>SHATTERED</span>`
+    + `<em>|</em><b class="sm">${d.doors}</b><span>DOOR${d.doors === 1 ? '' : 'S'}</span></div>`
+    + `<div class="dhead">RECOVERED SO FAR`
+    + `<span class="dmore">SEE ALL ${d.got}/${d.total} →</span></div>`
+    + d.secs.map((sec) =>
+      `<div class="drow"><span class="dlabel">${sec.title}</span>`
+      + `<span class="dpips">${pips(sec)}</span>`
+      + `<span class="dfrac">${sec.got}/${sec.total}</span></div>`).join('');
 }
 
 // Each wave is a street encounter: a quota big enough to roam through, and
@@ -6573,7 +6567,8 @@ function renderAltRow() {
   if (!el.modebtn) return;
   // NBSP: `.btn` is an inline-flex row, so the label and the name are separate
   // flex items and the trailing space of "MODE: " is trimmed away.
-  el.modebtn.innerHTML = `MODE:&nbsp;<b>${escHtml(modeName(menuMode))}</b>`;
+  el.modebtn.innerHTML =
+    `MODE:&nbsp;<b>${escHtml(modeName(menuMode))}</b><span class="chev">›</span>`;
 }
 // EVERY MODE, INCLUDING THE MAIN ONE. The old row left the tunnel out on the
 // grounds that PLAY already started it — true when tapping a row started a
@@ -6603,7 +6598,7 @@ function selectMenuMode(id) {
   if (last && last.i !== slotIx) slotUse(last.i);
   renderAltRow();
   refreshMenuPrimary();
-  renderScores();
+  renderDiscover();
   // ...and so does the world behind it. Two of the five are city games and
   // three are corridors; showing the wrong one behind the CTA for the other is
   // a small lie the menu does not need to tell.
@@ -8229,7 +8224,9 @@ const el = {
   stickNub: document.getElementById('sticknub'),
   warn: document.getElementById('warn'),
   guide: document.getElementById('guide'),
-  scores: document.getElementById('scores'),
+  discover: document.getElementById('discover'),
+  runrow: document.getElementById('runrow'),
+  startnew: document.getElementById('startnew'),
   sndbtn: document.getElementById('sndbtn'),
   howtolink: document.getElementById('howtolink'),
   htp: document.getElementById('htp'),
@@ -8259,10 +8256,16 @@ const el = {
 // Unlocking is MEETING, not defeating. Walking into a fog leg files FOG;
 // living through it is a separate matter.
 // ---------------------------------------------------------------------------
+// FOUR SECTIONS, IN THE MENU'S ORDER. Room forms used to hide inside
+// PROTOCOLS, which was fine until the start screen began advertising ROOM
+// TYPES as its own count — a teaser for a category the panel then didn't
+// have is a broken promise. Fills-fastest first, emptiest last, exactly as
+// the pips run, so the panel and the teaser read as one document.
 const ARCH_SECTIONS = [
-  { title: 'ENEMIES', kinds: ['enemy'] },
-  { title: 'PROTOCOLS', kinds: ['form', 'condition', 'measure'] },
+  { title: 'ENEMY TYPES', kinds: ['enemy'] },
+  { title: 'ROOM TYPES', kinds: ['form'] },
   { title: 'WEAPONS', kinds: ['weapon'] },
+  { title: 'PROTOCOLS', kinds: ['condition', 'measure'] },
 ];
 
 function renderArchive() {
@@ -8297,7 +8300,7 @@ function openArchive() {
   el.archlist.scrollTop = 0;
 }
 
-renderScores();
+renderDiscover();
 
 // swap the h1's plain SHARD for the faceted polygon wordmark BEFORE the menu
 // snapshot below, so MAIN MENU restores the styled title too
@@ -8371,14 +8374,20 @@ function refreshMenuPrimary() {
   // sitting at door 13 one row down in the list and no way to make another
   // from the menu. "Is there a run to go back to" is the question, and a run
   // on its first door is still a run.
+  // THE GAME'S NAME, OR YOURS — never the numbered default. "THE TUNNEL 1 ·
+  // DOOR 22" made the number look like part of the address; the number exists
+  // to tell saves apart IN THE LIST, and on the big button there is only one.
+  // A save the player renamed keeps its name: with three runs going, which
+  // one CONTINUE means is exactly what a custom name is for.
   go.innerHTML = last
-    ? `CONTINUE<span class="gosub">${escHtml(saveName(last))}${goWhere(last)}</span>`
+    ? `CONTINUE<span class="gosub">${escHtml(last.name || modeName(last.mode))}${goWhere(last)}</span>`
     : MENU_HTML.go;
   go.classList.toggle('two', !!last);
-  if (el.newrun) {
-    // NEW RUN only exists once continuing is possible; before that the big
-    // button IS new run and a second one saying the same thing is noise.
-    el.newrun.style.display = last ? 'block' : 'none';
+  if (el.runrow) {
+    // LOAD GAME and NEW RUN only exist once continuing is possible; before
+    // that the big button IS new run and a second pair saying the same thing
+    // is noise.
+    el.runrow.style.display = last ? 'flex' : 'none';
   }
 }
 
@@ -8418,8 +8427,9 @@ function showMenu() {
   renderAltRow();
   closeModePick();   // never carried back from wherever it was left open
   for (const d of document.querySelectorAll('.mdiv')) d.style.display = '';
+  el.discover.style.display = '';
   menuBackdrop();
-  renderScores();
+  renderDiscover();
   updateSndBtn();
   el.menubtn.style.display = 'none';
   el.redflash.style.opacity = 0;
@@ -8684,10 +8694,10 @@ function hitPlayer(ended = false) {
   el.reloadbar.style.display = 'none';
   // retry retries THIS mode only — the alternates leave the death screen
   el.altwrap.style.display = 'none';
-  // ...and so does LOAD GAME, which nothing else ever hid. It sat under RETRY
-  // FROM LAST DOOR on every death, and did nothing when tapped: its handler
-  // requires the menu.
-  if (el.newrun) el.newrun.style.display = 'none';
+  // ...and so do LOAD GAME and NEW RUN, which nothing else ever hid. They sat
+  // under RETRY on every death, and did nothing when tapped: their handlers
+  // require the menu.
+  if (el.runrow) el.runrow.style.display = 'none';
   if (!ended) {   // a chosen exit skips the death drama
     el.redflash.style.opacity = 1;
     sfx.die();
@@ -8703,7 +8713,7 @@ function hitPlayer(ended = false) {
     // you back in front of the same man raising the same arm.
     if (tutorDeadPending) {
       r.style.display = 'none';
-      el.scores.style.display = 'none';
+      el.discover.style.display = 'none';
       el.menurow.style.display = 'none';
       el.moderow.style.display = 'none';
       const g = el.overlay.querySelector('.go');
@@ -8736,7 +8746,7 @@ function hitPlayer(ended = false) {
         return `<div class="stats">${pl(game.wave)} · ` +
           `${game.kills} SHATTERED · BEST ${pl(bestWave)}</div>`; })()) + filed;
     r.style.display = 'flex';
-    el.scores.style.display = 'none';
+    el.discover.style.display = 'none';
     el.menurow.style.display = 'none';
     el.moderow.style.display = 'none';   // keep the stats line's row clear
     const goEl = el.overlay.querySelector('.go');
