@@ -91,6 +91,12 @@ function validate() {
   };
   for (const st of S) {
     const can = new Set(['enter', 'advance', ...(KIND_EVENTS[st.advance.kind] || [])]);
+    // ...AND A STEP THAT GRANTS THE RESCUE CAN STOP THE WORLD ITSELF. `held`
+    // used to belong to hardFreeze beats alone, which made it a dead event on
+    // a `crossed` step — true until the training rooms started adopting a
+    // round aimed at somebody who is not reacting. The grant is what says a
+    // step can do that, so the grant is what opens the event.
+    if (st.grants && st.grants.rescue) { can.add('held'); can.add('dodge'); }
     for (const c of st.cues || []) {
       if (!can.has(c.on)) {
         out.push(`<b>${st.id}</b> shows “${(c.text || '').slice(0, 24)}…” on <b>${c.on}</b>, `

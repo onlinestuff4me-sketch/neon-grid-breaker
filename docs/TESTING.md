@@ -43,6 +43,11 @@ therefore a race that fails on a loaded machine and passes on an idle one.
 run was still in `intro`, where `closeSeal` is gated off and a fired round hits
 a player who has not started yet:
 
+* `seal.js` — "the slab rose out of floor" waits on **the slab**, not on a clock.
+  It was `setTimeout(900)` — wall clock against an animation that runs on the
+  world clock — so under suite load those 900 ms delivered fewer frames, the
+  bulkhead was caught mid-rise at y 1.18 against a 1.3 bar, and a correct build
+  reported a seal that never closed. It now runs until the height stops climbing.
 * `seal.js` — its placement claim ("builds on most legs") is **sequential**, not a
   fixed sample: leg generation is random, and a fixed 16 draws against a ≥10 bar
   failed on an unlucky 9/16 while the same build drew 12 and 14 on reruns. It now
@@ -179,6 +184,7 @@ existing state and costs nothing — but nothing in `src/` may depend on it.
 | `ramp.js` | the TRAINING line at the top of the screen, and the pause button surviving a retry |
 | `shatter.js` | the shooting lesson driven with the REAL weapon: three shatters, the barrier down, the door open |
 | `corner.js` | the barrier is up from frame one and its sign is on from the last corner |
+| `tutool.js` | (its cue linter knows that a step granting `rescue` can fire `held` and `dodge` — those used to belong to hardFreeze beats alone, which made them dead events on a `crossed` step until the training rooms started adopting a round) |
 | `tutool.js` | the tutorial pane: a clean spec warns about nothing, a duplicate id is named, the revert leaves the map on the live object, and a new leg is editable |
 | `physics.js`, `halldoor3.js`, `timebtn.js`, `slots.js` | the rest of the game, so a tutorial change that breaks it is caught |
 
