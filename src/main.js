@@ -2811,7 +2811,7 @@ function spawnEnemy(type = 'gunner', at = null) {
   const bodyR = bodyRadius(type, parts.g);
   // the wave attacks from one flank: spawn in an arc around the wave bearing
   // so the fight stays in front of you instead of whipping side to side
-  let x = 0, z = 0, placed = false, holdZ;
+  let x = 0, z = 0, placed = false, holdZ, stagedZ;
   if (at) {
     // The caller has already decided, and has usually clamped to real floor
     // to do it — there is nothing here that would improve on that.
@@ -2821,14 +2821,50 @@ function spawnEnemy(type = 'gunner', at = null) {
     // The wave's last few stage on the door approach: you fight them with
     // the door in frame, so the opening lands as visible payoff and you are
     // never left hunting for where to go next.
-    const finale = game.spawnQueue.length < HALL_FINALE && L.approach && L.approach.length;
+    // THE FINALE IS THE APPROACH'S OWN SHARE, and it is on only once the
+    // player has walked far enough for the approach to be in the release
+    // window. It used to be `spawnQueue.length < HALL_FINALE` — is what is
+    // left small enough to be the last group — with HALL_FINALE 3 and a
+    // measured maximum queue of 2 at every door from 1 to 26. So it was
+    // ALWAYS true, `pool = L.approach` unconditionally, and every body in the
+    // game was placed in the last four cells before the door no matter what
+    // the quota said. Fixing the quota alone would have changed nothing.
+    const finK = playerStretch(L);
+    const finLast = (L.stretches ? L.stretches.length : 1) - 1;
+    const finale = !!(L.approach && L.approach.length
+      && finK + LEG.lookahead >= finLast);
     // Everyone else comes out of the stretch the player is walking THROUGH,
     // or the next one — never the whole remaining corridor. Bodies therefore
     // travel with you down the leg instead of accumulating in whatever is
     // still ahead, which is what stacked a whole wave in front of the door.
     const approachZ = L.approach && L.approach.length ? L.approach[0][1] * HALL.cell : 1e9;
     let pool;
-    if (finale) pool = L.approach;
+    // IS THIS THE ONE THE HEADLINE IS ABOUT? A leg reserves exactly one body
+    // for its feature stretch (see hallWave) and this is the frame that body
+    // is released on: the player has walked into the window that covers the
+    // room, the room's own share has not been spent, and the pool is the
+    // room's cells rather than the corridor's.
+    const fsIx = L.featureStretch;
+    if (!finale && fsIx >= 0 && L.stretches && fsIx < L.stretches.length
+      && L.quota && L.quota[fsIx] > 0 && !L.featureSent
+      && playerStretch(L) + LEG.lookahead >= fsIx) {
+      const st = L.stretches[fsIx];
+      // THE ROOM'S WHOLE FLOOR, not just its spine. `stretches[].cells` is the
+      // spine crossing the room; the pillars stand off the spine and getting
+      // behind one is the entire point, so the pool is every cell of the leg
+      // inside the stretch's z band — the widened chamber included.
+      pool = L.cells.filter(([, cz]) =>
+        cz * C >= st.z0 - C * 0.5 && cz * C <= st.z1 + C * 0.5);
+      if (pool.length) {
+        L.featureSent = true;
+        // ...ARMED WHEN THEY ARE THROUGH THE NEAR DOORWAY, not when they have
+        // crossed the whole room. Standing among the pillars is the moment the
+        // headline is about.
+        stagedZ = st.z0;
+      } else pool = null;
+    }
+    if (pool && pool.length) { /* the room's own pool, chosen above */ }
+    else if (finale) pool = L.approach;
     else if (L.stretches && L.stretches.length > 1) {
       const body = L.stretches.length - 2;   // last stretch before the approach
       const k = Math.min(playerStretch(L), body);
@@ -3035,6 +3071,13 @@ function spawnEnemy(type = 'gunner', at = null) {
     burstT: 0,
     tell: 0,                              // fire-telegraph heat, 0..1
     holdZ,                                // set for the door-approach finale
+    // THE MAN THE HEADLINE IS ABOUT. Set when this body is the one reserved
+    // for a leg's feature stretch — the pillared hall. He assembles while the
+    // player is still a stretch short of the room, so they watch him arrive;
+    // he does not leave the room to meet them, and he does not fire until
+    // they are actually in it. Undefined for everybody else.
+    stageZ: stagedZ,
+    stageArm: 0,
     alive: true,
   });
   // snipers and lasers announce every entrance; everyone else gets a warning
@@ -3875,6 +3918,14 @@ function updateEnemy(e, sdt) {
       // round a corner — so the fight that opens the door is always fought
       // with the door in frame.
       if (e.holdZ !== undefined && dir.z < 0 && e.pos.z <= e.holdZ) dir.z = 0;
+      // ...AND THE MAN IN THE ROOM STAYS IN THE ROOM UNTIL YOU ARE IN IT.
+      // He does not close the distance AT ALL while he is unarmed — not a
+      // ceiling at the room's near edge, which is what this was: the vault's
+      // room splits into a one-cell-deep stretch whose z0 and z1 are the same
+      // number, so "do not go past the near edge" was a knife edge he stood
+      // on and drifted over. He may still turn and strafe, so he is plainly a
+      // man waiting rather than a prop.
+      if (!stagedArmed(e) && dir.z < 0) dir.z = 0;
       e.pos.x += dir.x * moveSpeed * sdt;
       e.pos.z += dir.z * moveSpeed * sdt;
       resolveEnemyCollisions(e);   // hard guarantee: steering can fail, this can't
@@ -3891,6 +3942,7 @@ function updateEnemy(e, sdt) {
       if (e.type !== 'rusher' && dist < e.engageDist && e.fireCd <= 0 &&
           (!ENEMY_TYPES[e.type].shielded || Math.cos(e.g.rotation.y - wantYaw) > 0.8) &&
           performance.now() >= game.noFireBefore && !tutorHoldsFire(e) &&
+          stagedArmed(e) &&
           !earlyRoundInFlight() &&
           los && e.seenT > RAMP.sightGrace) {
         // take turns on the trigger: only a couple of guns telegraph at once,
@@ -8769,6 +8821,41 @@ const LEG_HEADLINES = {
   stairwell: 'MIND THE LEVEL ABOVE',
   spiral: 'NO STRAIGHT LINE OUT',
 };
+// IS THE STAGED BODY LIVE YET? Everybody who is not staged always is — the
+// question only means anything for the one man a leg reserves for its feature
+// stretch. He is placed while the player is a stretch short of the room so
+// they see him assemble; he arms when they are through the near doorway, plus
+// a grace so that crossing the threshold is not the same instant as being
+// shot at. Once armed he stays armed: walking back out does not disarm him.
+//
+// NOT game.noFireBefore. That is one global wall-clock stamp that silences
+// every enemy on the level, so holding one man with it would mute the door
+// group too — and being wall-clock it cannot express "until they walk in".
+function stagedArmed(e) {
+  if (!e || e.stageZ === undefined) return true;
+  // the clock starts the first frame they are inside, and does not restart
+  if (!e.stageArm) {
+    if (player.pos.z < e.stageZ) return false;
+    e.stageArm = worldT + LEG.featureArmGrace;
+  }
+  return worldT >= e.stageArm;
+}
+// DOES THIS LEG ACTUALLY PROMISE SOMETHING? A vault says PILLARS ARE YOUR ONLY
+// COVER and a gauntlet says NO COVER · DO NOT STOP; a plain corridor says
+// DOOR 7, which is a fact rather than a claim. Only a claim has to be paid
+// for — see LEG.featureFloor.
+function legPromises(proto) {
+  const pick = (e) => e && LEG_HEADLINES[e.id];
+  return !!(pick(proto && proto.condition)
+    || (proto && proto.measures || []).map(pick).find(Boolean)
+    || pick(proto && proto.form));
+}
+// ...and does it promise a PLACE? A form headline names geometry — a vault's
+// pillared hall is somewhere you stand. A condition headline (FLOODED, DEAD
+// AIR) names a quality of the whole leg and has no room to put anybody in.
+// Only the first buys an extra body; see LEG.featureFloor.
+const legPromisesPlace = (proto) =>
+  !!(proto && proto.form && LEG_HEADLINES[proto.form.id]);
 function legHeadline(proto) {
   // A SIMPLIFIED LEG IS ALWAYS THE SAME SHAPE, so the composer's names for
   // it are all lies: every one of them describes geometry (tight turns, a
@@ -9222,7 +9309,8 @@ function buildMenuHall() {
 // The approach is always the last stretch, however the leg was built.
 
 function buildHallLeg(sgx, sgz, proto) {
-  const { cells, spine, approach, stretches, doorways, pillars, covers, endGx, endGz, authored } =
+  const { cells, spine, approach, stretches, doorways, pillars, covers,
+    featureStretch, endGx, endGz, authored } =
     genHallLeg(sgx, sgz, proto, hall.grid, proto.tutorCells || TUTOR.hallCells);
   const cond = (proto && proto.condition && proto.condition.id) || null;
   const measures = new Set((proto && proto.measures || []).map((m) => m.id));
@@ -9386,6 +9474,10 @@ function buildHallLeg(sgx, sgz, proto) {
   // `spine` comes out too: the onboarding measures "have they reached the
   // corner yet" against it, which a list of floor cells cannot answer.
   return { cells, spine, approach, stretches, doorways, pillars, meshes, obs, door, seal, grind,
+    // WHICH STRETCH THE LEG'S HEADLINE IS ABOUT — the vault's pillared room,
+    // or the chamber an atrium widens into. -1 for a leg that promises nothing
+    // in particular. The wave reserves a body for it; see hallWave().
+    featureStretch: featureStretch === undefined ? -1 : featureStretch,
     endGx, endGz, proto, authored: !!authored, retired: false, nextBuilt: false };
 }
 
@@ -9610,8 +9702,35 @@ function hallWave(n) {
   // corridor games with the same four beats, and a mode whose whole pitch is
   // "one round at a time, dodge it" wants the metronome most of all.
   if (inHall()) {
-    const want = legShare(n, hall ? hall.legInDoor : 0);
     const leg = hall && hall.legs[hall.cur];
+    // WHERE THIS LEG'S HEADLINE POINTS, if anywhere, and whether that place is
+    // somewhere a body can actually be put. Never the approach — that ground
+    // is the door's and has its own share.
+    const bodyN = leg && leg.stretches ? leg.stretches.length - 1 : 0;
+    const fs = leg && leg.featureStretch >= 0 && leg.featureStretch < bodyN
+      ? leg.featureStretch : -1;
+    // A LEG THAT PROMISES A ROOM HAS TO AFFORD BOTH THE ROOM AND THE DOOR.
+    // At a share of one, reserving a body for the pillared hall empties the
+    // approach and moves the anticlimax rather than removing it. This is the
+    // only place the opening ramp is added to, and it is added to only where
+    // a headline has made a claim that needs paying for.
+    // THREE KINDS OF LEG, and only two of them change.
+    //
+    //   a leg that promises a PLACE — a vault's pillared hall — reserves a
+    //   body for that place and is given a floor of two so the door keeps
+    //   one as well, but never more than the door itself holds;
+    //   a leg that promises a QUALITY — NO COVER · DO NOT STOP, TIGHT TURNS,
+    //   FLOODED — spreads what it has down the corridor the claim is about,
+    //   because the claim is about all of it;
+    //   a leg that promises NOTHING is left exactly as it was. Its headline
+    //   is DOOR 7, which is a fact and not a claim, and the last group
+    //   waiting on the approach so you fight it with the door in frame is a
+    //   deliberate payoff rather than an accident.
+    const proto = leg && leg.proto;
+    const reserve = fs >= 0 && legPromisesPlace(proto);
+    const spread = !reserve && legPromises(proto);
+    const want = Math.max(legShare(n, hall ? hall.legInDoor : 0),
+      reserve ? Math.min(LEG.featureFloor, doorBodies(n)) : 0);
     if (leg && leg.stretches && leg.stretches.length) {
       // ONE EACH IN THE LAST `want` STRETCHES, so the fight travels with the
       // player rather than waiting in a heap at the door — and if the leg is
@@ -9624,14 +9743,36 @@ function hallWave(n) {
       // deals in GROUPS: a volley's worth per stretch, so walking into one is
       // walking into all of them.
       const per = Math.max(1, schoolVolleyAt(n));
-      leg.quota = leg.stretches.map((_, i) => {
-        const back = k - 1 - i;                        // 0 is the last stretch
-        const from = want - back * per;                // ...filled from the end
-        return Math.max(0, Math.min(per, from));
-      });
-      const placed = leg.quota.reduce((a, b) => a + b, 0);
-      if (placed < want) leg.quota[k - 1] += want - placed;
+      // THE FEATURE IS PAID FIRST, then the rest fill from the end.
+      //
+      // Filling purely from the end is right when there is enough to reach
+      // back down the leg, and a lie when there is not. `want` is one or two
+      // for every door in the opening ramp and a leg has six to eight
+      // stretches, so `want - back * per` came out [0,0,0,0,0,1] every single
+      // time: measured across 300 legs at doors 1-26, not one had a non-zero
+      // share anywhere before its last two stretches. A median of 84% of
+      // every leg in the game was structurally incapable of producing an
+      // enemy — including, in all 71 vault legs sampled, the pillared room
+      // the banner had just called your only cover.
+      leg.quota = leg.stretches.map(() => 0);
+      let left = want;
+      if (reserve && left > 0) { leg.quota[fs] = 1; left--; }
+      if (spread) {
+        // evenly down the body of the leg, because that is what the headline
+        // is describing — the turns, the straight, the flooded length of it
+        for (let i = 0; i < want && left > 0; i++) {
+          const at = Math.min(bodyN - 1, Math.floor(((i + 0.5) / want) * bodyN));
+          if (leg.quota[at] >= per) continue;
+          leg.quota[at]++; left--;
+        }
+      }
+      for (let i = k - 1; i >= 0 && left > 0; i--) {
+        const add = Math.min(per - leg.quota[i], left);
+        if (add > 0) { leg.quota[i] += add; left -= add; }
+      }
+      if (left > 0) leg.quota[k - 1] += left;   // nowhere else to put them
       leg.released = 0; leg.markK = undefined; leg.budget = 0;
+      leg.featureSent = false;   // one staged body per composition of the wave
     }
     hallWant = want;
   }
@@ -11227,6 +11368,10 @@ window.__ts = {
   },
   // THE DODGE COACH, so a test can ask what it is watching and how far along
   // the round was when it stopped the world — the two numbers the rule is.
+  // What a leg claims, and whether that claim names somewhere to stand — the
+  // two questions hallWave() asks before it decides where the fight is.
+  legPromise: (proto) => ({ any: legPromises(proto), place: legPromisesPlace(proto),
+    line: legHeadline(proto) }),
   tutorRescue: () => {
     const b = tutorRescueB;
     return {

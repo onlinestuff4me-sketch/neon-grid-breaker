@@ -109,6 +109,12 @@ export function genHallLeg(sgx, sgz, proto, grid, straightCells = 7) {
   const doorways = [];         // interior openings that get a framed jamb
   const breaks = new Set();    // spine indices that must start a new stretch
   let vaultDone = false;
+  // WHERE THE LEG'S HEADLINE IS POINTING. A vault leg says PILLARS ARE YOUR
+  // ONLY COVER and an atrium widens into a chamber; both are one identifiable
+  // place in the corridor, and the wave has to be able to put somebody in it.
+  // Recorded as a spine index here and resolved to a stretch below, because
+  // the split into stretches has not happened yet.
+  let featureSpine = -1;
   while (f < fwd) {
     const run = straight ? 9999
       : form === 'serviceRun'
@@ -133,6 +139,7 @@ export function genHallLeg(sgx, sgz, proto, grid, straightCells = 7) {
         for (let dz = 1; dz <= dp; dz++) add(gx + side * i, gz + dz);
       }
       doorways.push([gx, gz, 1]);          // in: the face you walk through
+      featureSpine = spine.length;         // ...and the room is what it promises
       breaks.add(spine.length);            // the room is a stretch of its own
       spine.push([gx, gz + 1]);
       const ex = gx + side * LEG.vaultExitOffset;
@@ -184,6 +191,7 @@ export function genHallLeg(sgx, sgz, proto, grid, straightCells = 7) {
   if (wantsRoom && spine.length > 10) {
     const i = 3 + Math.floor(Math.random() * Math.max(1, spine.length - 9));
     const [rx, rz] = spine[i];
+    if (featureSpine < 0) featureSpine = i;   // the chamber, if there is no vault
     for (let dx = -roomWide; dx <= roomWide; dx++) {
       for (let dz = 0; dz <= (form === 'atrium' ? 4 : 3); dz++) {
         const k = (rx + dx) + ',' + (rz + dz);
@@ -226,8 +234,25 @@ export function genHallLeg(sgx, sgz, proto, grid, straightCells = 7) {
   // at its end, where the final enemies stage so you watch it open as they
   // shatter. approach[0] is where the run begins; the last is at the slab.
   const approach = spine.slice(spine.length - APPROACH);
-  return { cells, spine, approach, stretches: splitStretches(spine, APPROACH, breaks),
-    doorways, pillars, covers, endGx: gx, endGz: gz };
+  const stretches = splitStretches(spine, APPROACH, breaks);
+  // ...resolved to the stretch that CONTAINS it. The vault's break makes the
+  // room a stretch of its own so this is exact; a widened chamber sits inside
+  // whichever stretch it was cut into, which is the right answer anyway —
+  // that stretch is the open part of the corridor.
+  //
+  // Never the approach: the approach is the door's own ground and already has
+  // its share. A feature that landed there is not a mid-leg feature at all.
+  let featureStretch = -1;
+  if (featureSpine >= 0) {
+    for (let i = 0; i < stretches.length - 1; i++) {
+      if (featureSpine >= stretches[i].at
+        && featureSpine < stretches[i].at + stretches[i].cells.length) {
+        featureStretch = i; break;
+      }
+    }
+  }
+  return { cells, spine, approach, stretches,
+    doorways, pillars, covers, featureStretch, endGx: gx, endGz: gz };
 }
 
 export function splitStretches(spine, approachLen, breaks) {
@@ -244,10 +269,18 @@ export function splitStretches(spine, approachLen, breaks) {
   if (cur.length) out.push(cur);
   out.push(spine.slice(spine.length - approachLen));
   // z span per stretch: what counts as "you are in it", and which cells of
-  // the leg (branch lanes and chambers included) may spawn for it
-  return out.map((c) => ({
-    cells: c,
-    z0: Math.min(...c.map((p) => p[1])) * HALL.cell,
-    z1: Math.max(...c.map((p) => p[1])) * HALL.cell,
-  }));
+  // the leg (branch lanes and chambers included) may spawn for it.
+  //
+  // `at` is the SPINE INDEX this stretch starts at, and it is here so that a
+  // caller who knows where a feature was built — the vault's room, a widened
+  // chamber — can say which stretch that is without re-deriving the split.
+  let at = 0;
+  return out.map((c) => {
+    const a = at; at += c.length;
+    return {
+      cells: c, at: a,
+      z0: Math.min(...c.map((p) => p[1])) * HALL.cell,
+      z1: Math.max(...c.map((p) => p[1])) * HALL.cell,
+    };
+  });
 }

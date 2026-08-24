@@ -376,6 +376,20 @@ export const LEG = {
   stretchMin: 2, stretchCap: 4,    // no stretch is ever emptier or fuller
   finaleWave: 3,                   // the one final group waiting at the door
   lookahead: 1,                    // stretches past yours that may also spawn
+  // A LEG THAT NAMES A ROOM HAS TO AFFORD ONE. The opening ramp gives a leg
+  // one or two bodies, and a leg whose headline says PILLARS ARE YOUR ONLY
+  // COVER needs one of them standing in the pillars AND one waiting at the
+  // door — otherwise reserving the room just empties the approach and moves
+  // the anticlimax. This is a floor, not a bonus: a leg already dealt two or
+  // more is untouched, and a leg that promises nothing never sees it. It is
+  // the only addition to OPENING's budget anywhere in the game.
+  featureFloor: 2,
+  // ...and how long the man in that room waits. He is placed while the player
+  // is a stretch short of the room so they SEE him assemble, then holds his
+  // fire and his ground until they actually cross in. Without the hold he
+  // walks out to meet them in the corridor and the room is empty again by the
+  // time anybody reaches it.
+  featureArmGrace: 0.35,           // world seconds after entry before he fires
   spawnMin: 9,                     // nearest a corridor spawn may appear (m)
   spawnMax: 40,                    // and the furthest
 };

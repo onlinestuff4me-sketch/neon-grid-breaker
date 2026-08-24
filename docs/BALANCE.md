@@ -630,3 +630,48 @@ within **64 px** of a body takes the body.
 | Ease onto target | 9 /s | 14 /s (TIME_EASE) |
 | March to the open door | 6.5 m/s | you walk it yourself |
 
+## Where a leg's fight happens
+
+A leg's wave is small — one or two bodies at every door in the opening ramp —
+and it used to be dealt out from the END of the leg: `want - back * per`. With
+six to eight stretches and a `want` of one, that is `[0,0,0,0,0,1]` every
+time. Measured across 300 legs at doors 1-26: **not one had a non-zero share
+anywhere before its last two stretches**, and a median of **84%** of every leg
+was structurally incapable of producing an enemy.
+
+That made the headlines lie. All 71 vault legs sampled announced PILLARS ARE
+YOUR ONLY COVER over a pillared room containing nobody, with the actual fight
+a median 27 m further on in the bare corridor at the door. `gauntlet` announced
+NO COVER · DO NOT STOP over a median 92 m of guaranteed-safe walking.
+
+A second, independent mechanism guaranteed it even if the quota had been
+right: `spawnEnemy`'s finale guard was `spawnQueue.length < HALL_FINALE`, with
+`HALL_FINALE` 3 and a measured maximum queue of **2**. It was therefore always
+true, `pool = L.approach` unconditionally, and every body in the game was
+placed in the last four cells before the door regardless of quota.
+
+**There are three kinds of leg now, and only two of them changed.**
+
+| the leg | what it does | example |
+|---|---|---|
+| promises a **place** | reserves one body for that stretch, and is floored at `LEG.featureFloor` so the door keeps a group too — never above what the door itself holds | `vault` → the pillared room |
+| promises a **quality** | spreads its share evenly down the body of the leg, because the claim is about all of it | `gauntlet`, `serviceRun`, `flood` |
+| promises **nothing** | unchanged | a plain corridor, headline `DOOR 7` |
+
+The third row is deliberate. `DOOR 7` is a fact, not a claim, and the last
+group waiting on the approach — so you fight it with the door in frame — is a
+payoff the game is built around, not an accident to be corrected.
+
+**The man in the room waits.** A body staged for a feature stretch is placed
+while the player is still a stretch short of it, so they watch him assemble;
+he does not close the distance at all until they are through the near doorway,
+and `stagedArmed()` holds his trigger until `LEG.featureArmGrace` after that.
+Not `game.noFireBefore` — that is one global wall-clock stamp that silences
+every enemy on the level, and being wall-clock it cannot express "until they
+walk in".
+
+**What it cost.** Mean bodies per leg went from **1.34** to **1.48** — a
+13% increase, entirely on legs that had made a promise. Doors 1 and 2 are
+untouched, because the floor is capped at `doorBodies(d)`: where a leg can
+only afford one body, that body goes in the room and the approach is empty.
+Keeping the promise beats keeping the convention.
