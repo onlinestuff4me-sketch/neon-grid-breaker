@@ -2790,7 +2790,17 @@ function pointInObstacle(x, z, pad) {
   return false;
 }
 
-function spawnEnemy(type = 'gunner') {
+// `at` PLACES THE BODY BEFORE IT IS BUILT, and that ordering is the whole
+// point of the argument rather than a convenience. Everything below bakes the
+// assemble animation into ABSOLUTE world coordinates at whatever point is
+// chosen here: `parts.g.position`, and 156 shards each with a `from` out in a
+// ring and a `to` on the finished silhouette. A caller that spawns first and
+// moves the body afterwards moves the body ONLY — the swarm still flies
+// together at the spawn point, blinks out, and the man appears somewhere else
+// entirely. That is what the onboarding did at every training leg, and why a
+// player saw the little red assemble animation play in the middle of an empty
+// room with nobody in it and two gunners arrive silently at the edges.
+function spawnEnemy(type = 'gunner', at = null) {
   // The archive files what you MEET, not what you kill — but the attract loop
   // behind the title is a shop window, not a meeting, so the menu files
   // nothing. Otherwise every player would "know" the heavy before playing.
@@ -2802,7 +2812,11 @@ function spawnEnemy(type = 'gunner') {
   // the wave attacks from one flank: spawn in an arc around the wave bearing
   // so the fight stays in front of you instead of whipping side to side
   let x = 0, z = 0, placed = false, holdZ;
-  if (inHall() && hall) {
+  if (at) {
+    // The caller has already decided, and has usually clamped to real floor
+    // to do it — there is nothing here that would improve on that.
+    x = at.x; z = at.z; placed = true;
+  } else if (inHall() && hall) {
     const L = hall.legs[hall.cur], C = HALL.cell;
     // The wave's last few stage on the door approach: you fight them with
     // the door in frame, so the opening lands as visible payoff and you are
@@ -7141,7 +7155,6 @@ const TUTOR_BAR_MAT = new THREE.MeshLambertMaterial({ color: 0x3b4148 });
 // each side, all level and all the same distance beyond the barrier.
 function tutorEnsureBodies(want) {
   const z = tutorBarrierZ() + TUTOR.enemyCells * HALL.cell;
-  const have = enemies.filter((e) => e.alive && e.hold).length;
   // SIX PLACES, NOT THREE. The count is an input the tool exposes from 0 to 6
   // and the ring only had three offsets, so bodies 4 and 5 were placed exactly
   // on top of bodies 1 and 2 — one silhouette, two men, and a round arriving
@@ -7153,25 +7166,51 @@ function tutorEnsureBodies(want) {
   // side it comes in at an angle, and by the time the world stops it is
   // unmistakably a separate thing hanging in the air.
   const OFF = [[-1, 0], [1, 0], [0, 0], [-2, 0.9], [2, 0.9], [0, 1.8]];
-  let added = 0;
-  for (let i = have; i < want; i++) {
-    const [ox, oz] = OFF[i % OFF.length];
-    const e = tutorPlaceEnemy(z + oz * HALL.cell, ox * TUTOR.enemyX);
-    if (e) added++;
-  }
   // ...AND EXACTLY THAT MANY. `bodies` is a count of who should be standing
   // there, so it has to be able to go down as well as up: entering a beat that
   // declares one man with three already up — which the tool's step jump does
   // every time somebody steps backwards through the sequence — used to leave
   // the other two in place, and the lesson about ONE round came with three
   // gunners in the corridor.
-  for (let i = enemies.length - 1; i >= 0 && enemies.filter((e) => e.alive && e.hold).length > want; i--) {
-    const e = enemies[i];
-    if (!e.alive || !e.hold) continue;
-    removeEnemyShards(e); removeBeam(e);
-    scene.remove(e.g);
-    enemies.splice(i, 1);
-    if (tutorMark === e) tutorMark = null;
+  //
+  // TRIMMED FIRST, AND THE LEAST-FORMED GO. This used to add and then trim,
+  // in that order, which meant a beat could spawn a man and delete him inside
+  // the same call — his shards were already in the air, so the player watched
+  // a swarm converge and resolve into nobody at all. That is the phantom, and
+  // it was two of eight spawns through the slow-time school.
+  //
+  // Nothing here can avoid removing SOMEBODY when the count goes down, so the
+  // choice is which disappearance the player notices. A swarm that has barely
+  // started is a few shards blinking out; a man who is finished looks like a
+  // man leaving; a swarm nine-tenths of the way in is the phantom. So they go
+  // in that order, newest first within each.
+  const heldUp = () => enemies.filter((e) => e.alive && e.hold);
+  const noticed = (e) => {
+    if (e.state !== 'assemble') return 1;                       // formed
+    return e.stateT / ASSEMBLE_T < 0.25 ? 0 : 2;                // barely / nearly
+  };
+  let over = heldUp().length - want;
+  if (over > 0) {
+    const victims = enemies
+      .map((e, i) => ({ e, i }))
+      .filter(({ e }) => e.alive && e.hold)
+      .sort((a, b) => noticed(a.e) - noticed(b.e) || b.i - a.i)
+      .slice(0, over)
+      .map(({ e }) => e);
+    for (const e of victims) {
+      const i = enemies.indexOf(e);
+      if (i < 0) continue;
+      removeEnemyShards(e); removeBeam(e);
+      scene.remove(e.g);
+      enemies.splice(i, 1);
+      if (tutorMark === e) tutorMark = null;
+    }
+  }
+  let added = 0;
+  for (let i = heldUp().length; i < want; i++) {
+    const [ox, oz] = OFF[i % OFF.length];
+    const e = tutorPlaceEnemy(z + oz * HALL.cell, ox * TUTOR.enemyX);
+    if (e) added++;
   }
   if (!tutorMark || !tutorMark.alive || enemies.indexOf(tutorMark) < 0) {
     tutorMark = enemies.find((e) => e.alive && e.hold) || null;
@@ -7336,19 +7375,27 @@ function tutorNoteShot() {
 // own floor: a player hugging the left wall must not push the left-hand man
 // through it.
 function tutorPlaceEnemyAt(x, z, type = 'gunner') {
-  spawnEnemy(type);
-  const e = enemies[enemies.length - 1];
-  if (!e) return null;
   // A held body ignores collision, so the script is the only thing keeping it
   // out of the masonry — snapped to the nearest row of floor there is, and
   // clamped across it. Clamping x alone was not enough: a body authored two
   // cells past the end of a room was still two cells into the end wall.
+  //
+  // WORKED OUT BEFORE THE BODY EXISTS, not after. This used to spawn first
+  // and then move what came back, which moved the man and left his 156 shards
+  // assembling at the point spawnEnemy had picked for itself — reliably
+  // several metres deeper into the room, because the tunnel placer keeps
+  // bodies at least `LEG.spawnMin` ahead of the player while the script pins
+  // them four to six cells in. Measured across the onboarding: ten of twelve
+  // bodies drifted more than a metre, median nine, worst twenty-seven — a
+  // swarm on the centre line converging into a silhouette of somebody who
+  // then appeared in silence at the edge of the room.
   const row = tutorRow(z);
   const cz = row ? row.gz * HALL.cell : z;
   const cx = tutorClampX(x, cz);
+  spawnEnemy(type, { x: cx, z: cz });
+  const e = enemies[enemies.length - 1];
+  if (!e) return null;
   e.hold = { x: cx, z: cz };
-  e.pos.set(cx, 0, cz);
-  e.g.position.set(cx, 0, cz);
   return e;
 }
 // The clear floor at a given z: the row's cell extent, less half a wall and
