@@ -118,6 +118,20 @@ export const TUTOR = {
   // metre it used to be, a bullet sailing past his shoulder brought up DODGE
   // THE BULLET and told a player who had just dodged that he had not.
   rescueLane: 0.55,     // metres off the round's line and still a threat
+  // HOW FAR A SCRIPTED BODY WILL ENGAGE FROM. A gunner's engage radius is
+  // rolled per spawn — 19 m plus up to 6 — and every retry deletes and
+  // re-spawns the area's bodies, so every retry re-rolls it. The training
+  // areas stand their lead man 5 cells in, which is 21.5 m from the door
+  // plane the player actually walks through: above the 19 m floor and inside
+  // the random band, so a measured 14 retries out of 30 came up under the
+  // standing distance. Those rooms were dead FOREVER — a pinned body never
+  // closes the gap, and `unstickHallEnemies` skips anything the script holds.
+  //
+  // A scripted body does not need a random radius. It cannot move, the script
+  // decided where it stands, and turn-taking is enforced separately by
+  // tutorTurnHolds() rather than by distance. So the script decides this too,
+  // and it covers the deepest authored placement (33.5 m) with room to spare.
+  engageM: 40,
   reshoot: 3.2,         // ...and the gap before a missed shot is retried
   // THE METER LESSON HAS A FLOOR. It empties at a readable rate to half, then
   // slows to a crawl, and never goes below a quarter: the player is being

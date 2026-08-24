@@ -7448,6 +7448,9 @@ function tutorPlaceEnemyAt(x, z, type = 'gunner') {
   const e = enemies[enemies.length - 1];
   if (!e) return null;
   e.hold = { x: cx, z: cz };
+  // ...AND HE ENGAGES FROM WHERE HE WAS PUT. See TUTOR.engageM: the rolled
+  // radius made "fires as you enter" a coin flip that a retry re-tossed.
+  e.engageDist = TUTOR.engageM;
   return e;
 }
 // The clear floor at a given z: the row's cell extent, less half a wall and
@@ -8711,6 +8714,96 @@ function warnFlash(words) {
 
 // red chevrons at the screen edge pointing toward off-screen enemies
 const edgeArrows = [];
+// ---------------------------------------------------------------------------
+// THE STALL WATCHDOG
+//
+// "Nothing is happening" is a state the game can reach and cannot get out of,
+// and it looks exactly like a bug because it is one. Two ways in, both
+// measured:
+//
+//   A live enemy who will not engage. `engageDist` is rolled per spawn and
+//   the training areas stand their lead man 21.5 m from the door plane the
+//   player walks through, against a roll of 19 + rand(6) — so 14 retries in
+//   30 came up short. A body the script pins never closes the distance, and
+//   `unstickHallEnemies` skips anything with a `hold`, so nothing on any code
+//   path ever resolved it. The room was dead forever. (TUTOR.engageM now
+//   settles the scripted case at the source; this is the floor under every
+//   other one — a body behind cover it will not leave, a roll that comes up
+//   short in an ordinary corridor.)
+//
+//   A queue that will not release. The leg's share belongs to a stretch
+//   further in, so `hallAllowance()` is 0 and the corridor stays empty until
+//   the player walks up to fifty metres. Measured 22 world seconds of nothing
+//   at the mouth of door 1 — the first corridor after the training ends, and
+//   the exact moment the coaching stops.
+//
+// Both are answered the same way: make something happen. Not a message — the
+// player has no way to act on "wait" — and not a teleport, which is how an
+// earlier rescue moved the enemy you were supposed to dodge out of the
+// hallway. The nearest reluctant body simply notices you, or the corridor
+// releases one it was holding back.
+//
+// ON THE WORLD CLOCK, so a player holding time still is not nagged for it,
+// and so this cannot fire while a lesson has the world frozen.
+let stallT = 0;              // world seconds since anything last happened
+let stallSaw = new WeakMap(); // ...and where each body was when we last looked
+function stallHappening() {
+  if (bullets.some((b) => !b.fromPlayer)) return true;
+  for (const e of enemies) {
+    if (!e.alive) continue;
+    if (e.state === 'assemble' || e.state === 'aim' || e.state === 'burst'
+      || e.state === 'windup') return true;
+    const was = stallSaw.get(e);
+    const now = Math.hypot(e.pos.x - player.pos.x, e.pos.z - player.pos.z);
+    stallSaw.set(e, now);
+    // closing on him counts as something happening; strafing on the spot,
+    // which is what a parked body does, does not
+    if (was !== undefined && was - now > LEG.stallCloseM) return true;
+  }
+  return false;
+}
+function updateStall(sdt, playing) {
+  if (!playing || !player.alive || game.state !== 'play' || timeLocked) {
+    stallT = 0; stallOwed = false; return;
+  }
+  // A held world is the lesson's own doing and is not a stall.
+  if (tutorWorldHeld) { stallT = 0; return; }
+  if (stallHappening()) { stallT = 0; return; }
+  stallT += sdt;
+  if (stallT < LEG.stallAfter) return;
+  stallT = 0;
+  // 1. somebody is standing there not engaging: let him see you. Nearest
+  //    first, and only somebody who actually has a line to you — opening the
+  //    radius of a man round a corner would do nothing and cost the next
+  //    check another four seconds.
+  let best = null, bestD = Infinity;
+  for (const e of enemies) {
+    if (!e.alive || e.state === 'assemble') continue;
+    const d = Math.hypot(e.pos.x - player.pos.x, e.pos.z - player.pos.z);
+    if (d >= bestD) continue;
+    if (!hasLineOfSight(_v2.set(e.pos.x, 1.35, e.pos.z),
+      _v3.set(player.pos.x, EYE_HEIGHT - 0.3, player.pos.z))) continue;
+    best = e; bestD = d;
+  }
+  if (best) {
+    best.engageDist = Math.max(best.engageDist || 0, bestD + LEG.stallReachM);
+    best.fireCd = Math.min(best.fireCd || 0, 0.2);
+    return;
+  }
+  // 2. nobody to wake, so the corridor lets one through — see stallRelease(),
+  //    which the release gate reads on the next frame.
+  stallOwed = true;
+}
+// The release gate's own allowance is a position window and can legitimately
+// be zero for a long walk. This overrides it exactly once, when the watchdog
+// has decided the corridor has been silent too long.
+let stallOwed = false;
+function stallRelease() {
+  if (!stallOwed) return false;
+  stallOwed = false;
+  return true;
+}
+
 function updateEdgeArrows(playing) {
   const dirs = [];
   // Half the horizontal field of view, asked of the camera rather than
@@ -10920,6 +11013,7 @@ function frame(now) {
       else if (player.pitch > hi) nudge(hi);
     }
   }
+  updateStall(sdt, playing);
   updateEdgeArrows(playing);
   if (tutorStep !== null) {
     updateTutorial(dt,
@@ -11042,8 +11136,14 @@ function frame(now) {
     // use it, and a body arriving mid-lesson is the loudest thing on screen.
     if (tutorHoldsSpawns()) game.spawnQueue.length = 0;
     const room = hallAllowance();
+    // ...and the watchdog's one-off override, asked for LAST so the flag is
+    // only spent on a frame that can actually use it. Spending it whenever
+    // this line runs would burn it on an empty queue and buy the stalled
+    // player another four seconds of nothing.
+    const owed = game.state === 'play' && game.spawnQueue.length > 0
+      && enemies.length < maxAlive() && room <= 0 && stallRelease();
     if (game.state === 'play' && game.spawnQueue.length > 0 &&
-        enemies.length < maxAlive() && room > 0) {
+        enemies.length < maxAlive() && (room > 0 || owed)) {
       game.spawnTimer -= sdt;
       // hold entrances while a card is on screen: one thing to read at a time
       if (game.spawnTimer <= 0 && performance.now() >= messageBusyUntil) {

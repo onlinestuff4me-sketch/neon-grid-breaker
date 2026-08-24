@@ -390,6 +390,24 @@ export const LEG = {
   // walks out to meet them in the corridor and the room is empty again by the
   // time anybody reaches it.
   featureArmGrace: 0.35,           // world seconds after entry before he fires
+  // ---------------------------------------------------------------------
+  // THE STALL WATCHDOG — nothing is happening, and that is never all right.
+  //
+  // A player standing in a corridor with a live enemy who will not engage,
+  // or with a queue that will not release, has no way to tell a lull from a
+  // broken game. They have no reason to walk INTO a room that has just
+  // killed them, and both onboarding prompts are gated on somebody aiming —
+  // so in exactly the state where a player is lost, the game has nothing to
+  // say. This is the floor under all of that: if a measured number of world
+  // seconds pass with no enemy aiming, no round in the air, nobody closing
+  // and nobody arriving, the game makes something happen.
+  //
+  // In WORLD seconds, so a player holding the world still is not nagged.
+  // ---------------------------------------------------------------------
+  stallAfter: 4.5,                 // ...of nothing at all before it steps in
+  stallCloseM: 0.35,               // less movement than this is "not closing"
+  stallReachM: 2.0,                // added to the distance when it opens a
+                                   // reluctant enemy's engage radius
   spawnMin: 9,                     // nearest a corridor spawn may appear (m)
   spawnMax: 40,                    // and the furthest
 };
