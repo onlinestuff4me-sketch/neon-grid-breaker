@@ -43,6 +43,11 @@ therefore a race that fails on a loaded machine and passes on an idle one.
 run was still in `intro`, where `closeSeal` is gated off and a fired round hits
 a player who has not started yet:
 
+* `seal.js` — its placement claim ("builds on most legs") is **sequential**, not a
+  fixed sample: leg generation is random, and a fixed 16 draws against a ≥10 bar
+  failed on an unlucky 9/16 while the same build drew 12 and 14 on reruns. It now
+  keeps drawing until ten builds prove the claim or a 28-attempt cap proves it
+  broken — a working build exits early, a broken one cannot reach ten.
 * `seal.js` — "it shut when crossed", "nobody was left trapped", "their release
   was refunded"
 * `physics.js` — "bullet → player" did not kill
