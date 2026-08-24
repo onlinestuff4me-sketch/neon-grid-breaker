@@ -1241,7 +1241,12 @@ function updateReload(dt) {
 // ---------------------------------------------------------------------------
 // Bullets — simple projectile physics with swept capsule collision
 // ---------------------------------------------------------------------------
-const bullets = [];   // {mesh, trail, pos, vel, prev, fromPlayer, life}
+const bullets = [];   // {mesh, trail, pos, vel, prev, born, seq, fromPlayer, life}
+// EVERY ROUND GETS A NUMBER, and it only ever goes up. The dodge coach wants
+// "the first round fired at him IN THIS AREA", and the array cannot answer
+// that: a bullet from the last room is still in the air when he crosses into
+// the next one, and it would be sitting at the front of the list.
+let bulletSeq = 0;
 const bulletGeo = new THREE.SphereGeometry(0.04, 8, 8);
 // A ROUND, not a ball. Lathed ogive profile — flat base, straight shank,
 // curved nose — spun about Y, then tipped so its axis is +Z, which is the
@@ -1400,6 +1405,10 @@ function spawnBullet(pos, dir, fromPlayer, opt = 0, pierce = 0) {
   bullets.push({
     mesh, trail,
     pos: pos.clone(), prev: pos.clone(),
+    // WHERE IT LEFT THE MUZZLE, kept for the life of the round. The dodge
+    // coach asks "how far along its flight is this?", and that question has no
+    // answer from a position and a velocity alone.
+    born: pos.clone(), seq: ++bulletSeq,
     vel: dir.clone().multiplyScalar(speed),
     fromPlayer, pierce, life: 6, rippleAcc: 0,
     whoosh: fromPlayer ? null : sfx.attachWhoosh(),   // incoming rounds sing
@@ -6792,10 +6801,11 @@ let tutorSpent = new Set();
 // only be spent by the action it asked for if it got as far as asking.
 let tutorShown = new Set();
 let tutorWorldHeld = false;    // ...and right now the world is actually held
-// THE RESCUE: one per area, and only for somebody who is not reacting.
-let tutorRescued = false;     // has this area already stopped a round for them
-let tutorStillT = 0;          // seconds since they last stepped sideways
-let tutorStillX = 0;          // ...measured from here
+// THE RESCUE: the first round fired at them in an area, and only if it is
+// still on course to hit when it is three-quarters of the way over.
+let tutorRescued = false;     // has this area already spent its one prompt
+let tutorRescueB = null;      // ...on this round, the first one fired here
+let tutorRescueFrom = 0;      // ...and "here" starts after this bullet serial
 let tutorLegIx = 0;          // which entry of tutorLegsOf() the current leg is
 let tutorVolleyT = 0;        // beat between rounds in the three-round lesson
 let tutorSpineIx = 0;        // how far along the leg's spine they have walked
@@ -7526,11 +7536,17 @@ function endTutorial(taught = true) {
   // one frame — score line, meter, ammo, gun, button — and without a word for
   // it the only thing that tells the player the training wheels are off is the
   // next room being harder.
-  // ONE LINE. It used to be two banners and then the new leg's own headline —
+  // ONE CARD. It used to be two banners and then the new leg's own headline —
   // three instructions in five seconds, on the frame everything the lesson had
   // been withholding arrived at once. What the player needs to know is that
   // the training is over and where to walk.
-  if (taught) setTimeout(() => showBanner('TRAINING COMPLETE \u00B7 GO TO THE NEXT DOOR', 2600), 60);
+  // TWO SIZES, NOT ONE SENTENCE. Joined with a middot it set as one run of
+  // 58px caps and wrapped to three ragged lines across the middle of the
+  // screen — a paragraph where a sign was wanted. The headline is the news;
+  // the instruction rides underneath in the sub-line the card already has.
+  if (taught) {
+    setTimeout(() => showBanner('TRAINING COMPLETE<small>GO TO THE NEXT DOOR</small>', 2600), 60);
+  }
 }
 const tutorAfter = (id) => {
   const order = tutorOrder();
@@ -7563,7 +7579,7 @@ function tutorNext(step) {
   tutorShown = new Set();
   tutorSlowedHere = false; tutorResumedHere = false;
   tutorHardFreeze = false;
-  tutorRescued = false; tutorStillT = 0; tutorStillX = player.pos.x;
+  tutorRescued = false; tutorRescueB = null; tutorRescueFrom = bulletSeq;
   const sp = tutorSpecOf(step);
   if (sp) {
     // WHERE TO PUT THEM BACK IF THIS BEAT IS FAILED — every beat, not just the
@@ -7831,6 +7847,41 @@ function tutorRevealButton() {
   el.timebtn.classList.add('arrive', 'hint');
 }
 
+// IS THIS ROUND THE ONE TO STOP THE WORLD FOR? Two questions, both answered
+// against the round's own line of flight rather than against the z axis, so a
+// body shooting across a room is judged the same way as one down a corridor.
+//
+//   how far along is it — muzzle to the player, measured NOW so that walking
+//   into the shot counts as closing the gap, which it is; and
+//   is he still in front of it — his distance from the line, not from the
+//   bullet, because a round two metres short and dead on his chest is about
+//   to hit him and one a metre to the side never was.
+//
+// The lane is the player's own radius and a little: "in the path" has to mean
+// it would land. At the metre the freeze used to allow, a round already
+// sailing past his shoulder brought up DODGE THE BULLET — telling somebody
+// who had just dodged that they had not.
+const _resA = new THREE.Vector3();
+const _resB = new THREE.Vector3();
+function tutorRescueDue(b) {
+  if (!b || !b.born) return false;
+  // travelled, and the whole trip: flat, because the muzzle is chest-high and
+  // the drop over a room is not part of "how far along".
+  _resA.set(b.pos.x - b.born.x, 0, b.pos.z - b.born.z);
+  _resB.set(player.pos.x - b.born.x, 0, player.pos.z - b.born.z);
+  const span = _resB.length();
+  if (span < 1e-3) return false;
+  if (_resA.length() < span * TUTOR.rescueAt) return false;
+  // ...and the perpendicular miss distance from the line the round is on.
+  _resA.set(b.vel.x, 0, b.vel.z);
+  if (_resA.lengthSq() < 1e-6) return false;
+  _resA.normalize();
+  _resB.set(player.pos.x - b.pos.x, 0, player.pos.z - b.pos.z);
+  const along = _resB.dot(_resA);
+  if (along <= 0) return false;                  // already past him
+  return _resB.addScaledVector(_resA, -along).length() <= TUTOR.rescueLane;
+}
+
 // Driven on REAL time from the frame loop, after input and movement have been
 // applied, so "did they do it yet" is answered against this frame's state.
 function updateTutorial(dtReal, movedM, yawDelta) {
@@ -7858,40 +7909,48 @@ function updateTutorial(dtReal, movedM, yawDelta) {
   //
   // Released by the button and by nothing else, every round, so the second and
   // the third are the first one practised rather than a new problem.
-  // ARE THEY REACTING? A sideways step resets the clock; standing in the lane
-  // runs it. Measured on the player's own axis and in real time, because this
-  // is about a thumb rather than about the world.
-  if (Math.abs(player.pos.x - tutorStillX) >= TUTOR.dodgeStepM * 0.5) {
-    tutorStillX = player.pos.x; tutorStillT = 0;
-  } else {
-    tutorStillT += dtReal;
-  }
   // ...AND IF A ROUND IS ABOUT TO LAND ON THEM, THE LESSON COMES BACK. Only
-  // in the training rooms (`rescue` is granted there and nowhere else), only
-  // once per area, and only for a round that is genuinely coming at them:
-  // close, closing, and in their lane. Everything after this is lesson 5's
-  // own machinery — the same freeze, the same words, the same way out.
+  // in the training areas (`rescue` is granted there and nowhere else), only
+  // for the FIRST round anybody fires at them in that area, and only if it is
+  // still going to hit them by the time it is three-quarters of the way over.
+  // Everything after this is lesson 5's own machinery — the same freeze, the
+  // same words, the same way out.
+  //
+  // THE FIRST ROUND, NOT THE FIRST QUALIFYING ROUND. The rescue used to scan
+  // every bullet in the air and adopt whichever one happened to be close, in
+  // lane and unanswered — which meant a player who dodged three rounds
+  // cleanly and then mistimed the fourth got the beginner's prompt in the
+  // middle of a fight they were winning. The leg's opening round is the one
+  // that reads as a lesson: it arrives before the fight has a rhythm, and
+  // whichever way it goes it retires the prompt for this area.
+  //
   // `tutorStep !== null` FIRST. tutorMay answers TRUE outside the lesson —
   // "outside the lesson everything is granted" — so asking it alone would arm
   // the rescue for the entire game, stopping the world on every round anybody
   // ever failed to sidestep.
-  if (tutorStep !== null && tutorMay('rescue')
-      && !tutorRescued && !tutorRound && !tutorWorldHeld
-      && tutorStillT >= TUTOR.rescueStill) {
-    for (const b of bullets) {
-      if (b.fromPlayer) continue;
-      const dz = b.pos.z - player.pos.z;
-      const closing = b.pos.z - b.prev.z < 0;   // travelling toward him
-      if (!closing || dz <= 0 || dz > TUTOR.rescueDist) continue;
-      if (Math.abs(b.pos.x - player.pos.x) > TUTOR.rescueLane) continue;
+  if (tutorStep !== null && tutorMay('rescue') && !tutorRescued) {
+    // SPENT IS SPENT. Once the leg's opening round is off the board — it hit
+    // him, it hit a wall, it ran out of life — this area has had its chance
+    // and the prompt does not transfer to the next bullet.
+    if (tutorRescueB && bullets.indexOf(tutorRescueB) < 0) {
+      tutorRescueB = null; tutorRescued = true;
+    }
+    if (!tutorRescueB) {
+      for (const b of bullets) {
+        if (b.fromPlayer || b.seq <= tutorRescueFrom) continue;
+        tutorRescueB = b;
+        break;
+      }
+    }
+    const b = tutorRescueB;
+    if (b && !tutorRound && !tutorWorldHeld && tutorRescueDue(b)) {
       // ADOPTED WITH A SPAN OF NOTHING, so the shared freeze below fires on
-      // this very frame: the round is already as close as it is going to get
-      // before it is a hit, and 45% of "no distance left" is zero.
+      // this very frame: the round is already as far along as the coach is
+      // willing to let it get, and 45% of "no distance left" is zero.
       tutorRound = { b, passedBar: true, counted: false, let: false,
         from: b.pos.z, span: 1e-6 };
       tutorHardFreeze = true;
       tutorRescued = true;
-      break;
     }
   }
   if (tutorHardFreeze && tutorRound && !tutorRound.counted && !tutorRound.let
@@ -11067,6 +11126,21 @@ window.__ts = {
     for (let k = enemies.length - 1; k >= 0; k--) { scene.remove(enemies[k].g); enemies.splice(k, 1); }
     tutorPopulateLeg();
     return true;
+  },
+  // THE DODGE COACH, so a test can ask what it is watching and how far along
+  // the round was when it stopped the world — the two numbers the rule is.
+  tutorRescue: () => {
+    const b = tutorRescueB;
+    return {
+      spent: tutorRescued, watching: b ? bullets.indexOf(b) : -1,
+      at: TUTOR.rescueAt, lane: TUTOR.rescueLane,
+      due: b ? tutorRescueDue(b) : false,
+      flown: b && b.born
+        ? +Math.hypot(b.pos.x - b.born.x, b.pos.z - b.born.z).toFixed(3) : null,
+      span: b && b.born
+        ? +Math.hypot(player.pos.x - b.born.x, player.pos.z - b.born.z).toFixed(3) : null,
+      held: tutorWorldHeld, froze: tutorFroze,
+    };
   },
   tutorTurn: () => ({ order: tutorTurnOrder,
     holder: tutorTurnHolder ? enemies.indexOf(tutorTurnHolder) : -1 }),

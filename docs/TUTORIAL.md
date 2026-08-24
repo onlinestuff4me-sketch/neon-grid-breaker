@@ -22,13 +22,23 @@ lesson returns as a **rescue**, on three conditions:
 * the area grants it (`rescue` in the step's grants — the teaching beats do
   not, because they fire rounds on purpose and have their own freezes, and
   `done` does not, because that is door 1 of the real game);
-* a round is genuinely coming — closing, within `TUTOR.rescueDist`, and inside
-  `TUTOR.rescueLane` of the player's own x;
-* they are **not reacting**: no sideways step for `TUTOR.rescueStill` seconds.
+* the round is the **first one fired at the player in that area** — not the
+  first one that happens to be in trouble. Bullets carry a serial (`seq`) and
+  the coach records the watermark when the area starts, so a round still in
+  the air from the last room cannot be mistaken for this room's opening shot;
+* it is `TUTOR.rescueAt` (**75%**) of the way from the muzzle to where the
+  player is standing *now*, and the player is still within `TUTOR.rescueLane`
+  (**0.55 m**, his own radius and a graze) of the line it is flying down.
+
+Both measurements are taken along the round's own line of flight rather than
+down the z axis, so a body shooting across a room is judged the same way as
+one down a corridor.
 
 It adopts that round as the lesson's own and hands it to the same freeze,
-words and release lesson 5 uses — recognising it is the point. Once per area:
-a prompt on every round is a nag, not a rescue.
+words and release lesson 5 uses — recognising it is the point. Once per area,
+and the opening round spends the prompt **whichever way it goes**: dodge it
+and there is nothing more to teach here; let it hit and the retry starts the
+area again. A prompt that waits for the round you mistime is a nag.
 
 > `tutorMay()` answers **true outside the lesson** ("outside the lesson
 > everything is granted"), so the rescue is gated on `tutorStep !== null`
