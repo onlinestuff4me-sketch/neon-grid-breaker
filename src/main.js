@@ -2882,9 +2882,18 @@ function spawnEnemy(type = 'gunner', at = null) {
     const doorView = finale
       ? L.approach[L.approach.length - 1]
       : null;
-    // and they hold there — see holdZ in advance(): a finale enemy may close
-    // on you but never retreats back round a corner out of the door's frame
-    if (finale) holdZ = approachZ - C;
+    // and they hold there — see holdZ in advance(): an enemy may close on you
+    // but never comes nearer than the door approach.
+    //
+    // NOT GATED ON `finale`. It used to be, and `finale` used to be true for
+    // every spawn in the game — so every body in every leg carried this line
+    // and none of them ever advanced in z at all. Fixing `finale` to mean
+    // what it says would therefore have quietly switched enemy advance ON
+    // across the whole game, which is a change to how the game plays and not
+    // one that belongs in a fix about where bodies are PLACED. The two were
+    // only ever coupled by the bug. They are separate now: `finale` chooses
+    // the spawn pool, this chooses how close he may come.
+    if (L.approach && L.approach.length) holdZ = approachZ - C;
     let fbX = 0, fbZ = 0, fbOk = false;
     // A VOLLEY STANDS TOGETHER. In the slow-time school the answer to several
     // men firing at once is to slow time and sweep across them, and that only
@@ -10368,6 +10377,15 @@ function crossHallDoor() {
   // in this same function and has to know whether the lesson began on THIS
   // crossing — see below.
   let enteredSlow = false;
+  // THE LAST DOOR'S CARD DOES NOT OUTLIVE THE LAST DOOR. A headline is shown
+  // for two seconds and the queue serialises anything behind it, so crossing
+  // inside that window left DOOR 9 on screen while the HUD above it had
+  // already moved to DOOR 10 — the same two-numbers-disagree the playtest
+  // reported, arriving by a different route from the off-by-one that was
+  // fixed earlier. Whatever the previous door was saying is dropped here, so
+  // the card that comes next is the only one on screen and it describes the
+  // corridor the player is actually standing in.
+  clearMessages();
   if (tutorStep === null) {
     // EVERY crossing, not just the unlock one: this is what enters the lesson
     // AND what undoes an arm that is never going to be entered. See
