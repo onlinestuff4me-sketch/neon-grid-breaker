@@ -158,12 +158,18 @@ export function speedAt(d, S = SPEED, school = true) {
   return Math.min(v.capM, v.unlockM + v.stepM * past);
 }
 
-// The difficulty ramp. diffT() runs 0 -> 1 across `rampWaves`, and telegraph
-// length and slow-mo cost read from it. Bullet speed does NOT — see SPEED.
+// The difficulty ramp. diffT() is where the round's SPEED sits between
+// `SPEED.openM` and `SPEED.capM` — telegraph length and slow-mo cost read from
+// that same number, so they tighten with it and reach full heat with it on
+// door 98.
+//
+// There is no `rampWaves` any more. It was a second schedule, 18 doors long,
+// which put every telegraph in the game at its shortest by door 19 while
+// bullet speed went on climbing for another eighty — half the difficulty
+// curve spent in the first fifth of the game, and one dial left for the rest.
+// The tool's slider for it is gone with it: a control that no longer changes
+// anything is worse than no control.
 export const RAMP = {
-  rampWaves: 18,       // waves until full heat. Was 11 — the opening now runs
-                       // on far fewer bodies, so the rest has room to take
-                       // longer over the same distance.
   aimBase: 1.15,       // telegraph/cooldown scale on wave 1
   aimRange: 0.63,      // subtracted across the ramp
   drainFloor: 0.55,    // slow-mo cost on wave 1

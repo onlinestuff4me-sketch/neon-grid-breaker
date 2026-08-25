@@ -35,7 +35,6 @@ function seed() {
     gapFrom: OPENING.gapFrom,
     gapTo: OPENING.gapTo,
     gapBy: OPENING.gapBy,
-    rampWaves: RAMP.rampWaves,
     // the speed staircase
     openM: SPEED.openM, openDoors: SPEED.openDoors,
     holdM: SPEED.holdM, holdDoors: SPEED.holdDoors,
@@ -144,10 +143,6 @@ const DIALS = [
   ['schoolDoors', 'School · doors', 0, 30, 1,
     'How long the staircase stops while slow time is taught. The speed holds '
     + 'flat here on purpose: one new thing at a time.'],
-  ['rampWaves', 'Telegraph · full heat by', 4, 90, 1,
-    'Doors until telegraphs and cooldowns reach their tightest. This is NOT '
-    + 'bullet speed any more — the staircase above owns that — it is only how '
-    + 'long an enemy takes to raise his arm.'],
   // --- THE SCHOOL ----------------------------------------------------------
   ['volley', 'School · volley size', 2, 8, 1,
     'How many fire together once the school is in session. A volley is the one '
@@ -265,7 +260,6 @@ export function read() {
       corridorDoors: V.corridorDoors, gapDoors: V.gapDoors,
       gapFrom: V.gapFrom, gapTo: V.gapTo, gapBy: V.gapBy,
       holdSlack: V.holdSlack },
-    RAMP: { rampWaves: V.rampWaves },
     SPEED: { openM: V.openM, openDoors: V.openDoors, holdM: V.holdM,
       holdDoors: V.holdDoors, stepM: V.stepM, stepDoors: V.stepDoors,
       unlockM: V.unlockM, schoolDoors: V.schoolDoors },

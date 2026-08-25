@@ -292,13 +292,13 @@ What it costs, and it is worth saying plainly:
   hardest stretch in the game, with a new power in hand — but it is a step
   down, not up.
 * **The telegraph ramp and the speed staircase no longer finish together, and
-  by a long way.** `RAMP.rampWaves` is 18, so an enemy raises his arm as fast
-  as he ever will by door 19 — where the round he then fires is still doing
-  6.8 m/s. Before the staircase this was one curve and the two moved as one.
-  It is not obviously wrong: "he shoots sooner, but the round is still
-  walkable" is a coherent way to spend the middle game. But it is now a
-  separate decision that nobody has made on purpose, and the dial is
-  **Telegraph · full heat by** in the RAMP pane.
+  by a long way.** — this was true and is fixed. Telegraph tightness had its
+  own 18-door schedule while bullet speed climbed a staircase to door 98, so
+  every telegraph was at its shortest one fifth of the way in and the next
+  eighty doors had one dial left. `diffT()` now reads where the round's speed
+  sits between `SPEED.openM` and `SPEED.capM`, so the two are the same dial and
+  reach full heat together on door 98 — and telegraphs inherit the school's
+  ten-door plateau, so nothing tightens while slow time is being taught.
 
 If either is the wrong trade, `/tool` → **RAMP** shows what any change does to
 every door before you play one.

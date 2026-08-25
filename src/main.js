@@ -3495,12 +3495,34 @@ function setEgunFlash(e, mat) {
   (e.egun.isGroup ? e.egun.children[0] : e.egun).material = m;
 }
 
-// One dial for the whole difficulty curve: 0 on wave 1, 1 by wave 8.
-// Rush hour has no waves, so it ramps on the run clock instead (~3 minutes
-// to full heat).
+// ONE DIAL, AND IT IS THE STAIRCASE BULLET SPEED CLIMBS.
+//
+// This used to be its own linear ramp — `(wave - 1) / RAMP.rampWaves`, full
+// heat by door 19 — while bullet speed climbed a separate staircase that does
+// not top out until door 98. So the two halves of "the fight gets harder"
+// were on different clocks: every telegraph in the game was as short as it
+// would ever get by door 19, and for the next EIGHTY doors the only thing
+// still changing was how fast the round travelled. Half the difficulty curve
+// was spent in the first fifth of the game and the rest had one dial left.
+//
+// They are the same dial now. `t` is where the round's speed sits between the
+// opening speed and the ceiling, so a door that is a tread faster is also a
+// tread tighter, and the two arrive at full heat together on door 98.
+//
+// It inherits the school's plateau for free, which is the part worth having:
+// `speedAt` holds flat for the ten doors that teach slow time, so telegraphs
+// stop tightening there too. The lesson is not the place to also be getting
+// harder.
+//
+// Rush hour has no doors and no school, so it reads the same staircase off
+// its run clock — the same exception `enemyBulletSpeed` makes, for the same
+// reason.
 function diffT() {
-  const w = game.mode === 'rush' ? 1 + rushT / 25 : game.wave;
-  return Math.min((w - 1) / RAMP.rampWaves, 1);
+  const v = game.mode === 'rush'
+    ? speedAt(1 + rushT / 25, SPEED, false)
+    : speedAt(game.wave);
+  const span = Math.max(0.01, SPEED.capM - SPEED.openM);
+  return Math.min(1, Math.max(0, (v - SPEED.openM) / span));
 }
 
 // Enemy rounds open slow enough to sidestep at a walk (wave 1: ~55% speed),
