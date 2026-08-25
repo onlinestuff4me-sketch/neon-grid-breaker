@@ -249,6 +249,28 @@ export const OPENING = {
 export const EARLY = {
   gunnerOnlyDoors: 5,  // no other type may debut before this door
   oneRoundDoors: 5,    // and only one enemy round may be in the air at once
+  // ---------------------------------------------------------------------
+  // HOW CLOSE A MAN MAY BE THE MOMENT YOU FIRST SEE HIM.
+  //
+  // `LEG.spawnMin` is a straight line from where the player is STANDING, and
+  // a corridor jogs: a body nine metres away round a corner is nine metres
+  // from you and three metres from the place you will be when you can first
+  // see him. Placement then makes it worse on purpose — it PREFERS a spot
+  // with no line of sight, so the man steps out of cover rather than popping
+  // in mid-street — which is a good rule everywhere except the doors where
+  // the player is still learning that a raised arm means move.
+  //
+  // So this is measured differently: walk the spine forward from the player,
+  // find the first point on it that can see the candidate, and ask how far
+  // apart they are THERE. That is the distance the player actually meets him
+  // at, and it is the number that decides whether there is room to dodge.
+  //
+  // Enforced flat for the opening doors and then eased away, because the
+  // surprise IS the game later — by then the player has the edge arrows, and
+  // rounding a corner into somebody is a thing they can answer.
+  firstSightM: 13,     // metres of clear ground when he first becomes visible
+  firstSightDoors: 10, // ...enforced in full through this door
+  firstSightEaseBy: 18, // ...and gone by this one
 };
 
 // ---------------------------------------------------------------------------

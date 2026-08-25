@@ -700,6 +700,9 @@ setLayout();
 // Small math helpers
 // ---------------------------------------------------------------------------
 const _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3();
+// ...and a second pair, because firstSightDist() runs INSIDE the placement
+// loop, which is already using _v2/_v3 for its own line-of-sight test.
+const _v4 = new THREE.Vector3(), _v5 = new THREE.Vector3();
 const _vMuz = new THREE.Vector3();
 
 // Squared distance between segments p1->q1 and p2->q2 (Ericson, RTCD 5.1.9).
@@ -2790,6 +2793,37 @@ function pointInObstacle(x, z, pad) {
   return false;
 }
 
+// HOW MUCH CLEAR GROUND A NEW BODY MUST HAVE WHEN HE FIRST BECOMES VISIBLE.
+// Full through EARLY.firstSightDoors, eased to nothing by firstSightEaseBy —
+// see EARLY for why the opening doors get a rule the rest of the game does
+// not. Zero means "not enforced", which is the deep game.
+function firstSightFloor() {
+  if (!inHall()) return 0;
+  const d = hall ? hall.doorsPassed + 1 : 1;
+  if (d <= EARLY.firstSightDoors) return EARLY.firstSightM;
+  const span = Math.max(1, EARLY.firstSightEaseBy - EARLY.firstSightDoors);
+  const t = Math.min(1, (d - EARLY.firstSightDoors) / span);
+  return EARLY.firstSightM * (1 - t);
+}
+// ...AND HOW MUCH THIS CANDIDATE ACTUALLY HAS. The player walks the spine, so
+// the first spine point that can see the spot is where he first sees the man,
+// and the gap between them there is the answer. Infinity means no point on the
+// walked path can see him at all — which is not a safe placement, it is an
+// unknown one, so the caller treats it as a failure while the rule is on.
+function firstSightDist(px, pz) {
+  const L = hall && hall.legs[hall.cur];
+  if (!L || !L.spine) return Infinity;
+  const C = HALL.cell;
+  for (const [gx, gz] of L.spine) {
+    const sx = gx * C, sz = gz * C;
+    if (sz < player.pos.z - C) continue;          // already behind him
+    if (sz > pz + C * 2) break;                   // past the body: never seen
+    if (!hasLineOfSight(_v4.set(px, 1.4, pz), _v5.set(sx, EYE_HEIGHT, sz))) continue;
+    return Math.hypot(px - sx, pz - sz);
+  }
+  return Infinity;
+}
+
 // `at` PLACES THE BODY BEFORE IT IS BUILT, and that ordering is the whole
 // point of the argument rather than a convenience. Everything below bakes the
 // assemble animation into ABSOLUTE world coordinates at whatever point is
@@ -2902,6 +2936,7 @@ function spawnEnemy(type = 'gunner', at = null) {
     // school pins each new body to whoever is already up: the group is the
     // thing the player is being taught to point the power at.
     const anchor = inSchool() ? schoolAnchor() : null;
+    const sightFloor = firstSightFloor();
     for (let tries = 0; tries < 40 && !placed; tries++) {
       const [cgx, cgz] = pool[Math.floor(Math.random() * pool.length)];
       const px = cgx * C + (Math.random() - 0.5) * 1.6;
@@ -2927,6 +2962,9 @@ function spawnEnemy(type = 'gunner', at = null) {
       const minD = (L.proto && L.proto.form && L.proto.form.id === 'vault')
         ? LEG.vaultSpawnMin : LEG.spawnMin;
       if (d < minD || d > LEG.spawnMax) continue;
+      // ...AND ENOUGH ROOM WHEN HE IS FIRST SEEN, which is a different number
+      // from `d` the moment the corridor bends. See firstSightDist.
+      if (sightFloor > 0 && firstSightDist(px, pz) < sightFloor) continue;
       // NOT INSIDE THE FURNITURE. The city path a hundred lines below has
       // always checked this; the tunnel path never did. It only ever tested
       // distance and line of sight, and a vault room's low cover sits 0.2 m
@@ -2940,7 +2978,20 @@ function spawnEnemy(type = 'gunner', at = null) {
       }
       if (!fbOk) { fbOk = true; fbX = px; fbZ = pz; }
     }
-    if (!placed && fbOk) { x = fbX; z = fbZ; placed = true; }
+    // THE FALLBACK OBEYS THE RULE TOO, or it is not a fallback, it is a hole in
+    // the floor. `fb` is the best in-sight candidate the loop found; it was
+    // recorded before the sight test, so it is re-checked here.
+    if (!placed && fbOk && (sightFloor <= 0 || firstSightDist(fbX, fbZ) >= sightFloor)) {
+      x = fbX; z = fbZ; placed = true;
+    }
+    if (!placed && sightFloor > 0) {
+      // NOWHERE FAR ENOUGH, SO NOBODY. A tight winding corridor in the opening
+      // doors simply has no spot that gives the player room to answer a round,
+      // and the honest thing is to leave it empty and let the next release try
+      // again from further along. The alternative is what shipped: a body four
+      // metres round a corner, which is not a fight, it is a coin toss.
+      return false;
+    }
     if (!placed) {
       // Last resort: the furthest-ahead cell of THIS spawn's own pool. It
       // used to fall back to the door approach, which is how a whole wave
@@ -3099,6 +3150,7 @@ function spawnEnemy(type = 'gunner', at = null) {
     warnFlash([type.toUpperCase() + '.']);   // silent card: the name is enough
   }
   seen[type] = true;
+  return true;   // ...and `false` from the early return that refuses a spot
 }
 
 // ---------------------------------------------------------------------------
@@ -6326,16 +6378,45 @@ function fmtWhen(t) {
 // what it has found — a number to be proud of, and four rows of marks whose
 // hollow squares are the tease. It reads the save CONTINUE would start
 // (the selected mode's latest), so the teaser and the panel behind it agree.
+// WHAT THIS PLAYER HAS EVER FOUND, ACROSS EVERY SAVE THEY HAVE.
+//
+// This used to read `latestSave()` and nothing else, so the panel called
+// RECOVERED SO FAR was really "recovered in the run you happened to touch
+// last": start a new game and a player who had met nine enemy types was shown
+// one, and the pips they had spent hours filling emptied. Discovery is a
+// property of the PLAYER — the archive is the thing you build up across runs
+// — so it is the union of every slot, plus whatever the live run has added
+// that is not written to disk yet.
+//
+// Shattered and doors are lifetime figures for the same reason: a headline
+// number over a panel about everything you have ever done cannot be about one
+// save. Doors is the DEEPEST reached rather than a sum — "how far in have you
+// been" is the question a door count answers, and adding two runs together
+// answers a question nobody asked.
 function discoverData() {
-  const last = latestSave();
-  const read = last ? slotRead(last.i) : null;
-  const have = new Set(read ? read.archiveList : []);
+  const have = new Set(archive);          // the live run, including this door
+  let shat = 0, doors = 0;
+  for (const e of saveIndex()) {
+    const read = slotRead(e.i);
+    if (!read || !read.used) continue;
+    for (const id of read.archiveList) have.add(id);
+    // THE ACTIVE SLOT IS COUNTED FROM MEMORY, NOT FROM DISK, and so it is
+    // skipped here. Its in-memory total is ahead of its stored one for the
+    // whole of a run — and reconciling that with a `max` over the SUM would
+    // throw away every other save the moment the live run passed their
+    // combined total.
+    if (e.i === slotIx) continue;
+    shat += read.shat || 0;
+    doors = Math.max(doors, read.best || read.doors || 0);
+  }
+  shat += lifetimeShattered;
+  doors = Math.max(doors, lifetimeDoors);
   const secs = ARCH_SECTIONS.map((sec) => {
     const rows = ELEMENTS.filter((e) => sec.kinds.includes(e.kind));
     return { title: sec.title, got: rows.filter((e) => have.has(e.id)).length,
       total: rows.length };
   });
-  return { shat: read ? read.shat : 0, doors: read ? read.doors : 0, secs,
+  return { shat, doors, secs,
     got: secs.reduce((n, x) => n + x.got, 0),
     total: secs.reduce((n, x) => n + x.total, 0) };
 }
@@ -11258,8 +11339,21 @@ function frame(now) {
         game.waveBearing = player.yaw + Math.PI + (Math.random() - 0.5) *
           (Math.random() < 0.2 ? Math.PI * 2 : 2.4);
         const next = game.spawnQueue.shift();
-        spawnEnemy(next);
-        if (next === 'rusher') {
+        // A REFUSED PLACEMENT IS NOT A SPENT BODY. In the opening doors there
+        // may be nowhere in this stretch that gives the player room to answer
+        // a round — see EARLY.firstSightM — and the man goes back on the queue
+        // to be released from somewhere further along instead of being quietly
+        // dropped, which would empty the leg.
+        const born = spawnEnemy(next) !== false;
+        if (!born) {
+          game.spawnQueue.unshift(next);
+          game.spawnTimer = PACING.hallFullGap;
+        }
+        // NOT `return`. This block sits inside the frame update, and bailing
+        // out of it here would skip everything after the spawner — the
+        // enemies' own update, the HUD, the lot — on any frame a placement was
+        // refused. Only the rest of THIS arrival is skipped.
+        if (born && next === 'rusher') {
           // rushers hunt in packs of 3-4: pull the rest of the pack from
           // anywhere in the wave and send them out the same alley together
           let extra = Math.min(2 + (Math.random() < 0.5 ? 1 : 0),
@@ -11271,7 +11365,7 @@ function frame(now) {
               extra--;
             } else i++;
           }
-        } else if (inHall()) {
+        } else if (born && inHall()) {
           // corridors fight in clusters: 1-3 round the corner together — but
           // NOT under a condition. A clump in the dark is a single problem
           // you solve with one burst or one knife sweep; the same bodies met
@@ -11286,7 +11380,8 @@ function frame(now) {
         // the fuller the street (a fresh pack fills it fast), the longer
         // until the next arrival
         const fill = enemies.length / maxAlive();
-        if (inHall()) {
+        if (!born) { /* the refusal above already set the retry gap */ }
+        else if (inHall()) {
           // A cleared corridor stays quiet only briefly — long enough to
           // breathe and push forward, never long enough to feel empty.
           game.spawnTimer = (enemies.length === 0 ? PACING.hallEmptyGap
@@ -11578,6 +11673,10 @@ window.__ts = {
   // say "it waited, and it did not dawdle" against the same numbers.
   stallCfg: () => ({ after: LEG.stallAfter, close: LEG.stallCloseM,
     reach: LEG.stallReachM, t: +stallT.toFixed(2), owed: stallOwed }),
+  discover: () => discoverData(),
+  // how far a spot is from the player when the walked path first sees it
+  firstSight: (x, z) => firstSightDist(x, z),
+  sightFloor: () => firstSightFloor(),
   legPromise: (proto) => ({ any: legPromises(proto), place: legPromisesPlace(proto),
     line: legHeadline(proto) }),
   tutorRescue: () => {

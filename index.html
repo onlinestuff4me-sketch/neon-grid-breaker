@@ -670,8 +670,15 @@
   /* REAL BUTTONS, REAL TARGETS. As a text link the pair read as a caption on
      CONTINUE and sat too close to it to hit the one you meant. Bordered
      pills, ~42 px tall, sharing one width, with clear air from the primary. */
-  #runrow { display:none; gap:9px; margin-top:20px; }
-  .rbtn { width:136px; padding:13px 0; font-size:9.5px; letter-spacing:.2em;
+  /* 14px OF GAP, NOT 9. Two 136px targets nine pixels apart is a pair a thumb
+     lands between, and a tap that lands between them does nothing at all —
+     reported as the button "not responding", which is exactly what a miss
+     feels like when there is no miss state to see. */
+  #runrow { display:none; gap:14px; margin-top:20px; }
+  /* ...AND 46px TALL. These were 39: under the 44px a thumb actually covers,
+     on the one row of the menu where two targets sit side by side. The type
+     stays the size it was — the padding grew, not the label. */
+  .rbtn { width:136px; padding:16px 0; font-size:9.5px; letter-spacing:.2em;
           color:#6b717a; border:1.5px solid rgba(22,24,29,.2);
           background:rgba(238,240,243,.55); }
   /* MODE IS A SETTING, NOT AN ACTION. At the pair's combined width it read as
