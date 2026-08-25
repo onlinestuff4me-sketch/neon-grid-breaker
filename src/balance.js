@@ -408,6 +408,23 @@ export const LEG = {
   stallCloseM: 0.35,               // less movement than this is "not closing"
   stallReachM: 2.0,                // added to the distance when it opens a
                                    // reluctant enemy's engage radius
+  // ---------------------------------------------------------------------
+  // THE OPENER — somebody to walk towards, from the moment you walk in.
+  //
+  // A leg's share is released by POSITION: the stretch you are standing in
+  // and the next one. That is right for pacing and wrong for arrival, because
+  // a leg whose body belongs to the approach releases nobody until you have
+  // walked most of the way to the door — so you step into a corridor that is
+  // empty, silent, and gives you no reason to prefer one direction over
+  // another. Measured at the mouth of door 1, the first corridor after the
+  // training ends: 22+ world seconds of nothing, three runs of three.
+  //
+  // The leg's FIRST body ignores the window. One man, on arrival, wherever
+  // his stretch put him — which in a plain corridor is down by the door, so
+  // walking towards the fight and walking towards the exit are the same walk.
+  // Everyone after him is paced as before.
+  // ---------------------------------------------------------------------
+  openerOnArrival: true,
   spawnMin: 9,                     // nearest a corridor spawn may appear (m)
   spawnMax: 40,                    // and the furthest
 };

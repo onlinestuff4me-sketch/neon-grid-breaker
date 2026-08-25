@@ -6936,7 +6936,13 @@ const tutorHoldsFire = (e) => tutorStep !== null
 const tutorHoldsSpawns = () => tutorStep !== null && !tutorMay('spawns');
 // YOU CANNOT SHOOT WHAT YOU HAVE NOT BEEN GIVEN. Tapping fired a round with no
 // weapon on screen, which is the sort of thing a tutorial exists to prevent.
-const tutorHoldsPlayerFire = () => tutorStep !== null && !tutorMay('fire');
+// ...AND NOT WHILE THE WORLD IS HELD FOR THE DODGE. The freeze exists so the
+// player can read three words and step sideways; a tap during it put a round
+// in the air that then hung motionless in front of them, which reads as the
+// game having broken rather than as time having stopped. The trigger comes
+// back when they have dodged and the world starts again.
+const tutorHoldsPlayerFire = () =>
+  tutorStep !== null && (!tutorMay('fire') || tutorWorldHeld);
 // THE BANK IS SCRIPTED FOR THE WHOLE ONBOARDING. Before the meter lesson,
 // stopping time costs nothing at all — you are being taught what the button
 // does. During the meter lesson the script drains it on its own clock, to its
@@ -7688,7 +7694,9 @@ function endTutorial(taught = true) {
   // screen — a paragraph where a sign was wanted. The headline is the news;
   // the instruction rides underneath in the sub-line the card already has.
   if (taught) {
-    setTimeout(() => showBanner('TRAINING COMPLETE<small>GO TO THE NEXT DOOR</small>', 2600), 60);
+    // 4200, NOT 2600. It is two lines of new information at the one moment
+    // the coaching stops, and it was gone before it had been read.
+    setTimeout(() => showBanner('TRAINING COMPLETE<small>GO TO THE NEXT DOOR</small>', 4200), 60);
   }
 }
 const tutorAfter = (id) => {
@@ -8811,6 +8819,21 @@ function updateStall(sdt, playing) {
   //    which the release gate reads on the next frame.
   stallOwed = true;
 }
+// THE LEG'S FIRST MAN IGNORES THE WINDOW. See LEG.openerOnArrival: the
+// allowance is a position window, and a leg whose share belongs to the
+// approach releases nobody at all until the player has walked most of the way
+// to the door. Arriving in an empty corridor with no sound and no direction is
+// how a player loses the thread of where to go — so one body comes out on
+// arrival, and the pacing picks up from the second.
+function legOpenerDue() {
+  if (!LEG.openerOnArrival || !inHall() || !hall) return false;
+  const L = hall.legs[hall.cur];
+  if (!L || !L.quota) return false;
+  if ((L.released || 0) > 0) return false;          // he has already come out
+  if (enemies.length) return false;                 // ...or somebody else has
+  return L.quota.reduce((a, b) => a + b, 0) > 0;
+}
+
 // The release gate's own allowance is a position window and can legitimately
 // be zero for a long walk. This overrides it exactly once, when the watchdog
 // has decided the corridor has been silent too long.
@@ -8830,6 +8853,25 @@ function updateEdgeArrows(playing) {
   const showAt = halfH * EDGE_ARROW_SHOW;
   const hideAt = halfH * EDGE_ARROW_HIDE;
   if (playing && player.alive) {
+    // NOBODY TO POINT AT MEANS POINT AT THE DOOR. The arrow's job is "the
+    // thing you care about is over there", and when a corridor is empty the
+    // thing you care about is the way out — which in a leg that jogs twice is
+    // routinely behind you. This is the same mark, doing the same job, for
+    // the case the player is most likely to be lost in: an empty leg, no
+    // sound, no fight, and two directions that look identical.
+    //
+    // Only when the leg is genuinely clear. An arrow to the door competing
+    // with an arrow to a live enemy is two answers to one question.
+    if (!enemies.length && inHall() && hall) {
+      const L = hall.legs[hall.cur];
+      if (L && L.door) {
+        let dYaw = Math.atan2(-(L.door.x - player.pos.x), -(L.door.z - player.pos.z)) - player.yaw;
+        while (dYaw > Math.PI) dYaw -= Math.PI * 2;
+        while (dYaw < -Math.PI) dYaw += Math.PI * 2;
+        const halfHd = Math.atan(Math.tan(camera.fov * Math.PI / 360) * camera.aspect);
+        if (Math.abs(dYaw) >= halfHd * EDGE_ARROW_SHOW) dirs.push(dYaw);
+      }
+    }
     for (const e of enemies) {
       let dYaw = Math.atan2(-(e.pos.x - player.pos.x), -(e.pos.z - player.pos.z)) - player.yaw;
       while (dYaw > Math.PI) dYaw -= Math.PI * 2;
@@ -8883,6 +8925,20 @@ function killWord() {
   // unexplained voice sounds like when nothing has introduced it. The
   // flourish belongs to the game; the lesson stays quiet.
   if (tutorStep !== null) return;
+  // ...AND ONLY IN A CROWD. The two words are a flourish about a room full of
+  // people, and spoken one at a time they were not that: the announcer said
+  // TIME on the first eligible kill of the run and SHATTER on the second,
+  // which in the opening doors — one body a leg — could be a door and a
+  // corridor apart. Two halves of a phrase, minutes away from each other,
+  // each landing alone after a single shatter with nothing to connect them.
+  //
+  // Somebody still standing when this one goes down is what makes it a crowd,
+  // and it is the cheapest possible test: the dead man is already spliced out
+  // of `enemies` by the time this runs. Both words then land inside the same
+  // fight, as close together as the no-overlap rule allows.
+  // Being in the array is being alive: killEnemy splices the dead man out
+  // before this runs, so anyone left is somebody still standing.
+  if (!enemies.length) return;
   const word = sfx.say();
   if (!word) return;
   const { svg } = buildWordSVG(word, word.length > 5 ? 44 : 58);   // fits SHATTER
@@ -11161,7 +11217,7 @@ function frame(now) {
     // player who does not yet know what the button does cannot be asked to
     // use it, and a body arriving mid-lesson is the loudest thing on screen.
     if (tutorHoldsSpawns()) game.spawnQueue.length = 0;
-    const room = hallAllowance();
+    const room = Math.max(hallAllowance(), legOpenerDue() ? 1 : 0);
     // ...and the watchdog's one-off override, asked for LAST so the flag is
     // only spent on a frame that can actually use it. Spending it whenever
     // this line runs would burn it on an empty queue and buy the stalled

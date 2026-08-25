@@ -87,7 +87,13 @@
      in both clocks — so near-black ink on it was dark on dark, and the round
      count arrived on the shooting lesson as three invisible characters. The
      same treatment every other instruction on this screen gets. */
-  #ammo { position:absolute; left:0; right:0; bottom:calc(env(safe-area-inset-bottom, 0px) + 11vh);
+  /* ON THE BOTTOM LINE, WITH THE PAUSE CONTROL — not 11vh up, which is
+     exactly where the weapon is. The readout sat behind the gun: on a pistol
+     the slide covered the word PISTOL and the raised hand covered the pips,
+     so the one number telling you whether you can shoot was the one thing on
+     the screen you could not read. Down here it shares the row with the pause
+     glyph, clear of the model and clear of the reload bar below it. */
+  #ammo { position:absolute; left:0; right:0; bottom:calc(env(safe-area-inset-bottom, 0px) + 18px);
           text-align:center; font-size:13px; font-weight:900; letter-spacing:.26em; color:#16181d;
           text-shadow:0 1px 10px rgba(238,240,243,.9), 0 0 2px rgba(238,240,243,.75); }
   #ammo.shotgun { color:#ff2d1a; }
