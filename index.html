@@ -145,7 +145,15 @@
      A row is tappable only when Settings was opened from the MAIN MENU. Mid
      run the same list is a reference: tapping a mode there would mean
      abandoning the run you paused, which is what END RUN is for. */
-  #settings .htpcard { max-height:86vh; overflow-y:auto; }
+  /* A CARD TALLER THAN THE SCREEN HAS TO SCROLL, and every one of these can
+     be: the saves list grows to six entries, each a name, a depth line, a date
+     and three buttons. `#saves` centres its card with flex, and a flex-centred
+     child that overflows is cut off at BOTH ends — so the first save lost its
+     name and the CLOSE button under the last one was somewhere below the
+     bottom of the phone. There was no way back to the menu except reloading
+     the page, which is what the playtest had to do. */
+  #settings .htpcard, #saves .htpcard, #saveinfo .htpcard,
+  #askTut .htpcard, #modepick .htpcard { max-height:86vh; overflow-y:auto; }
   .setsec { width:230px; margin:14px 0 2px; text-align:left;
             font-size:9.5px; font-weight:800; letter-spacing:.3em; color:#9aa0a9; }
   .setsec .secnote { display:block; margin-top:3px; letter-spacing:.14em;

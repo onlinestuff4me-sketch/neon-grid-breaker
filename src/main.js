@@ -4770,6 +4770,11 @@ function onPointerDown(ev) {
       // many. The handler stays because the screen is still reached — from
       // that button, which the overlay block routes.)
       if (ev.target.closest('#savesclose')) { closeSaves(); return; }
+      // ...AND THE DIMMED GROUND AROUND THE CARD CLOSES IT TOO. A list this
+      // long can put CLOSE below the fold, and a screen with no visible way
+      // back is a screen the player leaves by reloading the game. `ev.target`
+      // is the overlay ITSELF only when the tap missed the card.
+      if (ev.target.id === 'saves') { closeSaves(); return; }
       const cont = ev.target.closest('#slotlist .cont');
       if (cont) {
         setTutorArmed(false);
@@ -6745,7 +6750,13 @@ function startNewRun(ask = true) {
   // save — which beginNewGame then wipes and re-stamps, destroying the run and
   // the creation date the details panel promises never moves.
   const entry = makeSave(menuMode, '');
-  if (!entry) return;
+  // ...AND IF THERE IS NO ROOM, SAY SO. `makeSave` returns null at the save
+  // cap, and this used to answer that with `return` — NEW RUN did nothing at
+  // all, no card, no sound, no page, for a player with six saves. Reported as
+  // the button being broken, which from the outside is exactly what it is.
+  // The saves page is where a slot gets freed and it already says ALL 6 SAVES
+  // IN USE — DELETE ONE across the bottom, so that is where this goes.
+  if (!entry) { openSaves(); return; }
   if (!ask) {
     // NO DIALOGUE AND NO ARMING. Going through beginNewGame here would call
     // setTutorArmed(true) on a first launch, and `tutorArmed` is a sticky
@@ -11697,6 +11708,7 @@ window.__ts = {
   stallCfg: () => ({ after: LEG.stallAfter, close: LEG.stallCloseM,
     reach: LEG.stallReachM, t: +stallT.toFixed(2), owed: stallOwed }),
   discover: () => discoverData(),
+  saves: () => saveIndex(),
   // how far a spot is from the player when the walked path first sees it
   firstSight: (x, z) => firstSightDist(x, z),
   sightFloor: () => firstSightFloor(),
