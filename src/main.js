@@ -6233,7 +6233,31 @@ function latestSave(mode = menuMode) {
 }
 function makeSave(mode, name) {
   const list = saveIndex();
-  if (list.filter((e) => e.mode === mode).length >= MAX_SAVES) return null;
+  if (list.filter((e) => e.mode === mode).length >= MAX_SAVES) {
+    // AT THE CAP, RECYCLE A RUN THAT NEVER WENT ANYWHERE. NEW RUN has one
+    // job and it is to start a new run; a button that answers a tap by
+    // showing you a different page has not done it. What fills the list is
+    // its own leavings — every abandoned attempt is a save at DOOR 1 with
+    // nought doors behind it — so the oldest of those gives way. A save with
+    // real depth is never touched: for that case there is genuinely nothing
+    // to do but ask, and startNewRun opens the list.
+    const spent = list
+      .filter((e) => e.mode === mode)
+      .map((e) => ({ e, r: slotRead(e.i) }))
+      .filter((x) => x.r && !(x.r.doors > 0))
+      .sort((a, b) => (a.r.at || 0) - (b.r.at || 0));
+    if (!spent.length) return null;
+    const take = spent[0].e;
+    slotClear(take.i);
+    stampSave(take.i);
+    const kept = list.filter((e) => e.i !== take.i);
+    const mineN = new Set(kept.filter((e) => e.mode === mode).map((e) => e.num || 0));
+    let n2 = 1;
+    while (mineN.has(n2)) n2++;
+    const reused = { i: take.i, name: String(name || '').slice(0, 24), num: n2, mode };
+    writeSaveIndex([...kept, reused]);
+    return reused;
+  }
   const used = new Set(list.map((e) => e.i));
   let i = 0;
   while (used.has(i) && i < MAX_SLOTS) i++;
