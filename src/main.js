@@ -2810,6 +2810,16 @@ function firstSightFloor() {
 // and the gap between them there is the answer. Infinity means no point on the
 // walked path can see him at all — which is not a safe placement, it is an
 // unknown one, so the caller treats it as a failure while the rule is on.
+// IS THERE ENOUGH ROOM AT FIRST SIGHT? Infinity — no point on the walked path
+// can see the spot at all — is a FAILURE, not a pass. Both call sites used to
+// spell this as `dist < floor`, and `Infinity < 13` is false, so the one case
+// the rule most wanted to catch was the one it waved through: a body you never
+// see coming until you are standing in the lane with him.
+function sightOK(px, pz, floor) {
+  if (!(floor > 0)) return true;
+  const d = firstSightDist(px, pz);
+  return isFinite(d) && d >= floor;
+}
 function firstSightDist(px, pz) {
   const L = hall && hall.legs[hall.cur];
   if (!L || !L.spine) return Infinity;
@@ -2958,7 +2968,7 @@ function spawnEnemy(type = 'gunner', at = null) {
         // group at eight metres and first sight at twelve while the rule
         // asked for thirteen. The staging is not so precious that it is worth
         // a round the player cannot answer.
-        if (sightFloor > 0 && !(firstSightDist(px, pz) >= sightFloor)) continue;
+        if (!sightOK(px, pz, sightFloor)) continue;
         if (!hasLineOfSight(_v2.set(px, 1.4, pz),
           _v3.set(doorView[0] * C, 1.4, doorView[1] * C))) continue;
         x = px; z = pz; placed = true; break;
@@ -2970,7 +2980,7 @@ function spawnEnemy(type = 'gunner', at = null) {
       if (d < minD || d > LEG.spawnMax) continue;
       // ...AND ENOUGH ROOM WHEN HE IS FIRST SEEN, which is a different number
       // from `d` the moment the corridor bends. See firstSightDist.
-      if (sightFloor > 0 && firstSightDist(px, pz) < sightFloor) continue;
+      if (!sightOK(px, pz, sightFloor)) continue;
       // NOT INSIDE THE FURNITURE. The city path a hundred lines below has
       // always checked this; the tunnel path never did. It only ever tested
       // distance and line of sight, and a vault room's low cover sits 0.2 m
@@ -2987,7 +2997,7 @@ function spawnEnemy(type = 'gunner', at = null) {
     // THE FALLBACK OBEYS THE RULE TOO, or it is not a fallback, it is a hole in
     // the floor. `fb` is the best in-sight candidate the loop found; it was
     // recorded before the sight test, so it is re-checked here.
-    if (!placed && fbOk && (sightFloor <= 0 || firstSightDist(fbX, fbZ) >= sightFloor)) {
+    if (!placed && fbOk && sightOK(fbX, fbZ, sightFloor)) {
       x = fbX; z = fbZ; placed = true;
     }
     if (!placed && sightFloor > 0) {
