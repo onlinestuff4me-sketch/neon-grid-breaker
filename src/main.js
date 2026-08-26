@@ -2953,6 +2953,12 @@ function spawnEnemy(type = 'gunner', at = null) {
         // stage still has to happen, and it has to happen where you can see
         // the door — never in a branch lane off to the side of it
         if (d < 4) continue;
+        // ...BUT THE OPENING DOORS STILL GET THEIR ROOM. This branch was the
+        // hole: it skips `spawnMin` by design, so it was placing the door
+        // group at eight metres and first sight at twelve while the rule
+        // asked for thirteen. The staging is not so precious that it is worth
+        // a round the player cannot answer.
+        if (sightFloor > 0 && !(firstSightDist(px, pz) >= sightFloor)) continue;
         if (!hasLineOfSight(_v2.set(px, 1.4, pz),
           _v3.set(doorView[0] * C, 1.4, doorView[1] * C))) continue;
         x = px; z = pz; placed = true; break;
