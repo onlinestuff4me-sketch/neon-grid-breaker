@@ -7,10 +7,21 @@ the change is measured rather than eyeballed, and both repos ship.
 
 ## The two repositories
 
-| | path | branch | role |
-|---|---|---|---|
-| mirror | `/home/user/physics-arcade-game` | `claude/tunnel-focus-experiments` | where work happens |
-| live | `/workspace/timeshard` | `main` | GitHub Pages, serves timeshatter.app from the repo root |
+Named by their GitHub repo, not by wherever a session happens to check
+them out — an agent's local paths mean nothing to anyone else, and saying
+`/workspace/timeshard` to a human sent them looking for a directory that
+does not exist outside the container.
+
+| repo | branch | role |
+|---|---|---|
+| **`onlinestuff4me-sketch/timeshard`** | `main` | THE LIVE SITE. GitHub Pages serves timeshatter.app from its root. |
+| `onlinestuff4me-sketch/physics-arcade-game` | `claude/tunnel-focus-experiments` | development mirror |
+
+`src/`, `index.html`, `tool/` and `docs/` are kept byte-identical between
+them; every change lands in both. If that split has outlived its use, the
+simplification is to work in `timeshard` alone — worth asking the owner,
+who thinks of `timeshard` as the repo, and reasonably so, since it is the
+one that ships.
 
 Both are pushed and clean as of `52df38c` (live) / `5ac6465` (mirror).
 **A deploy is confirmed by the GitHub Actions conclusion, never by the
