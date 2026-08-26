@@ -86,7 +86,78 @@ ground closes them; RECOVERED SO FAR is the union of every save plus the
 live run; and NEW RUN starts a new run — at the cap the oldest save with
 no doors behind it gives way.
 
-## Open, in the order I would take them
+## NEXT UP — the playtest that closed this session
+
+Five things, reported with screenshots after the last deploy. None is
+started; all of them are described here in enough detail to act on.
+
+### 1. The direction arrow needs to be one clear thing, not a flicker
+
+**What was seen:** the small red arrow appears and disappears seemingly at
+random while walking the training hallway, and when it is up it collides
+with the lesson's own words (it landed on DRAG TO MOVE).
+
+**What is wanted:** while the player is being led somewhere — the whole
+early game — ONE larger, unmistakable arrow that reads as a compass
+needle rotating in space, pointing the way to go, placed so it never
+obstructs the messaging. The small per-enemy markers are for LATER, once
+rooms hold several enemies and the player has learned what the marks mean.
+So: one big "go this way" arrow now, small "somebody is over there" marks
+introduced later.
+
+**Where:** `updateEdgeArrows()` in `src/main.js` (it builds `.edgearrow`
+divs on a ring of `min(vw,vh) * 0.38` and points them by rotation);
+`.edgearrow` CSS at `index.html:47`; thresholds `EDGE_ARROW_SHOW` 0.94 /
+`EDGE_ARROW_HIDE` 0.72 of the camera's live half-frame. The door fallback
+— arrow to the door when a leg is empty — is inside the same function.
+The flicker the player still sees is most likely the door arrow and the
+enemy arrows trading places, not the hysteresis, which is measured good in
+`edgesnd.js`.
+
+### 2. The spurious arrow on entering a room
+
+**What was seen:** walking into a new training room, a direction arrow
+flashes for about a second and vanishes. It reads as a bug and it is not
+needed — the player is already in the room.
+
+**Cause:** almost certainly the door fallback added this session. On the
+frame you cross in, the leg has no bodies yet, so the arrow points at the
+door until the opener spawns. Suppress it for a beat after a crossing, or
+require the leg to have been quiet for a moment first.
+
+### 3. The ammo pips need the readout's own shadow
+
+**What was seen:** PISTOL is legible against a light floor; the pips
+beside it are not.
+
+**Where:** `#ammo` carries `text-shadow: 0 1px 10px rgba(238,240,243,.9),
+0 0 2px rgba(238,240,243,.75)` — a TEXT shadow, which does nothing for the
+pips because they are `background`-filled elements, not glyphs
+(`index.html:105`). They want the same halo: `filter: drop-shadow(...)` on
+`#ammo .mag`, or a matching `box-shadow` on `.pip`.
+
+### 4. The training ramp should be three rooms, not six
+
+**What is wanted**, after the STAND HERE barrier and the dodge/shoot
+lessons: one enemy in a hallway, then two enemies in a hallway, then three
+enemies in a room with pillars, then training ends and Door 1 begins.
+
+**Where:** `src/tutorial.js` — `LEGS` currently runs `room1` (vault, 1),
+`hall1` (corridor, 1), `room2` (vault, 2), `hall2` (corridor, 2), `room3`
+(vault, 3), `hall3` (corridor, 3) at lines 303-325, with `STEPS` entries
+`ramp1`..`ramp6` to match. That is six areas where three are asked for,
+and it alternates room/hall where the ask is hall, hall, room. Cutting it
+means the leg list, the step list, and the tool's TUTORIAL pane, which
+reads both. `tutool.js` lints cue/grant agreement and will catch a step
+whose cues no longer have a leg.
+
+### 5. Confirm with the owner
+
+Whether the archive should span game modes (it does now — discovery is
+treated as the player's, not the save's) or track each mode separately.
+One line in `discoverData()`.
+
+## Open from before, in the order I would take them
 
 1. **Play the opening doors.** The first-sight rule means a tight winding
    early leg can legitimately field nobody. That is the trade the owner
