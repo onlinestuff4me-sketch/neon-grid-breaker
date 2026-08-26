@@ -2844,7 +2844,14 @@ function firstSightDist(px, pz) {
 // entirely. That is what the onboarding did at every training leg, and why a
 // player saw the little red assemble animation play in the middle of an empty
 // room with nobody in it and two gunners arrive silently at the edges.
-function spawnEnemy(type = 'gunner', at = null) {
+// `paced` MARKS THE CORRIDOR'S OWN RELEASE, and only that. The first-sight
+// floor is a pacing rule — it is about the rhythm a player meets bodies at as
+// they walk a leg — so it belongs to the release gate and to nothing else. The
+// menu's attract loop is a shop window with no player in it; a harness placing
+// a man to measure something has already decided where he goes. Applying the
+// rule to every caller made `spawnEnemy` refuse in both, which is how a change
+// about door 2 turned into a crash in a file about reload state.
+function spawnEnemy(type = 'gunner', at = null, paced = false) {
   // The archive files what you MEET, not what you kill — but the attract loop
   // behind the title is a shop window, not a meeting, so the menu files
   // nothing. Otherwise every player would "know" the heavy before playing.
@@ -2946,7 +2953,7 @@ function spawnEnemy(type = 'gunner', at = null) {
     // school pins each new body to whoever is already up: the group is the
     // thing the player is being taught to point the power at.
     const anchor = inSchool() ? schoolAnchor() : null;
-    const sightFloor = firstSightFloor();
+    const sightFloor = paced ? firstSightFloor() : 0;
     for (let tries = 0; tries < 40 && !placed; tries++) {
       const [cgx, cgz] = pool[Math.floor(Math.random() * pool.length)];
       const px = cgx * C + (Math.random() - 0.5) * 1.6;
@@ -11360,7 +11367,7 @@ function frame(now) {
         // a round — see EARLY.firstSightM — and the man goes back on the queue
         // to be released from somewhere further along instead of being quietly
         // dropped, which would empty the leg.
-        const born = spawnEnemy(next) !== false;
+        const born = spawnEnemy(next, null, true) !== false;
         if (!born) {
           game.spawnQueue.unshift(next);
           game.spawnTimer = PACING.hallFullGap;
@@ -11377,7 +11384,7 @@ function frame(now) {
           for (let i = 0; i < game.spawnQueue.length && extra > 0;) {
             if (game.spawnQueue[i] === 'rusher') {
               game.spawnQueue.splice(i, 1);
-              spawnEnemy('rusher');
+              spawnEnemy('rusher', null, true);
               extra--;
             } else i++;
           }
@@ -11391,7 +11398,7 @@ function frame(now) {
           let extra = clumps ? Math.min(
             (Math.random() < 0.65 ? 1 : 0) + (Math.random() < 0.3 ? 1 : 0),
             game.spawnQueue.length, maxAlive() - enemies.length, room - 1) : 0;
-          while (extra-- > 0) spawnEnemy(game.spawnQueue.shift());
+          while (extra-- > 0) spawnEnemy(game.spawnQueue.shift(), null, true);
         }
         // the fuller the street (a fresh pack fills it fast), the longer
         // until the next arrival
